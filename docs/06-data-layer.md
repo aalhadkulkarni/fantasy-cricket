@@ -139,7 +139,16 @@ squad.
 
 **Writes**
 
-- `createUser(googleIdentifier, email, displayName)`
+- `createUser(googleIdentifier, email, displayName)` — **claims
+  `googleIdentifierToUserIdMapping/{googleIdentifier}` transactionally** before
+  writing the user
+
+> **The same person can arrive twice.** Two tabs, a double-tapped button, a
+> retry after a timeout: both attempts find no user record and both create one,
+> and because ids are push keys the result is two distinct records for one
+> human rather than an overwrite. Nothing detects that afterwards. Whoever
+> claims the mapping first wins; the loser discards its draft and adopts the
+> winner's id.
 
 > `googleIdentifier` is deliberately non-committal — it may end up being the
 > Google user id or the email. Decide at implementation based on how Firebase
@@ -328,7 +337,9 @@ of managers it was out of. It is computed once, ever, at migration.
 
 **Writes**
 
-- `createLeague(config)` — returns the new league id and its join code
+- `createLeague(config)` — returns the new league id and its join code. **The
+  code is claimed transactionally** on `leagueCodeToLeagueMapping`, retrying
+  with a fresh one on failure, since a read-then-write check can lose.
 
 The config object carries everything on the create form: tournament, name,
 accessibility, max slots, join deadline, deadline offset, points source and
@@ -643,7 +654,8 @@ belong to the auction page itself.
 
 - `startAuction(leagueId)`
 - `generateDraftOrder(leagueId)`
-- `selectBatch(leagueId, category, role)`
+- `selectBatch(leagueId, category, role)` — **ids, not display names**, matching
+  how `currentBatch` stores them
 - `selectPlayer(leagueId, playerId)`
 - `selectRandomPlayerFromBatch(leagueId)`
 - `acceptBid(leagueId, playerId, managerId, amount)`
