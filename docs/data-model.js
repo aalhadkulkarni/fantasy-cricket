@@ -1,49 +1,74 @@
+/*
+  ===========================================================
+  IDS IN THIS FILE
+
+  The readable ids below — user001, league001, match001 — are ILLUSTRATIVE.
+  In the running system anything created at runtime carries a Firebase PUSH
+  KEY, e.g. league001 is really something like -Nx7k2pQmR3vT8sL9wYz. They are
+  written readably here because this file exists to be read by people, and a
+  page of twenty-character keys would obscure the shapes it is meant to show.
+
+  The SIX REFERENCE TABLES are different, and their keys below are REAL:
+  userRoles, formats, playerRoles, playerCategories, liveAuctionPhases and
+  timelineEvents are configuration, authored once and referenced from code, so
+  they carry semantic keys — manager, t20, batsman, marquee, bidding. Nothing
+  creates one at runtime, so there is no id to generate.
+
+  ORDERING NEVER COMES FROM AN ID. Rounds and gameweeks reference matches at
+  their boundaries; whether a match falls inside one is decided by matchNumber.
+  Comparing id strings works by accident here and fails under real push keys.
+
+  See 05-data-model.md for the reasoning, including why uniqueness on a natural
+  key such as a googleIdentifier or a join code needs a transaction rather than
+  a better key generator.
+  ===========================================================
+*/
 const dataModel = {
   // System level data
 
   userRoles: {
-    userRoles001: {
-      userRolesId: 'userRoles001',
+    systemOwner: {
+      userRolesId: 'systemOwner',
       userRolesName: 'System Owner',
       userRolesScope: 'System',
     },
-    userRoles002: {
-      userRolesId: 'userRoles002',
+    systemAdmin: {
+      userRolesId: 'systemAdmin',
       userRolesName: 'System Admin',
       userRolesScope: 'System',
     },
-    userRoles003: {
-      userRolesId: 'userRoles003',
+    leagueOwner: {
+      userRolesId: 'leagueOwner',
       userRolesName: 'League Owner',
       userRolesScope: 'League',
     },
-    userRoles004: {
-      userRolesId: 'userRoles004',
+    leagueAdmin: {
+      userRolesId: 'leagueAdmin',
       userRolesName: 'League Admin',
       userRolesScope: 'League',
     },
-    userRoles005: {
-      userRolesId: 'userRoles005',
+    manager: {
+      userRolesId: 'manager',
       userRolesName: 'Manager',
       userRolesScope: 'League',
     },
-    userRoles006: {
-      userRolesId: 'userRoles006',
+    primaryAuctioneer: {
+      userRolesId: 'primaryAuctioneer',
       userRolesName: 'Primary Auctioneer',
       userRolesScope: 'League',
     },
-    userRoles007: {
-      userRolesId: 'userRoles007',
+    secondaryAuctioneer: {
+      userRolesId: 'secondaryAuctioneer',
       userRolesName: 'Secondary Auctioneer',
       userRolesScope: 'League',
     },
-    userRoles008: {
-      userRolesId: 'userRoles008',
+    spectator: {
+      userRolesId: 'spectator',
       userRolesName: 'Spectator',
       userRolesScope: 'League',
     },
-    userRoles009: {
-      userRolesId: 'userRoles009',
+    bannedFromLeague: {
+      userRolesId: 'bannedFromLeague',
       userRolesName: 'BannedFromLeague',
       userRolesScope: 'League',
     },
@@ -52,19 +77,19 @@ const dataModel = {
   standardAuctionConfig: {
     playerDetails: {
       player001: {
-        playerCategory: 'playerCategory001',
+        playerCategory: 'marquee',
         playerBasePrice: 5,
       },
       player002: {
-        playerCategory: 'playerCategory002',
+        playerCategory: 'star',
         playerBasePrice: 3,
       },
       player003: {
-        playerCategory: 'playerCategory001',
+        playerCategory: 'marquee',
         playerBasePrice: 5,
       },
       player004: {
-        playerCategory: 'playerCategory003',
+        playerCategory: 'general',
         playerBasePrice: 2,
       },
     },
@@ -79,19 +104,19 @@ const dataModel = {
   },
 
   standardFantasyLineupRules: {
-    playerRole001: {
+    batsman: {
       min: 2,
       max: null,
     },
-    playerRole002: {
+    bowler: {
       min: 2,
       max: 4,
     },
-    playerRole003: {
+    wicketKeeper: {
       min: 1,
       max: null,
     },
-    playerRole004: {
+    allRounder: {
       min: 1,
       max: null,
     },
@@ -110,7 +135,7 @@ const dataModel = {
       userName: 'Aalhad',
       googleIdentifier: 'googleIdentifier001',
       googleEmailId: 'aalhad@gmail.com',
-      systemUserRoles: { userRoles001: true, userRoles002: true },
+      systemUserRoles: { systemOwner: true, systemAdmin: true },
       /*
         TBD1.1 RESOLVED: yes — a leagues index is required, not optional.
 
@@ -172,15 +197,15 @@ const dataModel = {
             join request is accepted, and when it is rejected.
 
             No 'Banned' value. Banning does not touch this field — it strips
-            userRoles005 and adds userRoles009 on the membership record, and
+            manager and adds bannedFromLeague on the membership record, and
             myRoles below carries that, so a card can tell a banned user
             without a second source of truth for the same fact.
           */
           membershipStatus: 'Accepted', // Pending | Accepted | Rejected
           myRoles: {
-            userRoles003: true,
-            userRoles004: true,
-            userRoles005: true,
+            leagueOwner: true,
+            leagueAdmin: true,
+            manager: true,
           },
         },
         league002: {
@@ -191,7 +216,7 @@ const dataModel = {
           ownerName: 'Yogesh',
           maxSlots: 6,
           membershipStatus: 'Accepted',
-          myRoles: { userRoles008: true }, // spectator in this league
+          myRoles: { spectator: true }, // spectator in this league
         },
       },
       /*
@@ -238,7 +263,7 @@ const dataModel = {
           ownerName: 'Aalhad',
           maxSlots: 6,
           membershipStatus: 'Accepted',
-          myRoles: { userRoles005: true },
+          myRoles: { manager: true },
           archivedAt: 1806500000000,
           finalRank: 3,
           finalManagerCount: 6,
@@ -252,7 +277,7 @@ const dataModel = {
       userName: 'Yogesh',
       googleIdentifier: 'googleIdentifier002',
       googleEmailId: 'yogesh@gmail.com',
-      systemUserRoles: { userRoles002: true },
+      systemUserRoles: { systemAdmin: true },
       leagues: {
         // same shape as user001 above
         league002: {
@@ -263,9 +288,9 @@ const dataModel = {
           maxSlots: 6,
           membershipStatus: 'Accepted',
           myRoles: {
-            userRoles003: true,
-            userRoles004: true,
-            userRoles006: true,
+            leagueOwner: true,
+            leagueAdmin: true,
+            primaryAuctioneer: true,
           },
         },
       },
@@ -285,7 +310,7 @@ const dataModel = {
           ownerName: 'Yogesh',
           maxSlots: 6,
           membershipStatus: 'Accepted',
-          myRoles: { userRoles005: true },
+          myRoles: { manager: true },
         },
       },
     },
@@ -313,16 +338,16 @@ const dataModel = {
   */
   formats: {
     // formatId:
-    format001: {
-      formatId: 'format001',
+    t20: {
+      formatId: 't20',
       formatName: 'T20',
     },
-    format002: {
-      formatId: 'format002',
+    odi: {
+      formatId: 'odi',
       formatName: 'ODI',
     },
-    format003: {
-      formatId: 'format003',
+    test: {
+      formatId: 'test',
       formatName: 'Test',
     },
   },
@@ -332,17 +357,17 @@ const dataModel = {
     competition001: {
       competitionId: 'competition001',
       competitionName: 'IPL',
-      formatId: 'format001',
+      formatId: 't20',
     },
     competition002: {
       competitionId: 'competition002',
       competitionName: 'ODI World Cup',
-      formatId: 'format002',
+      formatId: 'odi',
     },
     competition003: {
       competitionId: 'competition003',
       competitionName: 'Test Series',
-      formatId: 'format003',
+      formatId: 'test',
     },
   },
 
@@ -391,26 +416,26 @@ const dataModel = {
   },
 
   playerRoles: {
-    playerRole001: {
-      playerRoleId: 'playerRole001',
+    batsman: {
+      playerRoleId: 'batsman',
       playerRoleName: 'Batsman',
       playerRoleShortName: 'BAT',
       playerRoleIcon: '', // this is the emoji style icon that should be shown in front of player name in fantasy lineup. like a bat in front of batsman, ball infront of bowler, gloves in front of keeper etc
     },
-    playerRole002: {
-      playerRoleId: 'playerRole002',
+    bowler: {
+      playerRoleId: 'bowler',
       playerRoleName: 'Bowler',
       playerRoleShortName: 'BL',
       playerRoleIcon: '',
     },
-    playerRole003: {
-      playerRoleId: 'playerRole003',
+    wicketKeeper: {
+      playerRoleId: 'wicketKeeper',
       playerRoleName: 'Wicket Keeper',
       playerRoleShortName: 'WK',
       playerRoleIcon: '',
     },
-    playerRole004: {
-      playerRoleId: 'playerRole004',
+    allRounder: {
+      playerRoleId: 'allRounder',
       playerRoleName: 'All Rounder',
       playerRoleShortName: 'ALL',
       playerRoleIcon: '',
@@ -418,18 +443,18 @@ const dataModel = {
   },
 
   playerCategories: {
-    playerCategory001: {
-      playerCategoryId: 'playerCategory001',
+    marquee: {
+      playerCategoryId: 'marquee',
       playerCategoryName: 'Marquee',
       playerCategoryAuctionFormat: 'Auction',
     },
-    playerCategory002: {
-      playerCategoryId: 'playerCategory002',
+    star: {
+      playerCategoryId: 'star',
       playerCategoryName: 'Star',
       playerCategoryAuctionFormat: 'Auction',
     },
-    playerCategory003: {
-      playerCategoryId: 'playerCategory003',
+    general: {
+      playerCategoryId: 'general',
       playerCategoryName: 'General',
       playerCategoryAuctionFormat: 'Draft',
     },
@@ -446,7 +471,7 @@ const dataModel = {
         competition001: 'team001',
         competition002: 'team002',
       },
-      playerRole: 'playerRole001',
+      playerRole: 'batsman',
       isRetired: false, // fully retired from everything. Format-level retirement is expressed by absence from currentTeams
       /*
 				TBD4 RESOLVED: no per-format retirement matrix.
@@ -471,7 +496,7 @@ const dataModel = {
         competition002: 'team003',
         competition003: 'team003',
       },
-      playerRole: 'playerRole004',
+      playerRole: 'allRounder',
       isRetired: false,
     },
     player003: {
@@ -484,7 +509,7 @@ const dataModel = {
         competition002: 'team002',
         competition003: 'team002',
       },
-      playerRole: 'playerRole002',
+      playerRole: 'bowler',
       isRetired: false,
     },
     player004: {
@@ -495,7 +520,7 @@ const dataModel = {
       currentTeams: {
         competition001: 'team004',
       },
-      playerRole: 'playerRole002',
+      playerRole: 'bowler',
       isRetired: false,
     },
   },
@@ -707,9 +732,9 @@ const dataModel = {
         user001: {
           fantasyTeamName: 'Aalhad XI',
           leagueRoles: {
-            userRoles003: true,
-            userRoles004: true,
-            userRoles005: true,
+            leagueOwner: true,
+            leagueAdmin: true,
+            manager: true,
           }, // this means the user is league owner, league admin, and manager
           /*
             Cumulative effect of accepted transfers on this manager's total.
@@ -726,7 +751,7 @@ const dataModel = {
         },
         user002: {
           fantasyTeamName: "Yogesh's Warriors",
-          leagueRoles: { userRoles005: true }, // the player is just manager
+          leagueRoles: { manager: true }, // the player is just manager
           pointsAdjustment: 0,
           // [A1] matchWiseFantasyConfigs moved to the top-level lineups node
         },
@@ -768,19 +793,19 @@ const dataModel = {
       // the database.
       maxSlots: 6,
       fantasyLineupRules: {
-        playerRole001: {
+        batsman: {
           min: 3,
           max: 5,
         },
-        playerRole002: {
+        bowler: {
           min: 2,
           max: 3,
         },
-        playerRole003: {
+        wicketKeeper: {
           min: 1,
           max: 3,
         },
-        playerRole004: {
+        allRounder: {
           min: 1,
           max: 2,
         },
@@ -840,18 +865,18 @@ const dataModel = {
       },
       leagueMembers: {
         user001: {
-          leagueRoles: { userRoles008: true }, // spectator
+          leagueRoles: { spectator: true }, // spectator
         },
         user002: {
           leagueRoles: {
-            userRoles003: true,
-            userRoles004: true,
-            userRoles006: true,
+            leagueOwner: true,
+            leagueAdmin: true,
+            primaryAuctioneer: true,
           }, // owner, admin, primary auctioneer, but not manager
         },
         user003: {
           fantasyTeamName: 'Thane Thunders',
-          leagueRoles: { userRoles005: true }, // manager
+          leagueRoles: { manager: true }, // manager
           // asked for and received 500 points in transferProposal001 (accepted)
           pointsAdjustment: 500,
           // [A1] matchWiseSquads moved to top-level squads node
@@ -860,7 +885,7 @@ const dataModel = {
         },
         user004: {
           fantasyTeamName: 'Magical Miraj',
-          leagueRoles: { userRoles005: true },
+          leagueRoles: { manager: true },
           // gave up 500 points in transferProposal001 (accepted)
           pointsAdjustment: -500,
           // [A1] matchWiseSquads moved to top-level squads node
@@ -904,19 +929,19 @@ const dataModel = {
           */
           playerDetails: {
             player001: {
-              playerCategory: 'playerCategory001',
+              playerCategory: 'marquee',
               playerBasePrice: 6,
             },
             player002: {
-              playerCategory: 'playerCategory002',
+              playerCategory: 'star',
               playerBasePrice: 4,
             },
             player003: {
-              playerCategory: 'playerCategory001',
+              playerCategory: 'marquee',
               playerBasePrice: 6,
             },
             player004: {
-              playerCategory: 'playerCategory003',
+              playerCategory: 'general',
               playerBasePrice: 2,
             },
           },
@@ -950,7 +975,7 @@ const dataModel = {
         auctionStartTime: 1806345000000,
         /*
           DELIBERATE DUPLICATION of the auctioneer roles on the membership
-          record (userRoles006 / userRoles007). Kept because it makes the common
+          record (primaryAuctioneer / secondaryAuctioneer). Kept because it makes the common
           read cheap: showing a manager who the auctioneer is should not mean
           fetching every member and scanning their role maps for one flag. One
           extra field costs nothing.
@@ -1275,12 +1300,12 @@ const dataModel = {
     league002: {
       user005: {
         fantasyTeamName: 'My XI',
-        leagueRoleRequested: 'userRoles005', // join request as manager. hence fantasyTeamName exists
+        leagueRoleRequested: 'manager', // join request as manager. hence fantasyTeamName exists
         requestedAt: 1806300000000, // lets the admin sort the queue
         status: 'Pending', // Pending | Accepted | Rejected
       },
       user006: {
-        leagueRoleRequested: 'userRoles008', // join request as spectator
+        leagueRoleRequested: 'spectator', // join request as spectator
         requestedAt: 1806310000000,
         status: 'Rejected', // soft reject — this user may request again
       },
@@ -1301,7 +1326,7 @@ const dataModel = {
     filed a request.
 
     RESOLVED: an EXISTING member CAN be banned mid-season, and nothing is
-    removed. The ban strips userRoles005 (Manager) and adds userRoles009
+    removed. The ban strips manager (Manager) and adds bannedFromLeague
     (BannedFromLeague) on their leagueMembers record. Their squad, lineups and
     pointsAdjustment all survive, which matters in an auction league where the
     banned manager owns a squad they paid for. Slot counting and the
@@ -1372,46 +1397,46 @@ const dataModel = {
     liveAuctions would recreate the collision pattern fixed for joinRequests.
   */
   liveAuctionPhases: {
-    phase001: {
-      phaseId: 'phase001',
+    notStarted: {
+      phaseId: 'notStarted',
       phaseName: 'NotStarted',
       phaseDescription: 'Not Started',
     },
-    phase002: {
+    betweenPlayers: {
       // auction has started, but no bidding is live right now — between one
       // player being resolved and the next going up. Named "Between Players"
       // rather than "Idle", because Idle wrongly suggests managers can step
       // away when the next player can go up at any moment.
-      phaseId: 'phase002',
+      phaseId: 'betweenPlayers',
       phaseName: 'BetweenPlayers',
       phaseDescription: 'Between Players',
     },
-    phase003: {
-      phaseId: 'phase003',
+    bidding: {
+      phaseId: 'bidding',
       phaseName: 'Bidding',
       phaseDescription: 'Bidding',
     },
-    phase004: {
-      phaseId: 'phase004',
+    paused: {
+      phaseId: 'paused',
       phaseName: 'Paused',
       phaseDescription: 'Paused',
     },
-    phase005: {
-      phaseId: 'phase005',
+    timeUp: {
+      phaseId: 'timeUp',
       phaseName: 'TimeUp',
       phaseDescription: 'TimeUp',
     },
-    phase006: {
-      phaseId: 'phase006',
+    sold: {
+      phaseId: 'sold',
       phaseName: 'Sold',
       phaseDescription: 'Sold',
     },
-    phase007: {
-      phaseId: 'phase007',
+    unsold: {
+      phaseId: 'unsold',
       phaseName: 'Unsold',
       phaseDescription: 'Unsold',
     },
-    phase008: {
+    recovering: {
       /*
         The auctioneer made a mistake, or went absent and an admin is stepping
         in. Entered DELIBERATELY — the auctioneer clicks something like
@@ -1425,12 +1450,12 @@ const dataModel = {
         what exactly enters and leaves it, how far back a rewind may go, and who
         may do either. Not a Phase 1 priority.
       */
-      phaseId: 'phase008',
+      phaseId: 'recovering',
       phaseName: 'Recovering',
       phaseDescription: 'Recovering',
     },
-    phase009: {
-      phaseId: 'phase009',
+    ended: {
+      phaseId: 'ended',
       phaseName: 'Ended',
       phaseDescription: 'Ended',
     },
@@ -1445,92 +1470,93 @@ const dataModel = {
     rather than a pre-rendered string (spec 9Q).
   */
   timelineEvents: {
-    timelineEvent001: {
-      timelineEventId: 'timelineEvent001',
+    auctionStarted: {
+      timelineEventId: 'auctionStarted',
       timelineEventType: 'AuctionStarted',
       timelineEventDescription: 'Auction Started',
       params: [],
     },
-    timelineEvent002: {
-      timelineEventId: 'timelineEvent002',
+    nextBatch: {
+      timelineEventId: 'nextBatch',
       timelineEventType: 'NextBatch',
       timelineEventDescription: 'Next batch of players selected',
       params: ['playerCategory', 'playerRole'],
     },
-    timelineEvent003: {
-      timelineEventId: 'timelineEvent003',
+    nextPlayer: {
+      timelineEventId: 'nextPlayer',
       timelineEventType: 'NextPlayer',
       timelineEventDescription: 'Next player bidding started',
       params: ['playerId', 'basePrice', 'timeLimit'],
     },
-    timelineEvent004: {
-      timelineEventId: 'timelineEvent004',
+    bid: {
+      timelineEventId: 'bid',
       timelineEventType: 'Bid',
       timelineEventDescription: 'Bid accepted for current player',
       params: ['playerId', 'bid', 'managerId'],
     },
-    timelineEvent005: {
-      timelineEventId: 'timelineEvent005',
+    noBid: {
+      timelineEventId: 'noBid',
       timelineEventType: 'NoBid',
       timelineEventDescription: 'No bid accepted for current player',
       params: ['playerId', 'managerId'],
     },
-    timelineEvent006: {
-      timelineEventId: 'timelineEvent006',
+    paused: {
+      timelineEventId: 'paused',
       timelineEventType: 'Paused',
       timelineEventDescription: 'Bidding paused',
       params: [],
     },
-    timelineEvent007: {
-      timelineEventId: 'timelineEvent007',
+    auctionRestarted: {
+      timelineEventId: 'auctionRestarted',
       timelineEventType: 'AuctionRestarted',
       timelineEventDescription: 'Bidding restarted',
       params: [],
     },
-    timelineEvent008: {
-      timelineEventId: 'timelineEvent008',
+    auctionBeingRecovered: {
+      timelineEventId: 'auctionBeingRecovered',
       timelineEventType: 'AuctionBeingRecovered',
       timelineEventDescription: 'Auction is being recovered to valid state',
       params: [],
     },
-    timelineEvent009: {
-      timelineEventId: 'timelineEvent009',
+    auctionRecovered: {
+      timelineEventId: 'auctionRecovered',
       timelineEventType: 'AuctionRecovered',
       timelineEventDescription: 'Auction state recovered to valid state',
       params: ['rewindedRounds'],
     },
-    timelineEvent010: {
-      timelineEventId: 'timelineEvent010',
+    auctioneerChanged: {
+      timelineEventId: 'auctioneerChanged',
       timelineEventType: 'AuctioneerChanged',
       timelineEventDescription: 'Auctioneer changed',
       params: ['oldAuctionerId', 'newAuctioneerId'],
     },
-    timelineEvent011: {
-      timelineEventId: 'timelineEvent011',
+    sold: {
+      timelineEventId: 'sold',
       timelineEventType: 'Sold',
       timelineEventDescription: 'Current player was sold',
       params: ['playerId', 'winningBid', 'managerId'],
     },
-    timelineEvent012: {
-      timelineEventId: 'timelineEvent012',
+    unsold: {
+      timelineEventId: 'unsold',
       timelineEventType: 'Unsold',
       timelineEventDescription: 'Current player was unsold',
       params: ['playerId'],
     },
-    timelineEvent013: {
-      timelineEventId: 'timelineEvent013',
+    draftStarted: {
+      timelineEventId: 'draftStarted',
       timelineEventType: 'DraftStarted',
       timelineEventDescription: 'Draft started',
       params: [],
     },
-    timelineEvent014: {
-      timelineEventId: 'timelineEvent014',
+    nextDraftManager: {
+      timelineEventId: 'nextDraftManager',
       timelineEventType: 'NextDraftManager',
-      timelineEventDescription: "It's the turn of the next manager in the draft sequence",
+      timelineEventDescription:
+        "It's the turn of the next manager in the draft sequence",
       params: ['managerId'],
     },
-    timelineEvent015: {
-      timelineEventId: 'timelineEvent015',
+    draftPick: {
+      timelineEventId: 'draftPick',
       timelineEventType: 'DraftPick',
       timelineEventDescription: 'Current manager made a draft pick',
       params: ['managerId', 'playerId', 'basePrice'],
@@ -1541,39 +1567,39 @@ const dataModel = {
       and TimeUp at zero. It owns the deadline, so it owns the countdown that
       fires these.
     */
-    timelineEvent016: {
-      timelineEventId: 'timelineEvent016',
+    firstCall: {
+      timelineEventId: 'firstCall',
       timelineEventType: 'FirstCall',
       timelineEventDescription: 'First call for bids by auctioneer',
       params: ['timeRemaining'],
     },
-    timelineEvent017: {
-      timelineEventId: 'timelineEvent017',
+    secondCall: {
+      timelineEventId: 'secondCall',
       timelineEventType: 'SecondCall',
       timelineEventDescription: 'Second call for bids by auctioneer',
       params: ['timeRemaining'],
     },
-    timelineEvent018: {
-      timelineEventId: 'timelineEvent018',
+    lastCall: {
+      timelineEventId: 'lastCall',
       timelineEventType: 'LastCall',
       timelineEventDescription: 'Last call for bids by auctioneer',
       params: ['timeRemaining'],
     },
-    timelineEvent019: {
-      timelineEventId: 'timelineEvent019',
+    timeUp: {
+      timelineEventId: 'timeUp',
       timelineEventType: 'TimeUp',
       timelineEventDescription: 'Time up for current bidding ',
       params: [],
     },
-    timelineEvent020: {
-      timelineEventId: 'timelineEvent020',
+    timeIncreased: {
+      timelineEventId: 'timeIncreased',
       timelineEventType: 'TimeIncreased',
       timelineEventDescription:
         'Time limit for for current bidding increased by auctioneer',
       params: ['timeAdded'],
     },
-    timelineEvent021: {
-      timelineEventId: 'timelineEvent021',
+    auctionEnded: {
+      timelineEventId: 'auctionEnded',
       timelineEventType: 'AuctionEnded',
       timelineEventDescription: 'Auction ended',
       params: [],
@@ -1600,7 +1626,7 @@ const dataModel = {
 
     Carrying an empty NotStarted shell for the weeks before an auction would be
     a node nothing reads, in a subtree that exists specifically to isolate
-    high-frequency write traffic of which there is none yet. phase001
+    high-frequency write traffic of which there is none yet. notStarted
     NotStarted therefore means "room open, first player not yet up" — not "the
     auction is scheduled for next Friday".
 
@@ -1619,13 +1645,15 @@ const dataModel = {
     // leagueId: liveAuctionObject
     league002: {
       auctionState: {
+        // Ids, not display names. Every reference to a reference table in this
+        // model is an id; the client renders the label from the table.
         currentBatch: {
-          playerCategory: 'Marquee',
-          playerRole: 'Batsman',
+          playerCategory: 'marquee',
+          playerRole: 'batsman',
         },
         currentPlayerId: 'player003',
         lastPlayerId: 'player001',
-        phase: 'phase006',
+        phase: 'sold',
         // whose turn it is during the draft. null outside the draft phase.
         // the draft ORDER itself lives in leagues/{lid}/auctionDetails/draftOrder,
         // since it is settled configuration rather than live state.
@@ -1809,7 +1837,7 @@ const dataModel = {
       timeline: {
         timelineMessage001: {
           timelineMessageId: 'timelineMessage001',
-          timelineEventId: 'timelineEvent001',
+          timelineEventId: 'auctionStarted',
           timelineEventData: {},
         },
       },

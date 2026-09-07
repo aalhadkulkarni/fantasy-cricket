@@ -31,7 +31,7 @@ assume the roles are exclusive.
 are still granted at league level.
 
 > There is a further entry in the role table — **`BannedFromLeague`**
-> (`userRoles009`). It is handled separately at the end of this document,
+> (`bannedFromLeague`). It is handled separately at the end of this document,
 > because it works by removing capability rather than granting it.
 
 ---
@@ -273,7 +273,7 @@ Ban is modelled as a role rather than as deletion. Two reasons: the person's
 data survives — which matters in an auction league, where they own a squad they
 paid for — and reversing a ban is then a single change rather than a restore.
 
-**The role is `BannedFromLeague`, `userRoles009`.** Banning is one write that
+**The role is `bannedFromLeague`.** Banning is one write that
 removes the Manager role and adds this one.
 
 **An existing member can be banned mid-season**, by the same mechanism. Their

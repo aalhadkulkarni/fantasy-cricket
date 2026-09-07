@@ -256,7 +256,7 @@ action — only a person knows whether every point and correction is in.
 
 ### Ban is a role, not a deletion
 
-Banning someone adds the **`BannedFromLeague`** role (`userRoles009`) and
+Banning someone adds the **`bannedFromLeague`** role and
 **strips the manager role**. It is one write.
 
 **An existing member can be banned mid-season**, by the same mechanism and with
@@ -372,8 +372,60 @@ A league's join code is **not** its identifier. See `docs/04-navigation.md`.
 single read.
 
 **A code is eight alphanumeric characters, generated at league creation.** That
-same mapping makes collision handling cheap: read the candidate key, and if it
-is taken, generate another and read again.
+same mapping is where it is claimed: **write the candidate key
+transactionally**, and on failure generate another and try again.
+
+> **Read-then-write would not actually be safe.** Two creations can both read a
+> code as free and both take it. At eight alphanumeric characters and a few
+> hundred leagues the odds are nil, so this is correctness rather than risk —
+> but a check that can lose is not a guarantee, and it costs nothing to make it
+> one.
+
+### Ids are push keys, except where they are not
+
+**Anything created at runtime gets a Firebase push key.** Users, leagues,
+players, teams, competitions, tournaments, matches, gameweeks, transfer
+proposals, bids. Twenty characters, generated on the client from a millisecond
+timestamp plus randomness, chronologically sortable, and unique **without any
+coordination between clients**.
+
+> **This is what makes concurrent creation safe.** A counter is a read followed
+> by a write, so two clients can read the same next value and both write it, and
+> the second silently wins. With push keys no client ever asks what the next id
+> is, so there is nothing to lose a race over.
+
+**The six reference tables use semantic keys instead** — `manager`, `t20`,
+`batsman`, `marquee`, `bidding`, `firstCall`. They are configuration rather than
+records: authored once, by one person, referenced from code. Nothing creates a
+role at runtime, so the problem push keys solve does not arise, and their
+opacity would be pure cost. `leagueRoles: { manager: true }` says what it means;
+`leagueRoles: { userRoles005: true }` does not.
+
+**The id is repeated inside the object**, as everywhere else in this model, so
+an object detached from its key still knows what it is.
+
+#### Uniqueness on a natural key is a different problem
+
+Push keys guarantee that two actors get **different** ids. They do nothing about
+one actor acting **twice** — two tabs, a double-tap, a retry after a timeout —
+and there they make things worse, because two distinct records for one person is
+harder to detect than an overwrite.
+
+**That needs a conditional write on the thing that must be unique**, not a
+better key generator. `googleIdentifierToUserIdMapping/{googleIdentifier}` for a
+user, `leagueCodeToLeagueMapping/{code}` for a join code. Claim it with a
+transaction, and the loser adopts the winner rather than creating a duplicate.
+
+> **`runTransaction` is ruled out for the auction specifically**, where the
+> read/write split makes it unnecessary. Claiming a unique natural key is
+> exactly what it is for, and is not an exception to that rule.
+
+#### Ordering never comes from an id
+
+Rounds carry `firstMatchId` and `lastMatchId`; gameweeks carry `startMatchId`
+and `endMatchId`. **Whether a match falls inside one is decided by
+`matchNumber`, never by comparing id strings.** Sequential ids made that
+comparison work by accident, and push keys break it silently.
 
 ---
 
