@@ -414,7 +414,12 @@ harder to detect than an overwrite.
 **That needs a conditional write on the thing that must be unique**, not a
 better key generator. `googleIdentifierToUserIdMapping/{googleIdentifier}` for a
 user, `leagueCodeToLeagueMapping/{code}` for a join code. Claim it with a
-transaction, and the loser adopts the winner rather than creating a duplicate.
+transaction, so **the loser is rejected rather than creating a duplicate.**
+
+What the loser then does differs by case. A join code simply generates another
+and tries again. An identity cannot be regenerated, so the caller re-reads and
+continues with the record that won. Either way the create is refused, not
+merged. See `docs/06-data-layer.md`.
 
 > **`runTransaction` is ruled out for the auction specifically**, where the
 > read/write split makes it unnecessary. Claiming a unique natural key is

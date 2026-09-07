@@ -14,6 +14,18 @@ they reach the app.
 4. **No record** → display-name modal, single required field, **no prefill** →
    confirm → record written → home
 5. **Record exists** → straight to home
+6. **Creation refused** → look the record up again and go home with it
+
+> **Step 6 is not an error the user sees.** The same person can be part-way
+> through this flow in two tabs, and only one of them can claim the identity.
+> The other is refused, re-reads, and lands on home with the account that won.
+> They do have an account; it just is not the one that tab was drafting. See
+> `docs/06-data-layer.md`.
+
+> **The refused tab's typed name is discarded.** If both tabs reached the modal
+> and submitted different names, the first to claim wins. Accepted rather than
+> solved — the alternative is asking someone which of their own two names they
+> meant, about an account they did not know they were creating twice.
 
 ## Data captured
 
@@ -32,6 +44,7 @@ load later because the user changed or removed it.
 |---|---|
 | Signed out | Google sign-in prompt |
 | **Signed in, no user record** | Mid-creation. **If the tab is closed here, the next visit must route back to the modal.** The user is authenticated but has no profile, so home would break. |
+| **Signed in, creation refused** | Another tab claimed this identity first. Re-read and go home. **Never rendered as a failure** — the account exists. |
 | Signed in with a record | Straight to home |
 
 **Sign out** lives in the site header, not here.

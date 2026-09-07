@@ -30,6 +30,7 @@ member list.
 | **Unban** | An option against each entry in the banned list. The admin chooses which role to grant on the way back in. |
 | **Make admin / remove admin** | In the member list. **Admins sort to the top.** |
 | **Mark league finished** | Manual, and gated on all matches having ended |
+| **Delete the league** | **Owner only, and only while they are its only member.** For removing a league created twice by mistake. Absent entirely once anyone else has joined. |
 
 **Owner protections, which must be enforced:**
 

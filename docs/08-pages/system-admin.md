@@ -76,6 +76,29 @@ Select a match, see every eligible player, enter points, submit.
 > reliable — if it silently fails, correcting one player would blank everyone
 > else.
 
+## Nothing here deletes
+
+**There is no delete for a tournament, player, team, competition or match**, and
+that is deliberate rather than missing. Each has a way to be taken out of
+circulation without destroying anything that references it:
+
+| Created by mistake | What to do instead |
+|---|---|
+| **Tournament** | Do not publish the duplicate. An unpublished tournament is invisible to users and cannot have a league created against it. |
+| **Player** | Mark the duplicate fully retired. |
+| **Team** | Remove it from its competitions, which takes it out of every tournament that could draw on it. |
+
+> **Deleting would be the dangerous option, not the convenient one.** These are
+> the nodes everything else references. A deleted player leaves dangling ids in
+> squads, lineups and points across every league that ever used them, and none
+> of those can be walked backwards to find what broke.
+
+> **The one delete in the product is a league**, restricted to its owner while
+> they are its only member. See `admin-center.md`.
+
+> **This screen is deliberately not user-friendly.** Its only user is the person
+> who built it, so a slightly awkward workaround beats a destructive button.
+
 ## Everything else
 
 Publish gates, on-the-fly team and player creation, adding a system admin, and

@@ -141,18 +141,45 @@ squad.
 
 - `createUser(googleIdentifier, email, displayName)` — **claims
   `googleIdentifierToUserIdMapping/{googleIdentifier}` transactionally** before
-  writing the user
+  writing the user, and **rejects if that identity is already claimed**
 
-> **The same person can arrive twice.** Two tabs, a double-tapped button, a
-> retry after a timeout: both attempts find no user record and both create one,
-> and because ids are push keys the result is two distinct records for one
-> human rather than an overwrite. Nothing detects that afterwards. Whoever
-> claims the mapping first wins; the loser discards its draft and adopts the
-> winner's id.
+### The read is not the guard
+
+**The same person can arrive twice.** Two tabs, a double-tapped button, a retry
+after a timeout. Both attempts find no user record, both proceed, and because
+ids are push keys the result is two distinct records for one human rather than
+an overwrite. Nothing detects that afterwards.
+
+> **"Look it up first, and don't create if it exists" does not fix this.** That
+> is a read followed by a conditional write, and both attempts pass the read.
+> The **claim on the mapping is the guard**; `getUserByGoogleIdentifier` is
+> convenience. Same shape as route guards and interface gating being convenience
+> while this layer is the actual check.
+
+**The contract.** `createUser` **rejects** when the identity is already claimed.
+It does not silently return the winner's record.
+
+**The caller re-reads and continues.** On rejection the login flow calls
+`getUserByGoogleIdentifier` again and proceeds to home with the record that won.
+**The user never sees a failure**, because they do have an account — just not
+the one this tab was drafting.
+
+> **The losing tab's typed display name is discarded, silently.** Both tabs can
+> reach the display-name modal and both submit; the first to claim the identity
+> wins. This is accepted rather than solved: the alternative is asking someone
+> which of their own two names they meant, about an account they did not know
+> they were creating twice.
 
 > `googleIdentifier` is deliberately non-committal — it may end up being the
 > Google user id or the email. Decide at implementation based on how Firebase
-> auth actually behaves; nothing else in the model depends on which.
+> auth actually behaves.
+>
+> **But the guarantee above is only as strong as that key is stable.** A Google
+> user id is immutable for the life of the account. An email address is not, so
+> keying on it means someone who changes their Gmail address passes the
+> uniqueness check and gets a second record — the exact failure this exists to
+> prevent. The email is stored as `googleEmailId` either way, so this is only
+> about what the mapping is keyed on.
 
 ---
 
@@ -407,6 +434,32 @@ allowances, and the full auction configuration.
 - `makeAdmin(leagueId, targetUserId)`
 - `revokeAdmin(leagueId, targetUserId)`
 - `markLeagueFinished(leagueId)`
+- `deleteLeague(leagueId)` — **owner only, and only while the owner is the
+  league's only member**
+
+> **This exists for one case: a league created twice by mistake.** A league has
+> no natural key, correctly, since two people running leagues with the same name
+> is legitimate. So a double-tapped Create produces two distinct leagues and
+> something has to remove the spare.
+
+> **The emptiness condition is the whole safety story.** Once anyone else has
+> joined, the league holds other people's season, and no confirmation dialog
+> makes that safe to destroy. Enforced here, not in the button.
+
+> **One atomic multi-path `update()`, or it leaves orphans.** A league's data
+> spans ten nodes keyed by `leagueId` — `leagues`, `lineups`, `squads`,
+> `joinRequests`, `bannedUsers`, `transferProposals`,
+> `transferProposalsByManager`, `liveAuctions`, `customPointsByMatch` and
+> `customPointsByPlayer` — plus four reverse references:
+> `leagueCodeToLeagueMapping/{code}`,
+> `tournaments/{tournamentId}/leagues/{leagueId}`, and the owner's entry in
+> `users/{userId}/leagues`. Most are empty under the emptiness condition; clear
+> them anyway, so a bug in that check cannot leave a half-deleted league behind.
+
+> **The index reference is the one that must not survive.** As recorded under My
+> Leagues, `users/{userId}/leagues` cannot be rebuilt, so a leftover entry there
+> points at a league that no longer exists and the owner cannot clear it
+> themselves.
 
 **Subscriptions**
 
@@ -764,14 +817,14 @@ belong to the auction page itself.
 
 # Open at implementation
 
-| Item                            | What needs deciding                                                                                                                                 |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Subscription error handling** | `(error, data)` or a separate error callback. Pick one and apply it everywhere.                                                                     |
-| **Unsubscribe shape**           | Returned handle, or a matching `off` call. A returned handle fits React cleanup better.                                                             |
-| **`googleIdentifier`**          | Google user id or email. Depends on how Firebase auth behaves in practice.                                                                          |
-| **Timeline construction**       | Whether the timeline is derived in the UI from the event subscription, or read as its own list.                                                     |
-| **Squad derivation**            | Whether a squad is computed from auction wins plus transfers, or materialised and mutated. Decides whether the match parameter filters or looks up. |
-| **Auctioneer presence**         | No calls specified — Phase 2. For now an admin reassigns manually.                                                                                  |
+| Item                            | What needs deciding                                                                                                                                                                                      |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Subscription error handling** | `(error, data)` or a separate error callback. Pick one and apply it everywhere.                                                                                                                          |
+| **Unsubscribe shape**           | Returned handle, or a matching `off` call. A returned handle fits React cleanup better.                                                                                                                  |
+| **`googleIdentifier`**          | Google user id or email. Depends on how Firebase auth behaves in practice. **Not a free choice:** the identity-claim guarantee in Login holds only if the key is immutable, and an email address is not. |
+| **Timeline construction**       | Whether the timeline is derived in the UI from the event subscription, or read as its own list.                                                                                                          |
+| **Squad derivation**            | Whether a squad is computed from auction wins plus transfers, or materialised and mutated. Decides whether the match parameter filters or looks up.                                                      |
+| **Auctioneer presence**         | No calls specified — Phase 2. For now an admin reassigns manually.                                                                                                                                       |
 
 > **These are marked open deliberately.** Do not pick one and proceed — raise it
 > and we decide together, per `docs/02-working-with-me.md`.

@@ -90,6 +90,9 @@ _additionally_ theirs.
 
 - Grant and revoke league admin
 - Overrule any admin action
+- **Delete the league, but only while they are its only member.** This is for
+  removing a league created twice by mistake. Once anyone else has joined it
+  holds their season, and nothing can delete it after that.
 
 **Designating the auctioneer and the backup auctioneer is not owner-only.** Any
 admin can do it, so it is listed under League admin below.
