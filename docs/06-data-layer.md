@@ -102,8 +102,9 @@ Points are **computed on the fly.** There is no materialised alternative,
 because standard points cannot be pre-computed into every league for every
 manager.
 
-**So: read `lineups/{leagueId}` once, read the points node once, and compute in
-the layer.** Not one call per manager.
+**So: read the league's lineups node once — `matchBasedLineups/{leagueId}` or
+`gameWeekBasedLineups/{leagueId}` depending on the league type — read the points
+node once, and compute in the layer.** Not one call per manager.
 
 At the expected size — twenty managers, sixty-four matches — that is roughly
 100KB across three reads, and the arithmetic is single-digit milliseconds.
@@ -447,7 +448,8 @@ allowances, and the full auction configuration.
 > makes that safe to destroy. Enforced here, not in the button.
 
 > **One atomic multi-path `update()`, or it leaves orphans.** A league's data
-> spans ten nodes keyed by `leagueId` — `leagues`, `lineups`, `squads`,
+> spans eleven nodes keyed by `leagueId` — `leagues`, `matchBasedLineups`,
+> `gameWeekBasedLineups`, `squads`,
 > `joinRequests`, `bannedUsers`, `transferProposals`,
 > `transferProposalsByManager`, `liveAuctions`, `customPointsByMatch` and
 > `customPointsByPlayer` — plus four reverse references:

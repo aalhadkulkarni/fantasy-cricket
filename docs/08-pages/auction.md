@@ -77,6 +77,25 @@ zero. The auctioneer never clicks them.
 > renders them itself, which is what allows role-specific wording and lets the
 > countdown be a live timer rather than a series of "20 seconds left" log lines.
 
+**The timeline is display only.** It is written to and read for rendering, and
+**never dispatched on**. Nothing changes state, changes data, or fires a side
+effect because an entry arrived. Anything that needs to react reads the auction
+state instead, which is authoritative and always present.
+
+> **The calls are not an exception**, though they look like one. Every client
+> already computes the countdown against Firebase server time from the round
+> deadline, so it knows five seconds remain without a last-call entry telling
+> it. Reacting to the entry rather than to the deadline would put the reaction
+> out of step with the countdown sitting beside it on screen. The calls exist so
+> the timeline _reads_ like a real auction, not to carry information anyone
+> lacks.
+
+> **Why this needs saying.** The timeline is a log, and the state it describes
+> is sitting right there. Hanging behaviour off a convenient event arriving
+> would give two sources of truth for the same fact — whose turn it is, how long
+> is left — and a dropped or replayed write would then change behaviour rather
+> than merely leaving a gap in the history.
+
 ## Bidding constants
 
 **The increment is 0.5.** Every bid is the current asking price, and the asking

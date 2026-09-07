@@ -30,6 +30,7 @@ under them once they have committed.
 |---|---|
 | **League name** | Always |
 | **League type** (auction / regular) | **Never** — not editable after creation |
+| **Gameweek or match based** | **Never.** Separate from league type, since a regular league chooses this at creation, but locked for the same reason and more strongly — see below. |
 | **Accessibility** (public / closed) | **Never** — set at creation only |
 | **Max slots** | Always, but **never below the number of teams already joined**, and never above 8 in an auction league. It is the only slot field, so this row governs auction leagues too. |
 | **Join deadline** | **Regular:** extendable up to the team submission deadline (first match start, minus the offset). **Auction:** extendable up to the scheduled auction start, since there is nothing to join after bidding begins. |
@@ -40,6 +41,16 @@ under them once they have committed.
 | **Transfer settings** | Until the auction starts |
 | **Auction budget and player details** | Until the auction starts |
 | **Gameweek structure** | **Auction:** until the auction starts. **Regular:** as long as no teams have been submitted. |
+
+> **Why gameweek-or-match is locked harder than the others.** The other locks
+> are fairness: managers must be able to rely on the rules not changing under
+> them. This one is structural. Lineups are stored in a different node depending
+> on the answer — `matchBasedLineups` or `gameWeekBasedLineups` — and the two
+> hold different fields, keyed differently. Flipping it would orphan every
+> lineup already submitted, so there is nothing to migrate *to*.
+
+> **Editing structurally breaking fields is a later question.** Nothing here
+> supports it, and the fields that would need it are marked Never above.
 
 > The points source and scoring rules both lock at the moment people start
 > making informed decisions. For an auction league that moment is the auction,
