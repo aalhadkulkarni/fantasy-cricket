@@ -703,6 +703,13 @@ const dataModel = {
       // a table are actually per LEAGUE (round configs, change allowances),
       // and those already live on the league. Also consistent with isAuctionEnabled.
       // false = match based. Forced true when isAuctionEnabled is true (code-enforced).
+      //
+      // IMMUTABLE AFTER CREATION. Not merely locked for fairness like the other
+      // config: this decides WHICH NODE holds the lineups, matchBasedLineups or
+      // gameWeekBasedLineups, and the two are keyed differently and hold
+      // different fields. Flipping it would orphan every lineup already
+      // submitted. Allowing edits on structurally breaking fields is a later
+      // question; today the answer is no.
       isGameWeeksEnabled: false,
       tournamentId: 'tournament001',
       leagueEntry: 'Open',
@@ -747,13 +754,13 @@ const dataModel = {
             reconstructed if it ever drifts.
           */
           pointsAdjustment: 0,
-          // [A1] matchWiseFantasyConfigs moved to the top-level lineups node
+          // [A1] matchWiseFantasyConfigs moved to top-level matchBasedLineups
         },
         user002: {
           fantasyTeamName: "Yogesh's Warriors",
           leagueRoles: { manager: true }, // the player is just manager
           pointsAdjustment: 0,
-          // [A1] matchWiseFantasyConfigs moved to the top-level lineups node
+          // [A1] matchWiseFantasyConfigs moved to top-level matchBasedLineups
         },
       },
       // ALWAYS PRESENT. Written at creation, seeded from
@@ -880,7 +887,7 @@ const dataModel = {
           // asked for and received 500 points in transferProposal001 (accepted)
           pointsAdjustment: 500,
           // [A1] matchWiseSquads moved to top-level squads node
-          // [A1] gameWeekWiseFantasyConfigs moved to top-level lineups node
+          // [A1] gameWeekWiseFantasyConfigs moved to top-level gameWeekBasedLineups
           // [A1] transferProposalsReceived / Sent moved to top-level transferProposalsByManager node
         },
         user004: {
@@ -889,7 +896,7 @@ const dataModel = {
           // gave up 500 points in transferProposal001 (accepted)
           pointsAdjustment: -500,
           // [A1] matchWiseSquads moved to top-level squads node
-          // [A1] gameWeekWiseFantasyConfigs moved to top-level lineups node
+          // [A1] gameWeekWiseFantasyConfigs moved to top-level gameWeekBasedLineups
           // [A1] transferProposalsReceived / Sent moved to top-level transferProposalsByManager node
         },
       },
@@ -1120,15 +1127,34 @@ const dataModel = {
     },
   },
 
-  // =========================================================
-  // [A2] LINEUPS — moved out of leagues/{lid}/leagueMembers/{uid}
-  // Shape and density are UNCHANGED from v1. Both league types keep their
-  // original field names; only the location has moved.
-  // =========================================================
+  /*
+    =========================================================
+    [A2] LINEUPS — moved out of leagues/{lid}/leagueMembers/{uid}, then SPLIT
+    IN TWO.
 
-  lineups: {
+    TWO NODES, NOT ONE, because these are different entities rather than one
+    entity with two shapes. A match-based league keys by matchId and carries
+    change counters; a game-week league keys by gameWeekId and carries an
+    impact sub. They share almost no fields.
+
+    WHY SPLIT:
+      - A league is one type for its entire life, so the two are NEVER read
+        together — which is exactly what the "split what is not read together"
+        rule is for.
+      - The data layer already treats them as separate: getMyTeamForMatch vs
+        getMyTeamForGameWeek, updateTeamForMatch vs updateTeamForGameWeek. The
+        storage was the part that had not caught up.
+      - Merged, nothing in the node says which shape it holds — you had to read
+        the league first to know how to interpret what you just fetched. Split,
+        the PATH is the discriminant and each node has one concrete shape.
+
+    Density is unchanged: match-based is one entry per match copied forward,
+    game-week is one per game week and never was dense.
+    =========================================================
+  */
+
+  matchBasedLineups: {
     league001: {
-      // match based league — was matchWiseFantasyConfigs
       user001: {
         match001: {
           lineup: ['player001', 'player003', 'player004'], // this would be exactly 11, enforced in code, not in db
@@ -1152,8 +1178,11 @@ const dataModel = {
         // will have the same shape, not repeating, example is already there
       },
     },
+  },
+
+  // Game-week leagues only. Same managers, different league, different shape.
+  gameWeekBasedLineups: {
     league002: {
-      // game week based league — was gameWeekWiseFantasyConfigs
       user003: {
         gameWeek001: {
           startingLineup: ['player001', 'player002', 'player004'],
@@ -1528,7 +1557,7 @@ const dataModel = {
       timelineEventId: 'auctioneerChanged',
       timelineEventType: 'AuctioneerChanged',
       timelineEventDescription: 'Auctioneer changed',
-      params: ['oldAuctionerId', 'newAuctioneerId'],
+      params: ['oldAuctioneerId', 'newAuctioneerId'],
     },
     sold: {
       timelineEventId: 'sold',
