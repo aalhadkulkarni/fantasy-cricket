@@ -238,6 +238,7 @@ to retrofit. Colour contrast is already handled by the design tokens.
 | Multi-tournament leagues                                | One league covers one tournament                                                                               |
 | Leaving a league                                        | No use case                                                                                                    |
 | Retired players view                                    | Phase 2. Nothing lists fully retired players or brings one back. Rare enough not to matter in Phase 1.         |
+| Deleting anything except an empty league                | Deliberate, not missing. A league's owner can delete it while they are its only member, for the created-twice case. Nothing else deletes: an unwanted tournament goes unpublished, a duplicate player is retired, a duplicate team is removed from its competitions. |
 | Sparse storage of lineups and squads                    | A known optimisation, deliberately deferred — it only matters at 60+ match tournaments                         |
 
 ---
