@@ -68,6 +68,8 @@ export type LeaguePhase =
  * member's entry on every join.
  */
 export interface LeagueCard extends LeagueIndexEntry {
+  /** Not on the stored entry, which is keyed by it. */
+  leagueId: LeagueId
   phase: LeaguePhase
   filledSlots: number
 }
@@ -115,6 +117,7 @@ export interface JoinableLeague {
 
 /** An Archived tab card. Its final position was snapshotted at migration. */
 export interface ArchivedLeagueCard extends ArchivedLeagueIndexEntry {
+  leagueId: LeagueId
   phase: 'finished'
 }
 
