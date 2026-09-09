@@ -49,6 +49,23 @@ export const AuthContext = createContext<AuthContextValue | undefined>(
   undefined,
 )
 
+/**
+ * Whether this person may reach the admin panel.
+ *
+ * **Either system role qualifies.** `SYSTEM_ROLES` carries `systemOwner` and
+ * `systemAdmin`, and an owner who cannot open the panel makes no sense.
+ * `03-roles.md` lists only "System admin" in its six-role table, but the schema
+ * carries both and is the more specific document.
+ *
+ * Defined once so the nav item and the route guard cannot drift apart and start
+ * disagreeing about who is allowed in.
+ */
+export function isSystemAdmin(state: AuthState): boolean {
+  if (state.status !== 'signedIn' || state.user === undefined) return false
+  const roles = state.user.systemUserRoles
+  return roles?.systemAdmin === true || roles?.systemOwner === true
+}
+
 export function useAuth(): AuthContextValue {
   const value = useContext(AuthContext)
   if (value === undefined) {

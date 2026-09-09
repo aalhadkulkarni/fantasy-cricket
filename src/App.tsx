@@ -1,6 +1,7 @@
 import { Route, Routes } from 'react-router'
 
 import { RequireAccount } from './auth/require-account'
+import { RequireSystemAdmin } from './auth/require-system-admin'
 import { SiteHeader } from './components/site-header'
 import { ActionsCenter } from './pages/actions-center'
 import { CreateLeague } from './pages/create-league'
@@ -46,7 +47,14 @@ function App() {
                 <Route path={ROUTES.tournaments} element={<Tournaments />} />
                 <Route path={ROUTES.createLeague} element={<CreateLeague />} />
                 <Route path={ROUTES.actions} element={<ActionsCenter />} />
-                <Route path={ROUTES.admin} element={<SystemAdmin />} />
+                <Route
+                  path={ROUTES.admin}
+                  element={
+                    <RequireSystemAdmin>
+                      <SystemAdmin />
+                    </RequireSystemAdmin>
+                  }
+                />
 
                 {/* A not-found state, never a blank page. */}
                 <Route path="*" element={<NotFound />} />
