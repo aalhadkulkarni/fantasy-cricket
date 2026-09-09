@@ -1,13 +1,27 @@
 /**
- * `users/{userId}` and `googleIdentifierToUserIdMapping`.
+ * `users/{userId}`.
  *
  * Global identity, plus the two indexes that answer "which leagues is this
  * person in". Those indexes exist because RTDB cannot filter the `leagues` node
  * by a nested member key, which also means **they cannot be rebuilt**: lose an
  * entry and that league disappears from that user's interface permanently.
+ *
+ * **`userId` is the Firebase Auth UID.** There is no lookup table translating
+ * an auth identity into an id of our own, because the UID is stable, unique,
+ * and the only thing a Phase 2 security rule can verify — `auth.uid` resolves
+ * to exactly this.
+ *
+ * That choice removes the duplicate-account problem rather than solving it. Two
+ * tabs signing in as the same person both address `users/{sameUid}`, so there
+ * is nothing to claim and no race to lose. Only the display name can differ,
+ * and last write wins.
+ *
+ * **What it costs**, recorded so nobody meets it by surprise: leaving Firebase
+ * Auth changes every user id. See the migration note in `05-data-model.md` —
+ * user ids appear as *values* about as often as they appear as keys.
  */
 
-import type { GoogleIdentifier, LeagueId, TournamentId, UserId } from './ids'
+import type { LeagueId, TournamentId, UserId } from './ids'
 import type { LeagueRole, SystemRole } from './reference'
 
 /**
@@ -86,17 +100,22 @@ export interface ArchivedLeagueIndexEntry extends LeagueIndexEntry {
  * and for hotlinked images that later fail to load.
  */
 export interface User {
+  /** The Firebase Auth UID, and the key this record is stored under. */
   userId: UserId
+
   userName: string
 
   /**
-   * Whatever identifies the Google account.
+   * The Google account id — the `sub` claim, from `providerData` on the auth
+   * user.
    *
-   * OPEN: still undecided whether this is the Google user id or the email. It
-   * matters more than it looks — the uniqueness guarantee on account creation
-   * is only as strong as this key's stability, and an email address is mutable.
+   * **Nothing reads it, and that is the point.** It is insurance: if the
+   * Firebase project were ever deleted, this is the only thing that could say
+   * which person a `userId` belonged to. One field against an otherwise
+   * unrecoverable loss.
    */
-  googleIdentifier: GoogleIdentifier
+  googleSubjectId: string
+
   googleEmailId: string
 
   /** Universal roles. Empty for almost everyone. */
@@ -105,14 +124,3 @@ export interface User {
   leagues: Record<LeagueId, LeagueIndexEntry>
   archivedLeagues?: Record<LeagueId, ArchivedLeagueIndexEntry>
 }
-
-/**
- * `googleIdentifierToUserIdMapping`.
- *
- * Resolves an auth identity to a user in one read, and is where that identity
- * is **claimed transactionally** at sign-up. Looking a user up first and
- * creating if absent does not work: two tabs both read nothing, both pass the
- * check, and both create. Whoever claims this path wins; the loser is rejected
- * and re-reads.
- */
-export type GoogleIdentifierToUserIdMapping = Record<GoogleIdentifier, UserId>

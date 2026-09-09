@@ -202,6 +202,14 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  /* Tailwind v4's reset drops the pointer cursor browsers give buttons, and
+     shadcn's Button does not put it back. Restored once here rather than on
+     each component, so nothing has to remember. Disabled buttons keep the
+     default arrow, since pointing at one implies it can be pressed. */
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+
   /* Visible focus is part of the accessibility floor that applies
      during the build, not after. */
   :focus-visible {

@@ -170,52 +170,71 @@ squad.
 
 **Reads**
 
-- `getUserByGoogleIdentifier(googleIdentifier)` — resolves the auth identity to
-  a user record, or nothing if this is a first visit
+- `getCurrentUser()` — the signed-in person's record, or **nothing when they are
+  authenticated but have no record yet**
+- `onAuthChanged(callback)` — whether anyone is signed in, and who
 
 **Writes**
 
-- `createUser(googleIdentifier, email, displayName)` — **claims
-  `googleIdentifierToUserIdMapping/{googleIdentifier}` transactionally** before
-  writing the user, and **rejects if that identity is already claimed**
+- `signInWithGoogle()` / `signOut()`
+- `createUser(userName)` — writes the record for the signed-in person
 
-### The read is not the guard
+### `users/` is keyed by the Firebase Auth UID
 
-**The same person can arrive twice.** Two tabs, a double-tapped button, a retry
-after a timeout. Both attempts find no user record, both proceed, and because
-ids are push keys the result is two distinct records for one human rather than
-an overwrite. Nothing detects that afterwards.
+**There is no table translating an auth identity into an id of our own**, and no
+transactional claim at sign-up.
 
-> **"Look it up first, and don't create if it exists" does not fix this.** That
-> is a read followed by a conditional write, and both attempts pass the read.
-> The **claim on the mapping is the guard**; `getUserByGoogleIdentifier` is
-> convenience. Same shape as route guards and interface gating being convenience
-> while this layer is the actual check.
+The UID is what a Phase 2 security rule can verify, since `auth.uid` resolves to
+exactly it, and it is immutable where an email address is not.
 
-**The contract.** `createUser` **rejects** when the identity is already claimed.
-It does not silently return the winner's record.
+> **This removes the duplicate-account problem rather than guarding against it.**
+> The same person can arrive twice — two tabs, a double-tapped button, a retry
+> after a timeout. All of them address `users/{sameUid}`, so two records for one
+> human cannot happen. There is nothing to claim and no race to lose.
 
-**The caller re-reads and continues.** On rejection the login flow calls
-`getUserByGoogleIdentifier` again and proceeds to home with the record that won.
-**The user never sees a failure**, because they do have an account — just not
-the one this tab was drafting.
+**Only the display name can differ**, and last write wins. Both tabs can reach
+the modal and submit different names; one of them is discarded. Accepted rather
+than solved, for the same reason as before: the alternative is asking someone
+which of their own two names they meant.
 
-> **The losing tab's typed display name is discarded, silently.** Both tabs can
-> reach the display-name modal and both submit; the first to claim the identity
-> wins. This is accepted rather than solved: the alternative is asking someone
-> which of their own two names they meant, about an account they did not know
-> they were creating twice.
+### The lookup is the guard, not `isNewUser`
 
-> `googleIdentifier` is deliberately non-committal — it may end up being the
-> Google user id or the email. Decide at implementation based on how Firebase
-> auth actually behaves.
->
-> **But the guarantee above is only as strong as that key is stable.** A Google
-> user id is immutable for the life of the account. An email address is not, so
-> keying on it means someone who changes their Gmail address passes the
-> uniqueness check and gets a second record — the exact failure this exists to
-> prevent. The email is stored as `googleEmailId` either way, so this is only
-> about what the mapping is keyed on.
+**`getCurrentUser()` returning nothing is what says "show the display-name
+modal".** Never `getAdditionalUserInfo(result).isNewUser`.
+
+That flag reports whether _Firebase Auth_ just created the account, which is a
+different question from whether _we_ have a record. Someone who signs in,
+abandons the modal and returns is `isNewUser: false` with still no record — the
+exact mid-creation state `08-pages/login.md` requires the app to route back
+into.
+
+### Identity is never a parameter
+
+`createUser` takes only the display name. The UID, the email and the Google
+subject all come from the auth session, because a client-supplied identity is
+the cheating vector this layer exists to close.
+
+> **The Google subject is stored and never read.** It is insurance: if the
+> Firebase project were deleted, it is the only thing that could say which
+> person a `userId` belonged to.
+
+### Sign-in uses a popup
+
+Three outcomes, and only one is a failure:
+
+| Firebase code                  | Treatment                                                |
+| ------------------------------ | -------------------------------------------------------- |
+| `auth/popup-blocked`           | A real message. Nothing on screen explains it otherwise. |
+| `auth/popup-closed-by-user`    | **Not an error.** They changed their mind.               |
+| `auth/cancelled-popup-request` | Ignored. A second popup superseded the first.            |
+
+> **Popup rather than redirect**, and not only because it is simpler.
+> `signInWithRedirect` breaks on browsers that partition third-party storage
+> unless the auth handler is self-hosted, which makes it the more fragile option
+> on a product used mostly on phones.
+
+`account-exists-with-different-credential` cannot occur with a single provider.
+Nothing handles it.
 
 ---
 
@@ -854,14 +873,13 @@ belong to the auction page itself.
 
 # Open at implementation
 
-| Item                            | What needs deciding                                                                                                                                                                                      |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Subscription error handling** | `(error, data)` or a separate error callback. Pick one and apply it everywhere.                                                                                                                          |
-| **Unsubscribe shape**           | Returned handle, or a matching `off` call. A returned handle fits React cleanup better.                                                                                                                  |
-| **`googleIdentifier`**          | Google user id or email. Depends on how Firebase auth behaves in practice. **Not a free choice:** the identity-claim guarantee in Login holds only if the key is immutable, and an email address is not. |
-| **Timeline construction**       | Whether the timeline is derived in the UI from the event subscription, or read as its own list.                                                                                                          |
-| **Squad derivation**            | Whether a squad is computed from auction wins plus transfers, or materialised and mutated. Decides whether the match parameter filters or looks up.                                                      |
-| **Auctioneer presence**         | No calls specified — Phase 2. For now an admin reassigns manually.                                                                                                                                       |
+| Item                            | What needs deciding                                                                                                                                 |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Subscription error handling** | `(error, data)` or a separate error callback. Pick one and apply it everywhere.                                                                     |
+| **Unsubscribe shape**           | Returned handle, or a matching `off` call. A returned handle fits React cleanup better.                                                             |
+| **Timeline construction**       | Whether the timeline is derived in the UI from the event subscription, or read as its own list.                                                     |
+| **Squad derivation**            | Whether a squad is computed from auction wins plus transfers, or materialised and mutated. Decides whether the match parameter filters or looks up. |
+| **Auctioneer presence**         | No calls specified — Phase 2. For now an admin reassigns manually.                                                                                  |
 
 > **These are marked open deliberately.** Do not pick one and proceed — raise it
 > and we decide together, per `docs/02-working-with-me.md`.
