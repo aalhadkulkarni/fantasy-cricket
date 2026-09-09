@@ -8,19 +8,26 @@
  * value and produce a base hostname instead; neither translation belongs
  * outside its own service.
  *
+ * **Every Firebase import in the app is in this folder**, which is rule 2 of the
+ * boundary. Nothing above the data layer touches the SDK, and no
+ * Firebase-shaped value crosses out of it.
+ *
  * ---
  *
- * ## TODO — no Firebase client yet
+ * ## TODO — the functions have no bodies yet
  *
- * The SDK is not installed and there is no app, no auth and no database handle.
- * This service currently knows only how to build paths.
+ * The app and the database handle are live, but all 143 functions still throw.
+ * When they get bodies they reach the handle through `getFirebaseService()`
+ * and address it with the builders in `paths.ts`.
  *
- * When the client arrives it is held here, initialised for this environment,
- * and the layer's functions reach it through `getFirebaseService()` rather than
- * importing Firebase anywhere else.
+ * Auth is not set up either. That arrives with the login story.
  */
 
+import { initializeApp, type FirebaseApp } from 'firebase/app'
+import { getDatabase, type Database } from 'firebase/database'
+
 import type { Environment } from '@/config/environments'
+import { FIREBASE_CONFIG } from '@/config/firebase'
 import type { ApiService } from '../api-service'
 import { getApiService } from '../api-service'
 
@@ -32,6 +39,15 @@ export interface FirebaseService extends ApiService {
 
   /** The first segment of every path. The environment, literally. */
   readonly root: Environment
+
+  /** Held so nothing else has to call `initializeApp`. */
+  readonly app: FirebaseApp
+
+  /**
+   * The database handle. **Not exported above this layer** — it is the most
+   * Firebase-shaped object there is, and rule 2 says it stays inside.
+   */
+  readonly database: Database
 
   /**
    * Builds a path beneath the root: `path('leagues', leagueId)` gives
@@ -48,14 +64,37 @@ export interface FirebaseService extends ApiService {
  * Named `create…` rather than `FirebaseService` so the type keeps that name. A
  * factory rather than a class, which sidesteps `erasableSyntaxOnly` forbidding
  * parameter properties, and leaves nothing bound to `this`.
+ *
+ * Called once, by `setEnvironment`, which is idempotent — so a hot reload
+ * cannot initialise the app twice.
  */
 export function createFirebaseService(
   environment: Environment,
 ): FirebaseService {
+  /*
+    Refuse rather than let the SDK guess. With no `databaseURL` it does not
+    fail: it assumes `https://{projectId}-default-rtdb.firebaseio.com`, the
+    default US region. This database is in `asia-southeast1`, so that guess is
+    wrong and every read would go quietly nowhere. Same reasoning as an unmapped
+    hostname in `environments.ts`.
+  */
+  if (FIREBASE_CONFIG.databaseURL === '') {
+    throw new Error(
+      'firebase: databaseURL is empty in src/config/firebase.ts. ' +
+        'Copy it from the Realtime Database in the Firebase console. Leaving it ' +
+        'empty is deliberate: the SDK would otherwise guess a US-region URL, ' +
+        'which is wrong for this project.',
+    )
+  }
+
+  const app = initializeApp(FIREBASE_CONFIG)
+
   return Object.freeze({
     kind: 'firebase' as const,
     environment,
     root: environment,
+    app,
+    database: getDatabase(app),
 
     path(...segments: readonly string[]): string {
       for (const segment of segments) {
