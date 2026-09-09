@@ -74,6 +74,25 @@ const dataModel = {
     },
   },
 
+  /*
+    Written once per environment by the "Set up basic system" button, and read
+    before it runs. Not a reference table — a marker saying the reference data
+    below has been seeded into THIS root.
+
+    It matters most for competitions, which are keyed by push key rather than by
+    name. Without this guard a second run would create six MORE competitions
+    rather than overwriting six, and nothing afterwards would say which set was
+    real. Every other table is keyed by name and would merely be rewritten
+    identically.
+
+    Written inside the same atomic update as the seed, so it can never mark a
+    half-finished one. A timestamp rather than a boolean, at the same cost,
+    because "when was this environment set up" is worth being able to answer.
+  */
+  systemSetup: {
+    completedAt: 1788940000000,
+  },
+
   standardAuctionConfig: {
     playerDetails: {
       player001: {

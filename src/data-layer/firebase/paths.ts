@@ -111,6 +111,12 @@ export const paths = {
   // Standards — copied into a league at creation, never resolved at read time
   // -------------------------------------------------------------------------
 
+  /**
+   * Written by the setup routine, read before it runs. Not a reference table —
+   * a marker saying this environment has been seeded.
+   */
+  systemSetup: () => under('systemSetup'),
+
   standardAuctionConfig: () => under('standardAuctionConfig'),
   standardFantasyLineupRules: () => under('standardFantasyLineupRules'),
   standardFantasyLeagueTeamChangesDeadlineOffset: () =>
