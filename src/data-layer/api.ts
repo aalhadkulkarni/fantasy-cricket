@@ -106,6 +106,23 @@ export interface CreatePlayersResult {
   skipped: readonly string[]
 }
 
+/**
+ * Which official leagues to open alongside publishing a tournament.
+ *
+ * **The publisher owns and administers them but does not play them.** Being a
+ * manager means having a fantasy team name, which is chosen when joining, so
+ * the admin joins through the same door as everyone else.
+ *
+ * Both are public, use standard points, and hold no auction — the whole point
+ * is that anyone can walk in.
+ */
+export interface OfficialLeagues {
+  /** Changes counted across the whole tournament. */
+  matchBased?: boolean
+  /** One gameweek per round, so the impact sub exists wherever a round has more than one match. */
+  gameWeekBased?: boolean
+}
+
 /** What seeding an environment did, so a caller can say more than "done". */
 export interface SystemSetupResult {
   status: 'seeded' | 'alreadyDone'
@@ -281,6 +298,22 @@ export interface Api {
   setRounds(
     tournamentId: TournamentId,
     rounds: readonly TournamentRoundConfig[],
+  ): Promise<void>
+
+  /**
+   * Makes the tournament visible and lets leagues be created against it.
+   *
+   * **Refused here if no match has a start time**, rather than merely disabled
+   * in the admin form, because interface gating is convenience and this layer
+   * is the guard.
+   *
+   * Any official leagues asked for are created **in the same write** as the
+   * publish. Publishing and then failing to create the league would leave a
+   * tournament people can see with nothing to join.
+   */
+  publishTournament(
+    tournamentId: TournamentId,
+    officialLeagues?: OfficialLeagues,
   ): Promise<void>
 
   // -- system --------------------------------------------------------------

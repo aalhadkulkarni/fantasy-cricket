@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router'
 
 import { TournamentMatches } from '@/components/admin/tournament-matches'
 import { TournamentParticipants } from '@/components/admin/tournament-participants'
+import { TournamentPublish } from '@/components/admin/tournament-publish'
 import { TournamentRounds } from '@/components/admin/tournament-rounds'
 import { PageContainer } from '@/components/layout/page-container'
 import {
@@ -185,6 +186,13 @@ function Body({
           .join(',')}`}
         tournament={tournament}
         onSaved={onSaved}
+      />
+
+      {/* Last, because everything above it has to be right before it happens. */}
+      <TournamentPublish
+        key={tournament.publishedAt ?? 'draft'}
+        tournament={tournament}
+        onPublished={onSaved}
       />
     </>
   )
