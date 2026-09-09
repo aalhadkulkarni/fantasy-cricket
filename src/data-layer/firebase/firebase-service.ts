@@ -15,20 +15,16 @@
  *
  * ---
  *
- * **These primitives are Firebase's own and stay here.** `ApiService` carries
- * operations — `getLeague`, `acceptJoinRequest` — because those have a REST
- * implementation. `update({path: value})` does not: accepting a join request is
- * one multi-path write here and one POST there, with the server doing both
- * writes itself. A path *is* the schema, and the fifth boundary rule says the
- * schema never crosses upward.
+ * **This is a client, not an `Api`.** It knows about paths, snapshots and
+ * multi-path updates, none of which a REST backend has. `Api` carries
+ * operations — `getLeague`, `acceptJoinRequest` — because those have an
+ * implementation on either side. `update({path: value})` does not: accepting a
+ * join request is one multi-path write here and one POST there, with the server
+ * doing both writes itself. A path *is* the schema, and the fifth boundary rule
+ * says the schema never crosses upward.
  *
- * ---
- *
- * ## TODO — most of the layer's functions have no bodies yet
- *
- * As each gets implemented it moves onto `ApiService` and reaches these methods
- * through the Firebase implementation of it. Identity is the first area with
- * real bodies.
+ * **Nothing outside this folder holds one.** `FirebaseApi` constructs it and
+ * keeps it, which is what stops path knowledge reaching the app.
  */
 
 import { initializeApp, type FirebaseApp } from 'firebase/app'
@@ -57,8 +53,6 @@ import {
 
 import type { Environment } from '@/config/environments'
 import { FIREBASE_CONFIG } from '@/config/firebase'
-import type { ApiService } from '../api-service'
-import { getApiService } from '../api-service'
 import { DataLayerError } from '../data-layer-error'
 import type {
   Subscriber,
@@ -148,9 +142,7 @@ function asDataLayerError(action: string, cause: unknown): DataLayerError {
   return new DataLayerError('unknown', `${action} failed: ${raw}`, cause)
 }
 
-export class FirebaseService implements ApiService {
-  readonly kind = 'firebase' as const
-
+export class FirebaseService {
   /** What this service was constructed for. Fixed for its life. */
   readonly environment: Environment
 
@@ -487,21 +479,4 @@ export class FirebaseService implements ApiService {
   serverTimestamp(): unknown {
     return serverTimestamp()
   }
-}
-
-/**
- * The active service, when it is a Firebase one.
- *
- * Throws if the session was set up against a different backend, which is the
- * correct answer rather than a cast that quietly lies.
- */
-export function getFirebaseService(): FirebaseService {
-  const service = getApiService()
-  if (!(service instanceof FirebaseService)) {
-    throw new DataLayerError(
-      'unknown',
-      `firebase: the active API service is "${service.kind}", not Firebase`,
-    )
-  }
-  return service
 }
