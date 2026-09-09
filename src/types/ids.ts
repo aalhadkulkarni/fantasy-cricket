@@ -62,17 +62,12 @@ type Brand<K extends string> = string & { readonly [brand]: K }
 // Identity
 // ---------------------------------------------------------------------------
 
-export type UserId = Brand<'UserId'>
-
 /**
- * Whatever Firebase auth gives us to identify a Google account.
- *
- * OPEN: still undecided whether this is the Google user id or the email
- * address — see the "Open at implementation" table in `06-data-layer.md`. It is
- * branded separately from `UserId` because it is emphatically not one: it is
- * the key of `googleIdentifierToUserIdMapping`, which resolves to a `UserId`.
+ * **The Firebase Auth UID.** Not an id of our own: there is no translation
+ * table, because the UID is stable, unique, and the only value a Phase 2
+ * security rule can check, since `auth.uid` resolves to exactly this.
  */
-export type GoogleIdentifier = Brand<'GoogleIdentifier'>
+export type UserId = Brand<'UserId'>
 
 // ---------------------------------------------------------------------------
 // Cricket

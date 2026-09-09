@@ -18,9 +18,15 @@
   their boundaries; whether a match falls inside one is decided by matchNumber.
   Comparing id strings works by accident here and fails under real push keys.
 
+  USERS ARE THE EXCEPTION. users/ is keyed by the Firebase Auth UID rather than
+  by a push key, because that is the only value a Phase 2 security rule can
+  verify — auth.uid resolves to exactly it — and because it removes the
+  duplicate-account problem instead of guarding against it: two tabs signing in
+  as one person address the same path, so there is nothing to claim.
+
   See 05-data-model.md for the reasoning, including why uniqueness on a natural
-  key such as a googleIdentifier or a join code needs a transaction rather than
-  a better key generator.
+  key such as a league join code still needs a transaction rather than a better
+  key generator, and what leaving Firebase Auth would cost.
   ===========================================================
 */
 const dataModel = {
@@ -148,11 +154,24 @@ const dataModel = {
   standardFantasyLeagueTeamChangesDeadlineOffset: 0,
 
   users: {
-    // systemUserId: systemUserObject
+    /*
+      KEYED BY THE FIREBASE AUTH UID, not by a push key. user001 below is
+      illustrative like every other id here; the real one looks like
+      Xk3nP2qR8sT1vW5yZ7aB4cD6eF0g.
+
+      There is no table translating an auth identity into an id of our own. The
+      UID is stable, unique, and the only value a Phase 2 security rule can
+      check, since auth.uid resolves to exactly it. Keying on it also removes
+      the duplicate-account problem rather than guarding against it: two tabs
+      signing in as the same person address the same path, so there is nothing
+      to claim and no race to lose. Only the display name can differ, and last
+      write wins.
+    */
+    // firebaseAuthUid: systemUserObject
     user001: {
       userId: 'user001',
       userName: 'Aalhad',
-      googleIdentifier: 'googleIdentifier001',
+      googleSubjectId: '104291837465102938475',
       googleEmailId: 'aalhad@gmail.com',
       systemUserRoles: { systemOwner: true, systemAdmin: true },
       /*
@@ -294,7 +313,7 @@ const dataModel = {
     user002: {
       userId: 'user002',
       userName: 'Yogesh',
-      googleIdentifier: 'googleIdentifier002',
+      googleSubjectId: '117384950271639485720',
       googleEmailId: 'yogesh@gmail.com',
       systemUserRoles: { systemAdmin: true },
       leagues: {
@@ -317,7 +336,7 @@ const dataModel = {
     user003: {
       userId: 'user003',
       userName: 'Ninad',
-      googleIdentifier: 'googleIdentifier003',
+      googleSubjectId: '102938475610293847561',
       googleEmailId: 'ninad@gmail.com',
       systemUserRoles: {},
       leagues: {
@@ -333,20 +352,6 @@ const dataModel = {
         },
       },
     },
-  },
-
-  /*
-        TBD2 RESOLVED (deferred to implementation):
-        "googleIdentifier" is deliberately non-committal — it may end up being
-        the google user id or the google email id. Which one is decided at
-        implementation time in Claude Code, based on how firebase google auth
-        actually behaves. Everything above and below refers to it by this name
-        so the model does not need to change either way.
-    */
-  googleIdentifierToUserIdMapping: {
-    // googleIdentifier: systemUserId
-    googleIdentifier001: 'user001',
-    googleIdentifier002: 'user002',
   },
 
   /*
