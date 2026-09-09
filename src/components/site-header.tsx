@@ -11,7 +11,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
-import { useAuth } from '@/auth/auth-context'
+import { isSystemAdmin, useAuth } from '@/auth/auth-context'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -60,9 +60,12 @@ const NAV_ITEMS: readonly NavItem[] = [
 ]
 
 /**
- * TODO: system admins only. There is no auth to condition on, so it is shown to
- * everyone for now. It stays in the list because 3.3 builds a page per header
- * item and 3.5 routes them — dropping it now would leave `/admin` orphaned.
+ * **System admins only.** Appended to the nav for them and absent for everyone
+ * else, in both the desktop bar and the mobile sheet.
+ *
+ * Hiding it is convenience. `/admin` is guarded on the route as well, because
+ * anyone can type a URL — and that page carries the button that seeds an
+ * environment.
  */
 const ADMIN_ITEM: NavItem = { label: 'Admin panel', to: ROUTES.admin }
 
@@ -93,6 +96,7 @@ export function SiteHeader() {
   const { state } = useAuth()
   const user = state.status === 'signedIn' ? state.user : undefined
   const photoUrl = state.status === 'signedIn' ? state.photoUrl : undefined
+  const navItems = isSystemAdmin(state) ? [...NAV_ITEMS, ADMIN_ITEM] : NAV_ITEMS
 
   /*
     Owned here rather than inside the dialog so the mobile sheet can close
@@ -104,7 +108,10 @@ export function SiteHeader() {
   return (
     <header className="border-b">
       <PageContainer className="flex h-[58px] items-center gap-6 sm:gap-[26px]">
-        <MobileNav onJoinLeague={() => setIsJoinOpen(true)} />
+        <MobileNav
+          navItems={navItems}
+          onJoinLeague={() => setIsJoinOpen(true)}
+        />
 
         {/*
           The brand is one of the two named exceptions to rule 1 — see
@@ -120,7 +127,7 @@ export function SiteHeader() {
 
         {/* Hidden below 640px, as in the reference. MobileNav carries these there. */}
         <nav className="ml-2 hidden gap-5 sm:flex">
-          {[...NAV_ITEMS, ADMIN_ITEM].map((item) => (
+          {navItems.map((item) => (
             <NavLink key={item.to} item={item} />
           ))}
           <JoinLeagueButton
@@ -335,7 +342,13 @@ function AvatarImage({
  * the page swaps underneath without the sheet noticing, so an uncontrolled
  * sheet would sit open over whichever page you just chose.
  */
-function MobileNav({ onJoinLeague }: { onJoinLeague: () => void }) {
+function MobileNav({
+  navItems,
+  onJoinLeague,
+}: {
+  navItems: readonly NavItem[]
+  onJoinLeague: () => void
+}) {
   const [isOpen, setIsOpen] = useState(false)
 
   return (
@@ -355,7 +368,7 @@ function MobileNav({ onJoinLeague }: { onJoinLeague: () => void }) {
         </SheetHeader>
 
         <nav className="flex flex-col gap-1 px-4">
-          {[...NAV_ITEMS, ADMIN_ITEM].map((item) => (
+          {navItems.map((item) => (
             <RouterNavLink
               key={item.to}
               to={item.to}

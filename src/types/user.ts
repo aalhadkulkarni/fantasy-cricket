@@ -118,8 +118,15 @@ export interface User {
 
   googleEmailId: string
 
-  /** Universal roles. Empty for almost everyone. */
-  systemUserRoles: Partial<Record<SystemRole, true>>
+  /**
+   * Universal roles. **Absent for almost everyone**, which is what "no roles"
+   * looks like — Firebase stores neither an empty object nor a null, so a
+   * record written with `{}` comes back without the key at all.
+   *
+   * Optional rather than required for exactly that reason: the compiler then
+   * forces every reader to handle the common case instead of the rare one.
+   */
+  systemUserRoles?: Partial<Record<SystemRole, true>>
 
   leagues: Record<LeagueId, LeagueIndexEntry>
   archivedLeagues?: Record<LeagueId, ArchivedLeagueIndexEntry>
