@@ -26,6 +26,7 @@ import type {
   LeagueId,
   MatchId,
   PlayerId,
+  TeamId,
   TournamentId,
   TransferProposalId,
   UserId,
@@ -377,10 +378,11 @@ export type TournamentStatus = 'upcoming' | 'active' | 'past'
 
 /** Every field optional. Omitting all of them returns everything. */
 export interface PlayerFilter {
-  teamId?: string
-  competitionId?: string
+  teamId?: TeamId
+  competitionId?: CompetitionId
   format?: Format
   playerRole?: PlayerRole
+  /** Fully retired players are hidden unless asked for. */
   includeRetired?: boolean
 }
 
@@ -421,8 +423,24 @@ export interface TeamConfig {
 export interface PlayerConfig {
   playerName: string
   playerShortName: string
+
+  /**
+   * Free text. **Overseas is derived from this being anything but India**,
+   * which is hardcoded and a known Phase 1 limitation — so a fixed country list
+   * would imply a precision the model does not have.
+   */
   country: string
+
   playerRole: PlayerRole
+
+  /**
+   * Which team, in which competition. Absent or empty means unassigned.
+   *
+   * **Part of creation rather than a second call**, because a player and their
+   * team memberships have to land in one atomic write — the reverse side lives
+   * on the team, and half of that pairing is worse than none of it.
+   */
+  currentTeams?: Partial<Record<CompetitionId, TeamId>>
 }
 
 /**

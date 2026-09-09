@@ -45,6 +45,12 @@
 import type { Environment } from '@/config/environments'
 import type {
   Competition,
+  CompetitionId,
+  Player,
+  PlayerConfig,
+  PlayerFilter,
+  PlayerId,
+  PlayerRoleRecord,
   Team,
   TeamConfig,
   TeamFilter,
@@ -87,6 +93,13 @@ export interface SignedInIdentity {
  */
 export type SignInOutcome = 'signedIn' | 'dismissed' | 'superseded' | 'blocked'
 
+/** What a bulk player add did, so the caller can say more than "saved". */
+export interface CreatePlayersResult {
+  created: number
+  /** Names already present. Re-adding a squad is safe rather than duplicating it. */
+  skipped: readonly string[]
+}
+
 /** What seeding an environment did, so a caller can say more than "done". */
 export interface SystemSetupResult {
   status: 'seeded' | 'alreadyDone'
@@ -122,6 +135,12 @@ export interface Api {
   /** The interface calls these Base Tournaments and never "competitions". */
   getCompetitions(): Promise<Competition[]>
 
+  /**
+   * The reference table. Display names live in the database rather than in the
+   * union, so anything rendering a role has to read them.
+   */
+  getPlayerRoles(): Promise<PlayerRoleRecord[]>
+
   getTeams(filter?: TeamFilter): Promise<Team[]>
 
   createTeam(team: TeamConfig): Promise<TeamId>
@@ -133,6 +152,45 @@ export interface Api {
    * team outright.
    */
   updateTeam(teamId: TeamId, changes: Partial<TeamConfig>): Promise<void>
+
+  /** Fully retired players are excluded unless the filter asks for them. */
+  getPlayers(filter?: PlayerFilter): Promise<Player[]>
+
+  /**
+   * Writes the players **and their team memberships in one update**, so the
+   * reverse side on each team lands with them or not at all.
+   *
+   * Names that already exist are skipped rather than duplicated, and reported.
+   */
+  createPlayers(players: readonly PlayerConfig[]): Promise<CreatePlayersResult>
+
+  updatePlayer(
+    playerId: PlayerId,
+    changes: Partial<PlayerConfig>,
+  ): Promise<void>
+
+  /**
+   * **Replaces** any team this player already had for that competition,
+   * clearing the old roster entry in the same update. There is one team per
+   * competition, so adding is always moving.
+   */
+  addPlayerToTeam(
+    playerId: PlayerId,
+    teamId: TeamId,
+    competitionId: CompetitionId,
+  ): Promise<void>
+
+  /** Also how "retired from this competition" is expressed. */
+  removePlayerFromTeam(
+    playerId: PlayerId,
+    competitionId: CompetitionId,
+  ): Promise<void>
+
+  /**
+   * Fully retired from cricket. The one case an empty team map cannot express,
+   * since that is indistinguishable from a new player not yet assigned.
+   */
+  setPlayerRetired(playerId: PlayerId, isRetired: boolean): Promise<void>
 
   // -- system --------------------------------------------------------------
 

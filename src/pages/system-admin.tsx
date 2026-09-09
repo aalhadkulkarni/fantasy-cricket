@@ -1,5 +1,6 @@
 import { useState } from 'react'
 
+import { PlayersPanel } from '@/components/admin/players-panel'
 import { TeamsPanel } from '@/components/admin/teams-panel'
 import { PageContainer } from '@/components/layout/page-container'
 import { Button } from '@/components/ui/button'
@@ -18,6 +19,15 @@ import {
  * below being safe to press twice is what makes that tolerable for now.
  */
 export function SystemAdmin() {
+  /*
+    The panels share a catalogue, so a write in one can invalidate what another
+    is showing: a team created above is a dropdown option below. Bumping this
+    reloads every panel, which is cheap at this size and cannot go stale the way
+    passing individual lists between them would.
+  */
+  const [catalogueVersion, setCatalogueVersion] = useState(0)
+  const catalogueChanged = () => setCatalogueVersion((n) => n + 1)
+
   return (
     <main className="py-10 sm:py-14">
       <PageContainer>
@@ -29,18 +39,25 @@ export function SystemAdmin() {
           Cricket reference data, tournaments and scoring.
         </p>
 
-        <SetUpBasicSystem />
+        <SetUpBasicSystem onSetUp={catalogueChanged} />
 
-        <TeamsPanel />
+        <TeamsPanel
+          catalogueVersion={catalogueVersion}
+          onChanged={catalogueChanged}
+        />
+
+        <PlayersPanel
+          catalogueVersion={catalogueVersion}
+          onChanged={catalogueChanged}
+        />
 
         <div className="mt-4 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
           <p className="font-mono text-xs tracking-wide text-subtle-foreground uppercase">
             Still to come
           </p>
           <p className="mt-3 text-sm">
-            Players, tournaments and their fixtures, rounds, leagues, standard
-            points, and adding another system admin. See
-            docs/08-pages/system-admin.md.
+            Tournaments and their fixtures, rounds, leagues, standard points,
+            and adding another system admin. See docs/08-pages/system-admin.md.
           </p>
         </div>
       </PageContainer>
@@ -64,13 +81,16 @@ type State =
  * Safe to press twice: the routine reads its own marker first and does nothing
  * if the environment is already set up.
  */
-function SetUpBasicSystem() {
+function SetUpBasicSystem({ onSetUp }: { onSetUp: () => void }) {
   const [state, setState] = useState<State>({ status: 'idle' })
 
   async function run() {
     setState({ status: 'running' })
     try {
       setState({ status: 'done', result: await setUpBasicSystem() })
+      // It writes the competitions and the reference tables, which every panel
+      // below reads.
+      onSetUp()
     } catch (error) {
       setState({
         status: 'failed',
