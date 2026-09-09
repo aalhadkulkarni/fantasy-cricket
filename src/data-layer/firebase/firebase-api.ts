@@ -24,6 +24,7 @@
 
 import type {
   Api,
+  CreatePlayersResult,
   SignInOutcome,
   SignedInIdentity,
   SystemSetupResult,
@@ -32,6 +33,11 @@ import type { Environment } from '@/config/environments'
 import type {
   Competition,
   CompetitionId,
+  Player,
+  PlayerConfig,
+  PlayerFilter,
+  PlayerId,
+  PlayerRoleRecord,
   SystemSetup,
   Team,
   TeamConfig,
@@ -161,6 +167,13 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       return Object.values(all ?? {})
     },
 
+    async getPlayerRoles(): Promise<PlayerRoleRecord[]> {
+      const all = await service.read<Record<string, PlayerRoleRecord>>(
+        paths.playerRoles(),
+      )
+      return Object.values(all ?? {})
+    },
+
     /**
      * **Filtered after the read, not by a query.** The catalogue is a few dozen
      * rows and reads here are subtree-shaped anyway, so a query would buy
@@ -256,6 +269,189 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
 
       if (Object.keys(update).length === 0) return
       await service.update(update)
+    },
+
+    // -- players -------------------------------------------------------------
+
+    /**
+     * **Fully retired players are hidden by default.** They drop out of the
+     * player list entirely, and `system-admin.md` defers a Retired Players view
+     * to Phase 2 — retirement is rare enough not to come up here.
+     */
+    async getPlayers(filter?: PlayerFilter): Promise<Player[]> {
+      const all = await service.read<Record<string, Player>>(paths.players())
+      let players = Object.values(all ?? {})
+
+      if (filter?.includeRetired !== true) {
+        players = players.filter((p) => p.isRetired !== true)
+      }
+      if (filter?.playerRole !== undefined) {
+        players = players.filter((p) => p.playerRole === filter.playerRole)
+      }
+      if (filter?.competitionId !== undefined) {
+        const cid = filter.competitionId
+        players = players.filter((p) => p.currentTeams?.[cid] !== undefined)
+      }
+      if (filter?.teamId !== undefined) {
+        const teamId = filter.teamId
+        players = players.filter((p) =>
+          Object.values(p.currentTeams ?? {}).includes(teamId),
+        )
+      }
+
+      // TODO: format. Needs the competitions behind it, so a second read.
+
+      return players.sort((a, b) => a.playerName.localeCompare(b.playerName))
+    },
+
+    /**
+     * **One atomic update for the whole batch**, records and roster entries
+     * together. Two hundred players is roughly twelve hundred paths, which a
+     * single multi-path update handles comfortably — and all-or-nothing is what
+     * stops a failed save leaving half a squad to reconcile by hand.
+     *
+     * **Existing names are skipped, not duplicated.** Matched on name, which is
+     * the only thing a person can be expected to keep stable, so re-adding a
+     * squad is safe.
+     */
+    async createPlayers(
+      players: readonly PlayerConfig[],
+    ): Promise<CreatePlayersResult> {
+      const existing = await service.read<Record<string, Player>>(
+        paths.players(),
+      )
+      const takenNames = new Set(
+        Object.values(existing ?? {}).map((p) => p.playerName.toLowerCase()),
+      )
+
+      const update: Record<string, unknown> = {}
+      const skipped: string[] = []
+      let created = 0
+
+      for (const config of players) {
+        const playerName = config.playerName.trim()
+        if (takenNames.has(playerName.toLowerCase())) {
+          skipped.push(playerName)
+          continue
+        }
+        // Guards duplicates inside the batch itself, not just against the
+        // database — two identical rows would otherwise both be written.
+        takenNames.add(playerName.toLowerCase())
+
+        const playerId = service.generateKey() as PlayerId
+        const currentTeams = config.currentTeams ?? {}
+
+        update[paths.players(playerId)] = {
+          playerId,
+          playerName,
+          playerShortName: config.playerShortName.trim(),
+          country: config.country.trim(),
+          playerRole: config.playerRole,
+          isRetired: false,
+          ...(Object.keys(currentTeams).length > 0 ? { currentTeams } : {}),
+        }
+
+        // The other side of each membership, written in the same call.
+        for (const [competitionId, teamId] of Object.entries(currentTeams)) {
+          if (teamId === undefined) continue
+          update[
+            service.path('teams', teamId, 'playerIds', competitionId, playerId)
+          ] = true
+        }
+
+        created += 1
+      }
+
+      if (Object.keys(update).length > 0) await service.update(update)
+      return { created, skipped }
+    },
+
+    /**
+     * Fields only. Team membership goes through `addPlayerToTeam` and
+     * `removePlayerFromTeam`, because each of those has to touch the team side
+     * too and doing it here would hide that.
+     */
+    async updatePlayer(
+      playerId: PlayerId,
+      changes: Partial<PlayerConfig>,
+    ): Promise<void> {
+      const update: Record<string, unknown> = {}
+      const at = (field: string) => service.path('players', playerId, field)
+
+      if (changes.playerName !== undefined) {
+        update[at('playerName')] = changes.playerName.trim()
+      }
+      if (changes.playerShortName !== undefined) {
+        update[at('playerShortName')] = changes.playerShortName.trim()
+      }
+      if (changes.country !== undefined) {
+        update[at('country')] = changes.country.trim()
+      }
+      if (changes.playerRole !== undefined) {
+        update[at('playerRole')] = changes.playerRole
+      }
+
+      if (Object.keys(update).length === 0) return
+      await service.update(update)
+    },
+
+    /**
+     * **Adding is moving.** There is one team per competition, so setting a new
+     * one necessarily unsets the old — and the old team's roster entry has to go
+     * with it, in the same update, or the two sides disagree and nothing
+     * detects it.
+     */
+    async addPlayerToTeam(
+      playerId: PlayerId,
+      teamId: TeamId,
+      competitionId: CompetitionId,
+    ): Promise<void> {
+      const previous = await service.read<TeamId>(
+        service.path('players', playerId, 'currentTeams', competitionId),
+      )
+      if (previous === teamId) return
+
+      const update: Record<string, unknown> = {
+        [service.path('players', playerId, 'currentTeams', competitionId)]:
+          teamId,
+        [service.path('teams', teamId, 'playerIds', competitionId, playerId)]:
+          true,
+      }
+
+      if (previous !== undefined) {
+        update[
+          service.path('teams', previous, 'playerIds', competitionId, playerId)
+        ] = null
+      }
+
+      await service.update(update)
+    },
+
+    async removePlayerFromTeam(
+      playerId: PlayerId,
+      competitionId: CompetitionId,
+    ): Promise<void> {
+      const previous = await service.read<TeamId>(
+        service.path('players', playerId, 'currentTeams', competitionId),
+      )
+      if (previous === undefined) return
+
+      await service.update({
+        [service.path('players', playerId, 'currentTeams', competitionId)]:
+          null,
+        [service.path('teams', previous, 'playerIds', competitionId, playerId)]:
+          null,
+      })
+    },
+
+    async setPlayerRetired(
+      playerId: PlayerId,
+      isRetired: boolean,
+    ): Promise<void> {
+      await service.write(
+        service.path('players', playerId, 'isRetired'),
+        isRetired,
+      )
     },
 
     // -----------------------------------------------------------------------

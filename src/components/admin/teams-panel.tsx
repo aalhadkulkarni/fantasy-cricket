@@ -12,8 +12,14 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { createTeam, getCompetitions, getTeams, updateTeam } from '@/data-layer'
-import type { Competition, CompetitionId, Team } from '@/types'
+import {
+  createTeam,
+  getCompetitions,
+  getPlayers,
+  getTeams,
+  updateTeam,
+} from '@/data-layer'
+import type { Competition, CompetitionId, Player, Team } from '@/types'
 
 /**
  * Teams, on the admin panel.
@@ -23,12 +29,32 @@ import type { Competition, CompetitionId, Team } from '@/types'
  * That is why the edit dialog warns before removing one: the cascade also drops
  * the roster and every affected player's record of playing for the team.
  *
+ * **Each team's squad is shown per base tournament**, sized on the row and
+ * named in the edit dialog. It is read from the team's own roster rather than
+ * by counting the players who name this team, which is the point: the two are
+ * written together, and this is the only place a disagreement between them
+ * would be visible.
+ *
  * The interface says **Base Tournament** where the model says competition, and
  * the word "competition" never appears in anything a user reads.
  */
-export function TeamsPanel() {
+export function TeamsPanel({
+  catalogueVersion,
+  onChanged,
+}: {
+  /** Bumped by the page when another panel writes something this one reads. */
+  catalogueVersion: number
+  /** Called after a write here, so the panels below reload their dropdowns. */
+  onChanged: () => void
+}) {
   const [teams, setTeams] = useState<Team[] | undefined>(undefined)
   const [competitions, setCompetitions] = useState<Competition[]>([])
+  /*
+    Keyed by id, and **including the retired**. Retiring only flips a flag: it
+    leaves the player in every roster, so resolving a roster with the default
+    list would leave holes exactly where a retired player sits.
+  */
+  const [playersById, setPlayersById] = useState<Record<string, Player>>({})
   const [error, setError] = useState<string | undefined>(undefined)
   const [editing, setEditing] = useState<Team | 'new' | undefined>(undefined)
 
@@ -47,13 +73,18 @@ export function TeamsPanel() {
 
     void (async () => {
       try {
-        const [loadedTeams, loadedCompetitions] = await Promise.all([
-          getTeams(),
-          getCompetitions(),
-        ])
+        const [loadedTeams, loadedCompetitions, loadedPlayers] =
+          await Promise.all([
+            getTeams(),
+            getCompetitions(),
+            getPlayers({ includeRetired: true }),
+          ])
         if (cancelled) return
         setTeams(loadedTeams)
         setCompetitions(loadedCompetitions)
+        setPlayersById(
+          Object.fromEntries(loadedPlayers.map((p) => [p.playerId, p])),
+        )
         setError(undefined)
       } catch (e) {
         if (cancelled) return
@@ -67,7 +98,7 @@ export function TeamsPanel() {
     return () => {
       cancelled = true
     }
-  }, [reloadToken])
+  }, [reloadToken, catalogueVersion])
 
   return (
     <section className="mt-4 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
@@ -92,10 +123,13 @@ export function TeamsPanel() {
         <TeamDialog
           team={editing === 'new' ? undefined : editing}
           competitions={competitions}
+          playersById={playersById}
           onClose={() => setEditing(undefined)}
           onSaved={() => {
             setEditing(undefined)
             reload()
+            // A new team is a new option in the players table's dropdowns.
+            onChanged()
           }}
         />
       )}
@@ -172,17 +206,73 @@ function Body({
   )
 }
 
+/**
+ * Each base tournament with the size of this team's squad in it.
+ *
+ * **The count comes from the team's own roster**, not from counting players who
+ * name this team. That is the point of showing it: the two are written together
+ * and a disagreement between them is the failure this screen can catch by eye.
+ */
 function competitionNames(team: Team, competitions: Competition[]): string {
   const ids = Object.keys(team.competitionIds ?? {})
   if (ids.length === 0) return 'No base tournaments'
 
   return ids
-    .map(
-      (id) =>
-        competitions.find((c) => c.competitionId === id)?.competitionName ?? id,
-    )
+    .map((id) => {
+      const name =
+        competitions.find((c) => c.competitionId === id)?.competitionName ?? id
+      return `${name} (${rosterIds(team, id).length})`
+    })
     .sort()
     .join(' · ')
+}
+
+function rosterIds(team: Team, competitionId: string): string[] {
+  const roster = team.playerIds?.[competitionId as CompetitionId] ?? {}
+  return Object.keys(roster)
+}
+
+/**
+ * This team's squad in one base tournament, read from the team's own roster.
+ *
+ * **Both sides of a membership are written together**, so this is the half you
+ * cannot see anywhere else — the players panel shows only the player's side. A
+ * name here that does not list this team on its own record, or a player listing
+ * this team and missing here, is the failure the atomic writes exist to
+ * prevent, and this is where it would show.
+ *
+ * Retired players stay in a roster, since retiring only sets a flag. They are
+ * marked rather than hidden, because a squad that silently shrank would read as
+ * a bug in the write rather than as a retirement.
+ */
+function Roster({
+  team,
+  competitionId,
+  playersById,
+}: {
+  team: Team
+  competitionId: CompetitionId
+  playersById: Record<string, Player>
+}) {
+  const ids = rosterIds(team, competitionId)
+  if (ids.length === 0) return null
+
+  const names = ids
+    .map((playerId) => {
+      const player = playersById[playerId]
+      if (player === undefined) return `unknown (${playerId})`
+      return player.isRetired
+        ? `${player.playerShortName} (retired)`
+        : player.playerShortName
+    })
+    .sort()
+
+  return (
+    /* Indented to clear the checkbox, so it reads as belonging to the row. */
+    <p className="mt-1 pl-6.5 text-xs text-muted-foreground">
+      {names.length} · {names.join(', ')}
+    </p>
+  )
 }
 
 /**
@@ -192,11 +282,13 @@ function competitionNames(team: Team, competitions: Competition[]): string {
 function TeamDialog({
   team,
   competitions,
+  playersById,
   onClose,
   onSaved,
 }: {
   team: Team | undefined
   competitions: Competition[]
+  playersById: Record<string, Player>
   onClose: () => void
   onSaved: () => void
 }) {
@@ -233,7 +325,12 @@ function TeamDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[460px]">
+      {/*
+        Capped and scrollable: a team in six base tournaments now lists six
+        squads, which outgrows a phone. The dialog is centred, so one taller
+        than the viewport would push its own buttons off screen.
+      */}
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[460px]">
         <DialogHeader>
           <DialogTitle>
             {team === undefined ? 'Create team' : 'Edit team'}
@@ -277,21 +374,29 @@ function TeamDialog({
               </p>
             ) : (
               competitions.map((competition) => (
-                <label
-                  key={competition.competitionId}
-                  className="flex items-center gap-2.5 text-sm"
-                >
-                  <Checkbox
-                    checked={selected.has(competition.competitionId)}
-                    onCheckedChange={(checked) => {
-                      const next = new Set(selected)
-                      if (checked === true) next.add(competition.competitionId)
-                      else next.delete(competition.competitionId)
-                      setSelected(next)
-                    }}
-                  />
-                  {competition.competitionName}
-                </label>
+                <div key={competition.competitionId}>
+                  <label className="flex items-center gap-2.5 text-sm">
+                    <Checkbox
+                      checked={selected.has(competition.competitionId)}
+                      onCheckedChange={(checked) => {
+                        const next = new Set(selected)
+                        if (checked === true)
+                          next.add(competition.competitionId)
+                        else next.delete(competition.competitionId)
+                        setSelected(next)
+                      }}
+                    />
+                    {competition.competitionName}
+                  </label>
+
+                  {team !== undefined && (
+                    <Roster
+                      team={team}
+                      competitionId={competition.competitionId}
+                      playersById={playersById}
+                    />
+                  )}
+                </div>
               ))
             )}
           </fieldset>
