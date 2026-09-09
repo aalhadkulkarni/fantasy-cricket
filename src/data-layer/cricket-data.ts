@@ -206,9 +206,14 @@ export function getMatch(matchId: MatchId): Promise<Match> {
   return notImplemented('getMatch', { matchId })
 }
 
-/** The reference table. Display names live in the database, not in the union. */
+/**
+ * The reference table. Display names live in the database, not in the union.
+ *
+ * A tournament's format is its competition's, so anything showing one resolves
+ * `competitionId` to a competition and its `formatId` through here.
+ */
 export function getFormats(): Promise<FormatRecord[]> {
-  return notImplemented('getFormats', {})
+  return getApi().getFormats()
 }
 
 /** Likewise. Anything rendering a player's role needs these for its names. */

@@ -46,6 +46,7 @@ import type { Environment } from '@/config/environments'
 import type {
   Competition,
   CompetitionId,
+  FormatRecord,
   MatchConfig,
   Player,
   PlayerConfig,
@@ -163,6 +164,9 @@ export interface Api {
    * union, so anything rendering a role has to read them.
    */
   getPlayerRoles(): Promise<PlayerRoleRecord[]>
+
+  /** Likewise. A tournament's format is its competition's, resolved through here. */
+  getFormats(): Promise<FormatRecord[]>
 
   getTeams(filter?: TeamFilter): Promise<Team[]>
 
