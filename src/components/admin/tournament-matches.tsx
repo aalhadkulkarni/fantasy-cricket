@@ -140,6 +140,16 @@ export function TournamentMatches({
         tournament's start and end come from these.
       </p>
 
+      {/*
+        The field is a `datetime-local`, which carries no offset and silently
+        means whatever zone the browser is in. Naming it is the difference
+        between choosing a time and guessing one.
+      */}
+      <p className="mt-1 text-sm text-subtle-foreground">
+        Times are in your own timezone, {timeZoneName()}. Each field shows the
+        offset that applies on that date.
+      </p>
+
       {participating.length === 0 && (
         <p className="mt-3 text-sm text-subtle-foreground">
           No teams are in this tournament yet, so there is nobody to pick. Set
@@ -178,7 +188,12 @@ export function TournamentMatches({
                   htmlFor={`${row.matchId}-start`}
                   className="text-xs font-normal text-muted-foreground"
                 >
-                  Start
+                  {/*
+                    Per field, and from that match's own date, because the
+                    offset moves across a daylight-saving boundary. A series
+                    spanning one would otherwise be labelled wrongly at one end.
+                  */}
+                  Start ({offsetOn(row.startsAt)})
                 </Label>
                 <Input
                   id={`${row.matchId}-start`}
@@ -375,6 +390,31 @@ function toConfig(row: MatchRow): MatchConfig {
     startTimestamp: fromLocalInput(row.startsAt),
     venue: row.venue.trim() === '' ? undefined : row.venue.trim(),
   }
+}
+
+/** The browser's own zone, as its name — "Asia/Kolkata", "Australia/Perth". */
+function timeZoneName(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone
+}
+
+/**
+ * The offset in force on the date being edited, as "GMT+5:30".
+ *
+ * **Taken from that date rather than from today**, because an offset moves
+ * across a daylight-saving boundary. A series running through one would be
+ * labelled wrongly at one end if every field showed the current offset.
+ */
+function offsetOn(localInput: string): string {
+  const when = localInput === '' ? new Date() : new Date(localInput)
+  const date = Number.isNaN(when.getTime()) ? new Date() : when
+
+  const part = new Intl.DateTimeFormat(undefined, {
+    timeZoneName: 'shortOffset',
+  })
+    .formatToParts(date)
+    .find((p) => p.type === 'timeZoneName')
+
+  return part?.value ?? 'local time'
 }
 
 /**

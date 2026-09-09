@@ -18,7 +18,9 @@ import type {
   TournamentId,
   TournamentRoundConfig,
 } from '@/types'
-import { getApi } from './api'
+import { getApi, type OfficialLeagues } from './api'
+
+export type { OfficialLeagues }
 import { notImplemented } from './not-implemented'
 
 /**
@@ -133,9 +135,20 @@ export function setRounds(
  *
  * Its absence hides the tournament from the list entirely and stops a league
  * being created against it.
+ *
+ * **Any official leagues asked for are created in the same write.** Publishing
+ * and then failing to open the league would leave a tournament everyone can see
+ * with nothing in it to join.
+ *
+ * The publisher owns and administers those leagues but does not play them.
+ * Being a manager means having a fantasy team name, and that is chosen when
+ * joining — so whoever publishes joins the same way everyone else does.
  */
-export function publishTournament(tournamentId: TournamentId): Promise<void> {
-  return notImplemented('publishTournament', { tournamentId })
+export function publishTournament(
+  tournamentId: TournamentId,
+  officialLeagues?: OfficialLeagues,
+): Promise<void> {
+  return getApi().publishTournament(tournamentId, officialLeagues)
 }
 
 /**

@@ -25,6 +25,7 @@
 import type {
   Api,
   CreatePlayersResult,
+  OfficialLeagues,
   SignInOutcome,
   SignedInIdentity,
   SystemSetupResult,
@@ -33,6 +34,10 @@ import type { Environment } from '@/config/environments'
 import type {
   Competition,
   CompetitionId,
+  GameWeekId,
+  LeagueId,
+  LeagueJoinCode,
+  LineupRules,
   Match,
   MatchConfig,
   MatchId,
@@ -42,6 +47,7 @@ import type {
   PlayerId,
   PlayerRoleRecord,
   Round,
+  RoundConfig,
   RoundId,
   SystemSetup,
   Team,
@@ -147,6 +153,173 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
     }
 
     return best
+  }
+
+  /** The documented default for a regular league, and its ceiling. */
+  const OFFICIAL_LEAGUE_SLOTS = 200
+
+  /**
+   * Six characters, from an alphabet with no `0`/`O` or `1`/`I`/`L`, because
+   * people read these aloud and type them from memory.
+   */
+  function joinCode(): string {
+    const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+    let code = ''
+    for (let i = 0; i < 6; i += 1) {
+      code += alphabet[Math.floor(Math.random() * alphabet.length)]
+    }
+    return code
+  }
+
+  /**
+   * **Claimed transactionally**, because a code has to be unique across every
+   * league and only a transaction settles a race for one. Reading first and
+   * then writing lets two creations both see nothing and both write.
+   */
+  async function claimJoinCode(leagueId: LeagueId): Promise<LeagueJoinCode> {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const code = joinCode() as LeagueJoinCode
+      const won = await service.claim(
+        paths.leagueCodeToLeagueMapping(code),
+        leagueId,
+      )
+      if (won) return code
+    }
+    throw new DataLayerError(
+      'unknown',
+      'Could not find an unused join code. Try again.',
+    )
+  }
+
+  /**
+   * One gameweek per round.
+   *
+   * The impact sub is a change *during* a gameweek, so it is forced off where a
+   * round holds a single match and there is no during.
+   */
+  function oneGameWeekPerRound(
+    tournament: Tournament,
+  ): Record<string, RoundConfig> {
+    const matches = tournament.matches ?? {}
+    const numberOf = (matchId: MatchId) => matches[matchId]?.matchNumber ?? 0
+
+    const rounds = Object.values(tournament.rounds ?? {}).sort(
+      (a, b) => numberOf(a.firstMatchId) - numberOf(b.firstMatchId),
+    )
+
+    const configs: Record<string, RoundConfig> = {}
+
+    rounds.forEach((round, index) => {
+      const gameWeekId = service.generateKey() as GameWeekId
+      const span =
+        numberOf(round.lastMatchId) - numberOf(round.firstMatchId) + 1
+
+      configs[round.roundId] = {
+        // Absent allowances mean unlimited, which is what an open league wants.
+        isImpactSubAllowed: span > 1,
+        gameWeeks: {
+          [gameWeekId]: {
+            gameWeekId,
+            gameWeekName: round.roundName,
+            gameWeekNumber: index + 1,
+            startMatchId: round.firstMatchId,
+            endMatchId: round.lastMatchId,
+          },
+        },
+      }
+    })
+
+    return configs
+  }
+
+  /**
+   * One official league, as the paths that create it.
+   *
+   * **Four paths, and they only make sense together**: the league, the
+   * tournament's index of its leagues, and the owner's own index. An index is a
+   * view, never a source of truth, so one written without the others is worse
+   * than none.
+   *
+   * The owner is **not a manager**. A manager has a fantasy team name, chosen
+   * when joining, so whoever publishes joins their own league the same way
+   * everyone else does.
+   */
+  async function officialLeague(
+    inputs: {
+      tournament: Tournament
+      ownerId: UserId
+      ownerName: string
+      rules: LineupRules
+      offset: number
+      joinDeadline: number
+    },
+    gameWeeks: boolean,
+  ): Promise<Record<string, unknown>> {
+    const { tournament, ownerId, ownerName, rules, offset, joinDeadline } =
+      inputs
+
+    const leagueId = service.generateKey() as LeagueId
+    const leagueJoinCode = await claimJoinCode(leagueId)
+
+    const leagueName = `${tournament.tournamentName} — Official ${
+      gameWeeks ? 'Gameweek' : 'Match'
+    } League`
+
+    const roles = { leagueOwner: true, leagueAdmin: true } as const
+
+    const base = {
+      leagueId,
+      leagueName,
+      leagueOwner: ownerId,
+      leagueJoinCode,
+      tournamentId: tournament.tournamentId,
+      leagueEntry: 'Open',
+      maxSlots: OFFICIAL_LEAGUE_SLOTS,
+      fantasyLineupRules: rules,
+      leagueMembers: { [ownerId]: { leagueRoles: roles } },
+      fantasyLeagueTeamChangesDeadlineOffset: offset,
+      fantasyLeagueJoinDeadline: joinDeadline,
+      isCustomScoringSystem: false,
+      isAuctionEnabled: false,
+    }
+
+    return {
+      [paths.leagues(leagueId)]: gameWeeks
+        ? {
+            ...base,
+            isGameWeeksEnabled: true,
+            roundConfigs: oneGameWeekPerRound(tournament),
+          }
+        : // No change allowances at all. Absent is unlimited, which is what an
+          // open league everybody can walk into should be.
+          { ...base, isGameWeeksEnabled: false },
+
+      // The tournament page's list of its leagues. Exactly the fields that row
+      // renders, and no more, or it drifts into a second copy of the league.
+      [service.path(
+        'tournaments',
+        tournament.tournamentId,
+        'leagues',
+        leagueId,
+      )]: {
+        leagueName,
+        isAuctionEnabled: false,
+        leagueEntry: 'Open',
+        maxSlots: OFFICIAL_LEAGUE_SLOTS,
+      },
+
+      // My Leagues, for the owner.
+      [service.path('users', ownerId, 'leagues', leagueId)]: {
+        leagueName,
+        tournamentId: tournament.tournamentId,
+        tournamentName: tournament.tournamentName,
+        isAuctionEnabled: false,
+        ownerName,
+        maxSlots: OFFICIAL_LEAGUE_SLOTS,
+        membershipStatus: 'Accepted',
+        myRoles: roles,
+      },
+    }
   }
 
   const api: FirebaseApi = {
@@ -1005,6 +1178,106 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         if (!kept.has(roundId)) {
           update[paths.tournamentRounds(tournamentId, roundId as RoundId)] =
             null
+        }
+      }
+
+      await service.update(update)
+    },
+
+    /**
+     * **Publishing and opening the official leagues are one write.** Publishing
+     * first and then failing to create the league would leave a tournament
+     * everyone can see with nothing in it to join, and no record that anything
+     * was meant to be there.
+     *
+     * The join code is the exception, claimed before the update. A code has to
+     * be unique across leagues, and only a transaction can settle a race for
+     * one — a read then a write lets two creations both see nothing and both
+     * write. An unused code left behind by a failed update costs nothing.
+     */
+    async publishTournament(
+      tournamentId: TournamentId,
+      officialLeagues?: OfficialLeagues,
+    ): Promise<void> {
+      const session = requireSession()
+
+      const tournament = await service.read<Tournament>(
+        paths.tournaments(tournamentId),
+      )
+      if (tournament === undefined) {
+        throw new DataLayerError('unknown', 'No such tournament.')
+      }
+
+      const matches = Object.values(tournament.matches ?? {}).sort(
+        (a, b) => a.matchNumber - b.matchNumber,
+      )
+      const dated = matches.filter(
+        (match) => match.startTimestamp !== undefined,
+      )
+
+      // The documented gate, enforced here rather than only in the form.
+      if (dated.length === 0) {
+        throw new DataLayerError(
+          'unknown',
+          'A tournament cannot be published until at least its first match has a start time.',
+        )
+      }
+
+      const wantsLeague =
+        officialLeagues?.matchBased === true ||
+        officialLeagues?.gameWeekBased === true
+
+      if (
+        wantsLeague &&
+        Object.keys(tournament.participatingPlayers ?? {}).length === 0
+      ) {
+        throw new DataLayerError(
+          'unknown',
+          'This tournament has no players, so a league against it would have nobody to pick. Set its teams and players first.',
+        )
+      }
+
+      const update: Record<string, unknown> = {}
+
+      // Absent means not published, so this is only written when it is missing.
+      // Re-publishing must not move the timestamp.
+      if (tournament.publishedAt === undefined) {
+        update[service.path('tournaments', tournamentId, 'publishedAt')] =
+          Date.now()
+      }
+
+      if (wantsLeague) {
+        const [owner, lineupRules, deadlineOffset] = await Promise.all([
+          service.read<User>(paths.users(session.uid as UserId)),
+          service.read<LineupRules>(paths.standardFantasyLineupRules()),
+          service.read<number>(
+            paths.standardFantasyLeagueTeamChangesDeadlineOffset(),
+          ),
+        ])
+
+        const offset = deadlineOffset ?? STANDARD_TEAM_CHANGES_DEADLINE_OFFSET
+        const rules = lineupRules ?? STANDARD_FANTASY_LINEUP_RULES
+
+        // No later than the first match's deadline, which is its start minus
+        // the offset teams lock by.
+        const firstStart = Math.min(
+          ...dated.map((match) => match.startTimestamp ?? Number.MAX_VALUE),
+        )
+
+        const common = {
+          tournament,
+          ownerId: session.uid as UserId,
+          ownerName: owner?.userName ?? 'System admin',
+          rules,
+          offset,
+          joinDeadline: firstStart - offset,
+        }
+
+        if (officialLeagues?.matchBased === true) {
+          Object.assign(update, await officialLeague(common, false))
+        }
+        if (officialLeagues?.gameWeekBased === true) {
+          Object.assign(update, await officialLeague(common, true))
         }
       }
 
