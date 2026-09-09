@@ -34,6 +34,7 @@ import type { Environment } from '@/config/environments'
 import type {
   Competition,
   CompetitionId,
+  FormatRecord,
   GameWeekId,
   LeagueId,
   LeagueJoinCode,
@@ -402,6 +403,13 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
     async getPlayerRoles(): Promise<PlayerRoleRecord[]> {
       const all = await service.read<Record<string, PlayerRoleRecord>>(
         paths.playerRoles(),
+      )
+      return Object.values(all ?? {})
+    },
+
+    async getFormats(): Promise<FormatRecord[]> {
+      const all = await service.read<Record<string, FormatRecord>>(
+        paths.formats(),
       )
       return Object.values(all ?? {})
     },
