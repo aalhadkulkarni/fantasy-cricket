@@ -65,6 +65,10 @@ export type * from './points'
 export type * from './transfer'
 export type * from './live-auction'
 
+// Shapes no database node holds, invented so the data layer's signatures could
+// be written. Collected in one file so the guesses stay visible.
+export type * from './views'
+
 // The reference tables also export runtime values — the key arrays, which
 // double as validators for anything arriving from the database.
 export {
