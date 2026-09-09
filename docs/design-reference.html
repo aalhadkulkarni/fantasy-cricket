@@ -284,9 +284,11 @@
         background: var(--settled);
       }
 
+      /* RULE 1 exception: an outstanding action is closer to a live state
+         than to decoration. The other exception is the brand mark. */
       .count {
-        background: var(--secondary);
-        color: var(--foreground);
+        background: var(--live);
+        color: var(--live-foreground);
         font-family: var(--font-mono);
         font-weight: 700;
         min-width: 18px;
@@ -445,7 +447,8 @@
         align-items: center;
         gap: 26px;
       }
-      /* RULE 1 — the brand is not a live state. Plain. */
+      /* RULE 1 exception: the brand mark carries --live on its second word.
+         One of only two exceptions; see docs/07-design-system.md. */
       .brand {
         font-weight: 800;
         font-size: 15px;
@@ -900,8 +903,9 @@
           <strong
             >Card fields match <code>docs/08-pages/my-leagues.md</code></strong
           >: name, owner, size, type, tournament, status.<br /><br />
-          Note what is <em>not</em> blue &mdash; the brand, the primary button,
-          the active tab, the actions badge.
+          Note what is <em>not</em> blue &mdash; the primary button, the active
+          tab, the league-type tags. The brand mark and the actions count are
+          the two allowed exceptions.
           <strong
             >The only blue on the page is the one league that is live.</strong
           >
@@ -909,7 +913,9 @@
         <div class="stage">
           <div class="hdr">
             <div class="hdr-in">
-              <div class="brand">TwelfthMan</div>
+              <div class="brand">
+                Fantasy <span style="color: var(--live-text)">League</span>
+              </div>
               <nav class="nav">
                 <a href="#" class="on">My leagues</a><a href="#">Tournaments</a
                 ><a href="#">Join</a><a href="#">Create</a>

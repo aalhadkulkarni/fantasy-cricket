@@ -1,12 +1,16 @@
+import { SiteHeader } from './components/site-header'
 import { MyLeagues } from './pages/my-leagues'
 
 /**
- * Renders home directly for now. **Routing arrives in 3.5**, at which point this
- * becomes the router and every page under `src/pages/` gets a real route.
+ * The app shell: the site header above whichever page is showing.
+ *
+ * **Routing arrives in 3.5**, at which point the page below the header comes
+ * from a route rather than being hard-coded.
  */
 function App() {
   return (
     <div className="min-h-svh bg-background text-foreground">
+      <SiteHeader />
       <MyLeagues />
     </div>
   )
