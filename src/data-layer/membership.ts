@@ -20,6 +20,7 @@ import type {
   LeagueRole,
   UserId,
 } from '@/types'
+import { getApi } from './api'
 import { notImplemented } from './not-implemented'
 import type {
   Subscriber,
@@ -42,7 +43,7 @@ export function joinLeague(
   leagueId: LeagueId,
   fantasyTeamName: string,
 ): Promise<void> {
-  return notImplemented('joinLeague', { leagueId, fantasyTeamName })
+  return getApi().joinLeague(leagueId, fantasyTeamName)
 }
 
 /**

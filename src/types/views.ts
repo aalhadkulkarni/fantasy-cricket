@@ -73,27 +73,34 @@ export interface LeagueCard extends LeagueIndexEntry {
 }
 
 /**
- * A league as it appears on a tournament page.
+ * A league someone might join, on a tournament page or resolved from a code.
  *
- * **Not the My Leagues card.** There you are looking at your own leagues, so
- * the card carries your roles, your status and where to go next. Here you may
- * have no relationship with the league at all, so it carries what someone
- * deciding whether to join needs instead.
+ * **Not the My Leagues card.** There you are looking at your own leagues, so the
+ * card carries your status and where to go next. Here you may have no
+ * relationship with the league at all, so it carries what someone deciding
+ * whether to join needs instead.
+ *
+ * One type for both surfaces, because the decision is the same one either way.
  *
  * `filledSlots` counts members holding `manager` and is **never stored** — a
- * counter would fan out to every member's index entry on every join. Deriving
- * it costs one read per league, which `docs/data-model.js` records as the open
- * question on this page. Settled in favour of showing it, because a full league
- * cannot be joined and the row has to be able to say so.
+ * counter would fan out to every member's index entry on every join. Deriving it
+ * costs one read per league, which `docs/data-model.js` records as the open
+ * question on the tournament page. Settled in favour of showing it, because a
+ * full league cannot be joined and the row has to be able to say so.
  */
-export interface TournamentLeagueCard {
+export interface JoinableLeague {
   leagueId: LeagueId
   leagueName: string
+  tournamentId: TournamentId
+  tournamentName: string
   isAuctionEnabled: boolean
   /** Model vocabulary. The interface says public and closed. */
   leagueEntry: LeagueEntry
   maxSlots: number
   filledSlots: number
+
+  /** Not on the thin index either, so it is read per league. */
+  joinDeadline: number
 
   /**
    * The signed-in person's roles here, **empty when they are not a member**.

@@ -6,16 +6,17 @@
  */
 
 import type {
+  JoinableLeague,
   CreateLeagueConfig,
   CreatedLeague,
   LeagueConfig,
   LeagueId,
-  LeagueJoinCode,
   LeagueSummary,
   LineupRules,
   StandardAuctionConfig,
   UserId,
 } from '@/types'
+import { getApi } from './api'
 import { notImplemented } from './not-implemented'
 import type {
   Subscriber,
@@ -34,9 +35,9 @@ import type {
  * approval, so finding it this way does not join it.
  */
 export function getLeagueByCode(
-  leagueJoinCode: LeagueJoinCode,
-): Promise<LeagueSummary | undefined> {
-  return notImplemented('getLeagueByCode', { leagueJoinCode })
+  leagueJoinCode: string,
+): Promise<JoinableLeague | undefined> {
+  return getApi().getLeagueByCode(leagueJoinCode)
 }
 
 // ---------------------------------------------------------------------------

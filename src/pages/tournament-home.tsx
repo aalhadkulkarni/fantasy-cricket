@@ -16,10 +16,10 @@ import { ROUTES } from '@/routes'
 import type {
   Competition,
   FormatRecord,
+  JoinableLeague,
   Team,
   Tournament,
   TournamentId,
-  TournamentLeagueCard,
 } from '@/types'
 
 /**
@@ -45,12 +45,15 @@ export function TournamentHome() {
   const [tournament, setTournament] = useState<Tournament | undefined>(
     undefined,
   )
-  const [leagues, setLeagues] = useState<TournamentLeagueCard[]>([])
+  const [leagues, setLeagues] = useState<JoinableLeague[]>([])
   const [competitions, setCompetitions] = useState<Competition[]>([])
   const [formats, setFormats] = useState<FormatRecord[]>([])
   const [teams, setTeams] = useState<Team[]>([])
   const [error, setError] = useState<string | undefined>(undefined)
   const [showingFixtures, setShowingFixtures] = useState(false)
+
+  /* Bumped after a join, so the row it came from shows the new count. */
+  const [reloadToken, setReloadToken] = useState(0)
 
   useEffect(() => {
     if (tournamentId === undefined) return
@@ -90,7 +93,7 @@ export function TournamentHome() {
     return () => {
       cancelled = true
     }
-  }, [tournamentId])
+  }, [tournamentId, reloadToken])
 
   return (
     <main className="py-10 sm:py-14">
@@ -137,7 +140,11 @@ export function TournamentHome() {
             ) : (
               <div className="mt-5 grid grid-cols-[repeat(auto-fill,minmax(min(300px,100%),1fr))] gap-3.5">
                 {leagues.map((league) => (
-                  <LeagueRow key={league.leagueId} league={league} />
+                  <LeagueRow
+                    key={league.leagueId}
+                    league={league}
+                    onJoined={() => setReloadToken((n) => n + 1)}
+                  />
                 ))}
               </div>
             )}

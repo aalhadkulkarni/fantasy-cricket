@@ -167,6 +167,26 @@ export function createPaths(service: FirebaseService) {
      */
     leagues: (leagueId?: LeagueId) => under('leagues', leagueId),
 
+    /**
+     * **Read this, never the league itself**, to answer who is in one. A league
+     * read is subtree-shaped and drags its whole auction config — a base price
+     * for every player in the tournament — plus its gameweek structure.
+     */
+    leagueMembers: (leagueId?: LeagueId, userId?: UserId) =>
+      under('leagues', leagueId, 'leagueMembers', userId),
+
+    /**
+     * My Leagues, per user. **An index, never a source of truth** — and one that
+     * cannot be rebuilt, so losing an entry loses that league from that person's
+     * interface permanently.
+     */
+    userLeagues: (userId?: UserId, leagueId?: LeagueId) =>
+      under('users', userId, 'leagues', leagueId),
+
+    /** The tournament page's list of its leagues. Also an index. */
+    tournamentLeagues: (tournamentId?: TournamentId, leagueId?: LeagueId) =>
+      under('tournaments', tournamentId, 'leagues', leagueId),
+
     /** Where a join code is **claimed transactionally** at creation. */
     leagueCodeToLeagueMapping: (leagueJoinCode?: LeagueJoinCode) =>
       under('leagueCodeToLeagueMapping', leagueJoinCode),

@@ -36,9 +36,12 @@ import type {
   CompetitionId,
   FormatRecord,
   GameWeekId,
+  JoinableLeague,
+  League,
   LeagueId,
   LeagueJoinCode,
   LeagueMember,
+  BannedUser,
   LineupRules,
   Match,
   MatchConfig,
@@ -60,7 +63,6 @@ import type {
   TournamentConfig,
   TournamentFilter,
   TournamentId,
-  TournamentLeagueCard,
   TournamentLeagueIndexEntry,
   TournamentRoundConfig,
   User,
@@ -163,13 +165,57 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
   const OFFICIAL_LEAGUE_SLOTS = 200
 
   /**
-   * Six characters, from an alphabet with no `0`/`O` or `1`/`I`/`L`, because
-   * people read these aloud and type them from memory.
+   * One league, as the card both the tournament row and the code lookup render.
+   *
+   * **Two small reads per league**, and neither is the league itself: how many
+   * managers it holds, and when joining closes. A league read is subtree-shaped
+   * and would drag its whole auction config — a base price for every player in
+   * the tournament — to render six fields.
+   */
+  async function joinableLeague(
+    leagueId: LeagueId,
+    entry: TournamentLeagueIndexEntry,
+    tournamentId: TournamentId,
+    tournamentName: string,
+  ): Promise<JoinableLeague> {
+    const [members, joinDeadline] = await Promise.all([
+      service.read<Record<string, LeagueMember>>(paths.leagueMembers(leagueId)),
+      service.read<number>(
+        service.path('leagues', leagueId, 'fantasyLeagueJoinDeadline'),
+      ),
+    ])
+
+    const me = service.currentSession()?.uid
+    const all = Object.values(members ?? {})
+
+    return {
+      leagueId,
+      leagueName: entry.leagueName,
+      tournamentId,
+      tournamentName,
+      isAuctionEnabled: entry.isAuctionEnabled,
+      leagueEntry: entry.leagueEntry,
+      maxSlots: entry.maxSlots,
+      // Managers only. An owner or admin who does not play holds no slot, and a
+      // ban strips `manager`, so both drop out here for free.
+      filledSlots: all.filter((m) => m.leagueRoles?.manager === true).length,
+      joinDeadline: joinDeadline ?? 0,
+      // Empty when not a member. Owning a league is not playing in it, so the
+      // caller has to be able to tell those apart.
+      myRoles:
+        (me === undefined ? undefined : members?.[me]?.leagueRoles) ?? {},
+    }
+  }
+
+  /**
+   * **Eight characters**, as `05-data-model.md` specifies, from an alphabet
+   * with no `0`/`O` or `1`/`I`/`L` because people read these aloud and type
+   * them from memory.
    */
   function joinCode(): string {
     const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
     let code = ''
-    for (let i = 0; i < 6; i += 1) {
+    for (let i = 0; i < 8; i += 1) {
       code += alphabet[Math.floor(Math.random() * alphabet.length)]
     }
     return code
@@ -746,44 +792,181 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
      */
     async getLeaguesForTournament(
       tournamentId: TournamentId,
-    ): Promise<TournamentLeagueCard[]> {
-      const index = await service.read<
-        Record<string, TournamentLeagueIndexEntry>
-      >(service.path('tournaments', tournamentId, 'leagues'))
+    ): Promise<JoinableLeague[]> {
+      const [index, tournamentName] = await Promise.all([
+        service.read<Record<string, TournamentLeagueIndexEntry>>(
+          paths.tournamentLeagues(tournamentId),
+        ),
+        service.read<string>(
+          service.path('tournaments', tournamentId, 'tournamentName'),
+        ),
+      ])
 
       const entries = Object.entries(index ?? {})
       if (entries.length === 0) return []
 
-      const me = service.currentSession()?.uid
-
       const cards = await Promise.all(
-        entries.map(async ([leagueId, entry]) => {
-          const members = await service.read<Record<string, LeagueMember>>(
-            service.path('leagues', leagueId, 'leagueMembers'),
-          )
-
-          const all = Object.entries(members ?? {})
-
-          return {
-            leagueId: leagueId as LeagueId,
-            leagueName: entry.leagueName,
-            isAuctionEnabled: entry.isAuctionEnabled,
-            leagueEntry: entry.leagueEntry,
-            maxSlots: entry.maxSlots,
-            // Managers only. An owner or admin who does not play holds no
-            // slot, and a ban strips `manager`, so both drop out here for free.
-            filledSlots: all.filter(
-              ([, member]) => member.leagueRoles?.manager === true,
-            ).length,
-            // Empty when not a member. Owning a league is not playing in it,
-            // so the caller has to be able to tell those apart.
-            myRoles:
-              (me === undefined ? undefined : members?.[me]?.leagueRoles) ?? {},
-          }
-        }),
+        entries.map(([leagueId, entry]) =>
+          joinableLeague(
+            leagueId as LeagueId,
+            entry,
+            tournamentId,
+            tournamentName ?? '',
+          ),
+        ),
       )
 
       return cards.sort((a, b) => a.leagueName.localeCompare(b.leagueName))
+    },
+
+    /**
+     * **The mapping exists so a typed code resolves in a single read.** A code
+     * is not a league's address — it is a capability, which is why URLs carry
+     * the id instead.
+     *
+     * Finding a league is not entering one. A closed league resolves here and
+     * still refuses a join.
+     */
+    async getLeagueByCode(
+      leagueJoinCode: string,
+    ): Promise<JoinableLeague | undefined> {
+      const code = leagueJoinCode.trim().toUpperCase()
+      if (code === '') return undefined
+
+      const leagueId = await service.read<LeagueId>(
+        paths.leagueCodeToLeagueMapping(code as LeagueJoinCode),
+      )
+      if (leagueId === undefined) return undefined
+
+      const league = await service.read<League>(paths.leagues(leagueId))
+      if (league === undefined) return undefined
+
+      const tournamentName =
+        (await service.read<string>(
+          service.path('tournaments', league.tournamentId, 'tournamentName'),
+        )) ?? ''
+
+      return joinableLeague(
+        leagueId,
+        {
+          leagueName: league.leagueName,
+          isAuctionEnabled: league.isAuctionEnabled,
+          leagueEntry: league.leagueEntry,
+          maxSlots: league.maxSlots,
+        },
+        league.tournamentId,
+        tournamentName,
+      )
+    },
+
+    /**
+     * **Every refusal is decided here**, not hidden in the interface. Anyone can
+     * read the database directly with the client SDK, so a disabled button is
+     * convenience and this is the guard.
+     *
+     * The ban is checked at `bannedUsers`, not on a join request: a public
+     * league has no request to consult, so a ban has to be independently
+     * checkable at a known path.
+     */
+    async joinLeague(
+      leagueId: LeagueId,
+      fantasyTeamName: string,
+    ): Promise<void> {
+      const session = requireSession()
+      const userId = session.uid as UserId
+
+      const teamName = fantasyTeamName.trim()
+      if (teamName === '') {
+        throw new DataLayerError('unknown', 'Pick a team name first.')
+      }
+
+      const [league, banned] = await Promise.all([
+        service.read<League>(paths.leagues(leagueId)),
+        service.read<BannedUser>(paths.bannedUsers(leagueId, userId)),
+      ])
+
+      if (league === undefined) {
+        throw new DataLayerError('unknown', 'That league no longer exists.')
+      }
+      if (banned !== undefined) {
+        throw new DataLayerError(
+          'unknown',
+          'You are banned from this league and cannot rejoin it.',
+        )
+      }
+      if (league.leagueEntry !== 'Open') {
+        throw new DataLayerError(
+          'unknown',
+          'This league is closed, so joining needs its admin to approve you. Requesting to join is not built yet.',
+        )
+      }
+      if (Date.now() > league.fantasyLeagueJoinDeadline) {
+        throw new DataLayerError(
+          'unknown',
+          'The deadline to join this league has passed.',
+        )
+      }
+
+      const members = league.leagueMembers ?? {}
+      const mine = members[userId]
+
+      if (mine?.leagueRoles?.manager === true) {
+        throw new DataLayerError(
+          'unknown',
+          'You are already playing in this league.',
+        )
+      }
+
+      const filled = Object.values(members).filter(
+        (member) => member.leagueRoles?.manager === true,
+      ).length
+
+      if (filled >= league.maxSlots) {
+        throw new DataLayerError('unknown', 'This league is full.')
+      }
+
+      /*
+        Both are copied into the index rather than looked up when My Leagues
+        renders, which is the point of an index: it carries exactly the fields
+        its page shows, so drawing a card costs no further reads.
+      */
+      const [ownerName, tournamentName] = await Promise.all([
+        service.read<string>(
+          service.path('users', league.leagueOwner, 'userName'),
+        ),
+        service.read<string>(
+          service.path('tournaments', league.tournamentId, 'tournamentName'),
+        ),
+      ])
+
+      // Merged, not replaced. Someone joining a league they own keeps owning it.
+      const myRoles = { ...(mine?.leagueRoles ?? {}), manager: true as const }
+
+      await service.update({
+        /*
+          **Leaf paths on the membership, deliberately.** Writing the member
+          object whole would erase `leagueOwner` and `leagueAdmin` from anyone
+          joining a league they run — which is every official league.
+        */
+        [paths.leagueMembers(leagueId, userId) + '/fantasyTeamName']: teamName,
+        [paths.leagueMembers(leagueId, userId) + '/leagueRoles/manager']: true,
+
+        /*
+          The index cannot be rebuilt: lose this and the league disappears from
+          this person's interface permanently. It goes in the same write as the
+          membership for exactly that reason.
+        */
+        [paths.userLeagues(userId, leagueId)]: {
+          leagueName: league.leagueName,
+          tournamentId: league.tournamentId,
+          tournamentName: tournamentName ?? '',
+          isAuctionEnabled: league.isAuctionEnabled,
+          ownerName: ownerName ?? 'Unknown',
+          maxSlots: league.maxSlots,
+          membershipStatus: 'Accepted',
+          myRoles,
+        },
+      })
     },
 
     /**
