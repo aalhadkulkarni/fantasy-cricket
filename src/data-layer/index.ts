@@ -48,7 +48,43 @@
  * Grouping is by subject rather than by page, because pages share calls.
  * `docs/06-data-layer.md` lists `getMembers` three times and twelve other names
  * twice; each is defined once here.
+ *
+ * ---
+ *
+ * ## TODO — Firebase is not wired in yet
+ *
+ * **Nothing in this layer talks to a database.** The Firebase SDK is not
+ * installed, there is no client, and all 143 functions still throw.
+ *
+ * What *is* in place is the seam beneath them. `setEnvironment` builds an
+ * `ApiService` for the environment it is given, and the Firebase implementation
+ * turns that environment into the path prefix every node sits under. Neither is
+ * called by anything yet.
+ *
+ * That order is deliberate. Adding an environment prefix to a layer that
+ * already reads and writes without one means finding every path that was
+ * composed by hand, and missing one puts real data in the wrong root with
+ * nothing to detect it. Having it first means an implementation cannot skip it.
+ *
+ * Remaining, in order:
+ *
+ * 1. Install the Firebase SDK and initialise the app.
+ * 2. Hold the database handle on the service in `firebase/firebase-service.ts`.
+ * 3. Grow `ApiService` to carry the operations, and implement the functions by
+ *    delegating to the active service.
+ * 4. Fill in the test, preprod and prod hostnames in
+ *    `src/config/environments.ts` and clear the forced override — see G9.
  */
+
+// The only thing this layer exposes about its backend: tell it which
+// environment to run against, at bootstrap, before anything else.
+//
+// It exports no environment values or types of its own. Deciding the
+// environment is `src/config/environments.ts`, because it is a fact about the
+// deployment rather than about the backend. Nothing about paths or services is
+// re-exported either — a path is pure schema, and the fifth rule above is that
+// the schema does not leak upward.
+export { setEnvironment } from './api-service'
 
 export * from './users'
 export * from './actions'
