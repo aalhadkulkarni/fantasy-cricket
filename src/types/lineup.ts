@@ -16,9 +16,25 @@
  * which shape it held, so a reader had to fetch the league first just to know
  * how to interpret what it already had. **Split, the path is the
  * discriminant** and each node has one concrete type.
+ *
+ * ---
+ *
+ * **The elevens hold resolved players; the pointers into them stay ids.**
+ *
+ * The database stores ids in both cases. The lists are resolved here because a
+ * lineup exists to be rendered, and every row of it needs a name, a short name
+ * and a role. Handing a component eleven ids means every component that draws a
+ * lineup writes the same lookup.
+ *
+ * `captainId`, `viceCaptainId` and the two sides of an impact sub stay ids,
+ * because their job is to point *into* a list that is already resolved. Drawing
+ * a row is then `player.playerId === captainId`, which is the comparison you
+ * want, and a resolved captain would be a second copy of an object already in
+ * the array beside it.
  */
 
 import type { GameWeekId, MatchId, PlayerId, UserId } from './ids'
+import type { Player } from './player'
 
 /**
  * One entry at `matchBasedLineups/{leagueId}/{userId}/{matchId}`.
@@ -36,9 +52,10 @@ import type { GameWeekId, MatchId, PlayerId, UserId } from './ids'
  * apply 2x to the captain and 1.5x to the vice-captain, and sum. Never stored.
  */
 export interface MatchLineup {
-  /** Exactly eleven. Enforced in code; the database cannot express it. */
-  lineup: PlayerId[]
+  /** Exactly eleven. Enforced in code; the database stores ids and cannot express it. */
+  lineup: Player[]
 
+  /** Ids, not players — they point into `lineup`. See the note at the top. */
   captainId: PlayerId
   viceCaptainId: PlayerId
 
@@ -61,6 +78,11 @@ export interface MatchLineup {
  * the gameweek does.
  */
 export interface ImpactSub {
+  /**
+   * Ids for the same reason as the captain: `playerIdOut` points into
+   * `startingLineup` and `playerIdIn` into `postImpactSubLineup`, both of which
+   * are already resolved.
+   */
   playerIdOut: PlayerId
   playerIdIn: PlayerId
 
@@ -82,11 +104,11 @@ export interface ImpactSub {
  * during one — because the squad won at auction is already the constraint.
  */
 export interface GameWeekLineup {
-  startingLineup: PlayerId[]
+  startingLineup: Player[]
 
   /**
-   * Neither can be impact subbed, so a sub can never leave the gameweek without
-   * a captain or vice-captain.
+   * Ids, pointing into the lineups. Neither can be impact subbed, so a sub can
+   * never leave the gameweek without a captain or vice-captain.
    */
   captainId: PlayerId
   viceCaptainId: PlayerId
@@ -94,7 +116,7 @@ export interface GameWeekLineup {
   impactSub?: ImpactSub
 
   /** Absent until a sub is made. Otherwise the eleven from `applicableFromMatch` on. */
-  postImpactSubLineup?: PlayerId[]
+  postImpactSubLineup?: Player[]
 }
 
 /**

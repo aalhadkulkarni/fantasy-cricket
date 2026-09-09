@@ -186,19 +186,20 @@ to retrofit. Contrast is already handled by the design tokens.
 
 ## Where to find things
 
-| Document                     | Contents                                                         |
-| ---------------------------- | ---------------------------------------------------------------- |
-| `docs/01-overview.md`        | **Read first.** What the product is and which decisions shape it |
-| `docs/02-working-with-me.md` | **Read second.** How to collaborate here, in full                |
-| `docs/03-roles.md`           | What each of the six roles can do                                |
-| `docs/04-navigation.md`      | Routes, redirects, and what happens on refused access            |
-| `docs/05-data-model.md`      | Principles and structural rules behind the schema                |
-| `docs/data-model.js`         | The schema itself — a worked example with reasoning in comments  |
-| `docs/06-data-layer.md`      | Every read, write and subscription each page needs               |
-| `docs/07-design-system.md`   | Tokens, typography, and the rules governing them                 |
-| `docs/design-reference.html` | **Open in a browser.** The source of truth for exact CSS values  |
-| `docs/08-pages/`             | One document per page. Start at `index.md`.                      |
-| `src/types/`                 | The frontend's data types. **Not the schema** — see below        |
+| Document                        | Contents                                                         |
+| ------------------------------- | ---------------------------------------------------------------- |
+| `docs/01-overview.md`           | **Read first.** What the product is and which decisions shape it |
+| `docs/02-working-with-me.md`    | **Read second.** How to collaborate here, in full                |
+| `docs/03-roles.md`              | What each of the six roles can do                                |
+| `docs/04-navigation.md`         | Routes, redirects, and what happens on refused access            |
+| `docs/05-data-model.md`         | Principles and structural rules behind the schema                |
+| `docs/data-model.js`            | The schema itself — a worked example with reasoning in comments  |
+| `docs/06-data-layer.md`         | Every read, write and subscription each page needs               |
+| `docs/07-design-system.md`      | Tokens, typography, and the rules governing them                 |
+| `docs/design-reference.html`    | **Open in a browser.** The source of truth for exact CSS values  |
+| `docs/08-pages/`                | One document per page. Start at `index.md`.                      |
+| `docs/09-future-exploration.md` | Optimisations deliberately deferred. **Not a gap list**          |
+| `src/types/`                    | The frontend's data types. **Not the schema** — see below        |
 
 **`src/types/` is not a copy of the schema.** It started as one, which is why
 most of it still looks like `docs/data-model.js`. It is being built towards

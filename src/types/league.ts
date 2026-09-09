@@ -224,7 +224,14 @@ interface LeagueBase {
   leagueName: string
   leagueOwner: UserId
   leagueJoinCode: LeagueJoinCode
+
+  /**
+   * FUTURE: carry the tournament itself rather than its id — a thin one, since
+   * the full record drags every match and participant. See
+   * `docs/09-future-exploration.md`.
+   */
   tournamentId: TournamentId
+
   leagueEntry: LeagueEntry
   maxSlots: number
   fantasyLineupRules: LineupRules

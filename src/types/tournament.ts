@@ -136,11 +136,21 @@ export interface Tournament {
   startDate: number
   endDate?: number
 
+  /**
+   * FUTURE: a thin team record here instead of a set of ids, so a screen can
+   * render a team name without reading the global `teams` node. See
+   * `docs/09-future-exploration.md`.
+   */
   participatingTeams: Partial<Record<TeamId, true>>
 
   /**
    * Frozen per tournament, prefilled from `Player.currentTeams` at creation and
    * never written back. A player's club can change without rewriting history.
+   *
+   * FUTURE: a thin player record here instead of a bare team id. Today nothing
+   * renderable lives in this node, so drawing a tournament's players means
+   * reading the entire global catalogue to join against two hundred of them.
+   * See `docs/09-future-exploration.md`.
    */
   participatingPlayers: Partial<Record<PlayerId, TeamId>>
 
