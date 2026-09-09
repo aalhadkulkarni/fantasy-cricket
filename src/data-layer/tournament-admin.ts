@@ -16,42 +16,115 @@ import type {
   TeamId,
   TournamentConfig,
   TournamentId,
+  TournamentRoundConfig,
 } from '@/types'
+import { getApi } from './api'
 import { notImplemented } from './not-implemented'
 
 /**
- * **Reads each player's current team to prefill the tournament-scoped mapping,
- * and never writes back.** That freeze is the point: a player's club can change
- * without rewriting which team they played for in a finished season.
+ * The tournament, its placeholder matches, and **one round covering all of
+ * them**, in one write.
+ *
+ * Teams and players are not set here — `updateTournamentParticipants` does
+ * that, with the same editor that changes them later. The format is not set
+ * either; it comes from the base tournament.
  */
 export function createTournament(
   config: TournamentConfig,
 ): Promise<TournamentId> {
-  return notImplemented('createTournament', { config })
+  return getApi().createTournament(config)
 }
 
-/** Also maintains the reverse map, so "who is in this team here" stays one read. */
-export function updateTournamentPlayers(
+export function renameTournament(
   tournamentId: TournamentId,
-  players: Partial<Record<PlayerId, TeamId>>,
+  tournamentName: string,
 ): Promise<void> {
-  return notImplemented('updateTournamentPlayers', { tournamentId, players })
+  return getApi().renameTournament(tournamentId, tournamentName)
 }
 
-/** **Recomputes `startDate` and `endDate` in the same atomic write.** */
-export function updateMatch(
+/**
+ * Who is playing, as a map of player to **the team they play for in this
+ * tournament**.
+ *
+ * One argument rather than teams and players separately, because a player
+ * already names their team and two arguments could disagree.
+ *
+ * **Prefilled from each player's current team and never written back.** That
+ * freeze is the point: a player's club can change without rewriting which team
+ * they played for in a finished season.
+ */
+export function updateTournamentParticipants(
   tournamentId: TournamentId,
-  matchConfig: MatchConfig,
+  participants: Partial<Record<PlayerId, TeamId>>,
 ): Promise<void> {
-  return notImplemented('updateMatch', { tournamentId, matchConfig })
+  return getApi().updateTournamentParticipants(tournamentId, participants)
 }
 
-/** Same recomputation rule, once for the whole batch. */
+/**
+ * **Recomputes `startDate` and `endDate` in the same atomic write.**
+ *
+ * Each config is the full state of that match, so an absent field clears the
+ * stored one — which is what lets a date or a fixture be taken back.
+ */
 export function updateMatches(
   tournamentId: TournamentId,
   matchConfigs: readonly MatchConfig[],
 ): Promise<void> {
-  return notImplemented('updateMatches', { tournamentId, matchConfigs })
+  return getApi().updateMatches(tournamentId, matchConfigs)
+}
+
+/**
+ * Appends placeholders and **extends the final round to cover them**, so every
+ * match still belongs to exactly one round.
+ *
+ * Adding matches to a tournament already under way is expected rather than
+ * exceptional.
+ */
+export function addMatches(
+  tournamentId: TournamentId,
+  count: number,
+): Promise<void> {
+  return getApi().addMatches(tournamentId, count)
+}
+
+/**
+ * **The one delete in this admin.** Matches come off the end only, and only
+ * while the tournament is unpublished.
+ *
+ * Off the end because `matchNumber` is the ordering key, and removing from the
+ * middle would renumber everything after it — silently moving every round and
+ * gameweek boundary defined against those numbers.
+ *
+ * Unpublished because that is the window in which nothing can reference a
+ * match. A league cannot exist against an unpublished tournament, so there are
+ * no lineups and no points to strand, which is the reason nothing else here
+ * deletes.
+ *
+ * Rounds are trimmed with them, and one left holding nothing goes too.
+ */
+export function removeMatches(
+  tournamentId: TournamentId,
+  count: number,
+): Promise<void> {
+  return getApi().removeMatches(tournamentId, count)
+}
+
+/**
+ * The whole round structure at once, **in match numbers rather than ids**.
+ *
+ * The rounds must tile the matches exactly: start at match one, no gaps, no
+ * overlaps, ending at the last match. A match in no round could never fall in a
+ * gameweek, so it could never be played.
+ *
+ * Replacing the set rather than splitting and merging separately keeps that
+ * rule in one place, and lets a mistaken split be undone — which matters when
+ * nothing here deletes.
+ */
+export function setRounds(
+  tournamentId: TournamentId,
+  rounds: readonly TournamentRoundConfig[],
+): Promise<void> {
+  return getApi().setRounds(tournamentId, rounds)
 }
 
 /**

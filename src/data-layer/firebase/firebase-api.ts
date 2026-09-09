@@ -33,16 +33,26 @@ import type { Environment } from '@/config/environments'
 import type {
   Competition,
   CompetitionId,
+  Match,
+  MatchConfig,
+  MatchId,
   Player,
   PlayerConfig,
   PlayerFilter,
   PlayerId,
   PlayerRoleRecord,
+  Round,
+  RoundId,
   SystemSetup,
   Team,
   TeamConfig,
   TeamFilter,
   TeamId,
+  Tournament,
+  TournamentConfig,
+  TournamentFilter,
+  TournamentId,
+  TournamentRoundConfig,
   User,
   UserId,
 } from '@/types'
@@ -88,6 +98,55 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       )
     }
     return session
+  }
+
+  /**
+   * The two paths carrying a tournament's timing, recomputed from every match.
+   *
+   * **Both are start times.** `endDate` is the last match's start, not when
+   * anything finishes — a Test runs five days, and nothing here pretends to
+   * know that. It is absent while any match is undated, which is what lets a
+   * tournament with only match one dated behave correctly.
+   */
+  function tournamentDates(
+    tournamentId: TournamentId,
+    matches: Record<string, Match>,
+  ): Record<string, number | null> {
+    const all = Object.values(matches)
+    const dated = all
+      .map((match) => match.startTimestamp)
+      .filter((timestamp): timestamp is number => timestamp !== undefined)
+
+    return {
+      [service.path('tournaments', tournamentId, 'startDate')]:
+        dated.length === 0 ? null : Math.min(...dated),
+      [service.path('tournaments', tournamentId, 'endDate')]:
+        dated.length === all.length && dated.length > 0
+          ? Math.max(...dated)
+          : null,
+    }
+  }
+
+  /**
+   * The round the last match falls in, found **by match number**. Ids are push
+   * keys and sort by creation time, which is not the fixture order.
+   */
+  function lastRound(
+    rounds: readonly Round[],
+    matches: Record<string, Match>,
+  ): Round | undefined {
+    let best: Round | undefined
+    let bestNumber = -1
+
+    for (const round of rounds) {
+      const number = matches[round.lastMatchId]?.matchNumber ?? -1
+      if (number > bestNumber) {
+        bestNumber = number
+        best = round
+      }
+    }
+
+    return best
   }
 
   const api: FirebaseApi = {
@@ -452,6 +511,504 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         service.path('players', playerId, 'isRetired'),
         isRetired,
       )
+    },
+
+    // -----------------------------------------------------------------------
+    // Tournaments
+    // -----------------------------------------------------------------------
+
+    async getTournaments(filter?: TournamentFilter): Promise<Tournament[]> {
+      const all = await service.read<Record<string, Tournament>>(
+        paths.tournaments(),
+      )
+      let tournaments = Object.values(all ?? {})
+
+      if (filter?.includeUnpublished !== true) {
+        tournaments = tournaments.filter((t) => t.publishedAt !== undefined)
+      }
+      if (filter?.competitionId !== undefined) {
+        const competitionId = filter.competitionId
+        tournaments = tournaments.filter(
+          (t) => t.competitionId === competitionId,
+        )
+      }
+
+      return tournaments.sort((a, b) =>
+        a.tournamentName.localeCompare(b.tournamentName),
+      )
+    },
+
+    async getTournament(tournamentId: TournamentId): Promise<Tournament> {
+      const tournament = await service.read<Tournament>(
+        paths.tournaments(tournamentId),
+      )
+      if (tournament === undefined) {
+        throw new DataLayerError(
+          'unknown',
+          `No tournament with id ${tournamentId}.`,
+        )
+      }
+      return tournament
+    },
+
+    /**
+     * **One node written whole**, rather than a multi-path update: everything
+     * created here lives under the one tournament and nothing outside it is
+     * touched.
+     *
+     * The round is created with the matches deliberately. Every match belongs
+     * to exactly one round, so a tournament that briefly had matches and no
+     * round would already have broken that.
+     */
+    async createTournament(config: TournamentConfig): Promise<TournamentId> {
+      if (!Number.isInteger(config.matchCount) || config.matchCount < 1) {
+        throw new DataLayerError(
+          'unknown',
+          'A tournament needs at least one match.',
+        )
+      }
+
+      const tournamentId = service.generateKey() as TournamentId
+      const matchIds = Array.from(
+        { length: config.matchCount },
+        () => service.generateKey() as MatchId,
+      )
+
+      const matches: Record<string, Match> = {}
+      matchIds.forEach((matchId, index) => {
+        // No teams and no date. Absent is how "not yet known" is spelled, and
+        // Firebase would drop the keys anyway.
+        matches[matchId] = { matchId, matchNumber: index + 1 }
+      })
+
+      const roundId = service.generateKey() as RoundId
+      const firstMatchId = matchIds[0]
+      const lastMatchId = matchIds[matchIds.length - 1]
+      if (firstMatchId === undefined || lastMatchId === undefined) {
+        throw new DataLayerError('unknown', 'A tournament needs a match.')
+      }
+
+      await service.write(paths.tournaments(tournamentId), {
+        tournamentId,
+        tournamentName: config.tournamentName.trim(),
+        competitionId: config.competitionId,
+        matches,
+        rounds: {
+          [roundId]: {
+            roundId,
+            roundName: 'Round 1',
+            firstMatchId,
+            lastMatchId,
+            // No `eliminatedTeams`. An empty object is not stored.
+          },
+        },
+        // No participants, no startDate, no publishedAt. All absent.
+      })
+
+      return tournamentId
+    },
+
+    async renameTournament(
+      tournamentId: TournamentId,
+      tournamentName: string,
+    ): Promise<void> {
+      await service.write(
+        service.path('tournaments', tournamentId, 'tournamentName'),
+        tournamentName.trim(),
+      )
+    },
+
+    /**
+     * **Three nodes, one write.** `participatingPlayers`,
+     * `participatingTeamPlayers` and `participatingTeams` are three views of
+     * one fact, and any two of them disagreeing is a corruption nothing detects.
+     *
+     * A team that lost every player is removed as a node; a team that survives
+     * has its members adjusted one by one. Those are kept apart deliberately —
+     * Firebase rejects an update that writes both a path and its ancestor.
+     */
+    async updateTournamentParticipants(
+      tournamentId: TournamentId,
+      participants: Partial<Record<PlayerId, TeamId>>,
+    ): Promise<void> {
+      const before =
+        (await service.read<Partial<Record<PlayerId, TeamId>>>(
+          service.path('tournaments', tournamentId, 'participatingPlayers'),
+        )) ?? {}
+
+      const at = (...segments: string[]) =>
+        service.path('tournaments', tournamentId, ...segments)
+
+      const update: Record<string, unknown> = {}
+
+      const present = (teams: Partial<Record<PlayerId, TeamId>>) =>
+        new Set(
+          Object.values(teams).filter((id): id is TeamId => id !== undefined),
+        )
+
+      const teamsBefore = present(before)
+      const teamsAfter = present(participants)
+
+      for (const [playerId, teamId] of Object.entries(participants)) {
+        if (teamId === undefined) continue
+        const was = before[playerId as PlayerId]
+        if (was === teamId) continue
+
+        update[at('participatingPlayers', playerId)] = teamId
+        update[at('participatingTeamPlayers', teamId, playerId)] = true
+
+        // Moved between two teams that both survive: clear the old side.
+        if (was !== undefined && teamsAfter.has(was)) {
+          update[at('participatingTeamPlayers', was, playerId)] = null
+        }
+      }
+
+      for (const [playerId, teamId] of Object.entries(before)) {
+        if (participants[playerId as PlayerId] !== undefined) continue
+
+        update[at('participatingPlayers', playerId)] = null
+        if (teamId !== undefined && teamsAfter.has(teamId)) {
+          update[at('participatingTeamPlayers', teamId, playerId)] = null
+        }
+      }
+
+      for (const teamId of teamsAfter) {
+        if (!teamsBefore.has(teamId)) {
+          update[at('participatingTeams', teamId)] = true
+        }
+      }
+      for (const teamId of teamsBefore) {
+        if (teamsAfter.has(teamId)) continue
+        update[at('participatingTeams', teamId)] = null
+        // The whole node goes, so no per-player nulls for this team above.
+        update[at('participatingTeamPlayers', teamId)] = null
+      }
+
+      if (Object.keys(update).length > 0) await service.update(update)
+    },
+
+    /**
+     * **The tournament's start and end are recomputed here**, in the same
+     * write. They are what every reader uses to place a tournament in Upcoming,
+     * Active or Past, and nothing derives them by walking the match list — so a
+     * change that missed this would make every reader wrong at once.
+     *
+     * Each config is the full state of that match, so an absent field clears
+     * the stored one. That is what lets a date or a fixture be taken back.
+     */
+    async updateMatches(
+      tournamentId: TournamentId,
+      configs: readonly MatchConfig[],
+    ): Promise<void> {
+      if (configs.length === 0) return
+
+      const stored =
+        (await service.read<Record<string, Match>>(
+          paths.tournamentMatches(tournamentId),
+        )) ?? {}
+
+      const update: Record<string, unknown> = {}
+      const merged: Record<string, Match> = { ...stored }
+
+      for (const config of configs) {
+        const existing = stored[config.matchId]
+        if (existing === undefined) {
+          throw new DataLayerError(
+            'unknown',
+            `This tournament has no match ${config.matchId}.`,
+          )
+        }
+
+        const at = (field: string) =>
+          service.path(
+            'tournaments',
+            tournamentId,
+            'matches',
+            config.matchId,
+            field,
+          )
+
+        update[at('team1Id')] = config.team1Id ?? null
+        update[at('team2Id')] = config.team2Id ?? null
+        update[at('startTimestamp')] = config.startTimestamp ?? null
+        update[at('venue')] = config.venue?.trim() || null
+
+        merged[config.matchId] = {
+          ...existing,
+          team1Id: config.team1Id,
+          team2Id: config.team2Id,
+          startTimestamp: config.startTimestamp,
+          venue: config.venue,
+        }
+      }
+
+      Object.assign(update, tournamentDates(tournamentId, merged))
+
+      await service.update(update)
+    },
+
+    /**
+     * **The final round grows with them**, in the same write, because a match
+     * outside every round could never fall inside a gameweek and so could never
+     * be played.
+     */
+    async addMatches(tournamentId: TournamentId, count: number): Promise<void> {
+      if (!Number.isInteger(count) || count < 1) {
+        throw new DataLayerError('unknown', 'Add at least one match.')
+      }
+
+      const [storedMatches, storedRounds] = await Promise.all([
+        service.read<Record<string, Match>>(
+          paths.tournamentMatches(tournamentId),
+        ),
+        service.read<Record<string, Round>>(
+          paths.tournamentRounds(tournamentId),
+        ),
+      ])
+
+      const matches = storedMatches ?? {}
+      const highest = Object.values(matches).reduce(
+        (max, match) => Math.max(max, match.matchNumber),
+        0,
+      )
+
+      const update: Record<string, unknown> = {}
+      const added: MatchId[] = []
+
+      for (let i = 1; i <= count; i += 1) {
+        const matchId = service.generateKey() as MatchId
+        added.push(matchId)
+        update[paths.tournamentMatches(tournamentId, matchId)] = {
+          matchId,
+          matchNumber: highest + i,
+        } satisfies Match
+      }
+
+      const lastAdded = added[added.length - 1]
+      const finalRound = lastRound(Object.values(storedRounds ?? {}), matches)
+
+      if (lastAdded === undefined) return
+
+      if (finalRound === undefined) {
+        // Only reachable if a tournament somehow has no round at all. One is
+        // created rather than leaving matches outside every round.
+        const roundId = service.generateKey() as RoundId
+        const firstAdded = added[0]
+        if (firstAdded !== undefined) {
+          update[paths.tournamentRounds(tournamentId, roundId)] = {
+            roundId,
+            roundName: 'Round 1',
+            firstMatchId: firstAdded,
+            lastMatchId: lastAdded,
+          }
+        }
+      } else {
+        update[
+          service.path(
+            'tournaments',
+            tournamentId,
+            'rounds',
+            finalRound.roundId,
+            'lastMatchId',
+          )
+        ] = lastAdded
+      }
+
+      // A new match has no date, so the end is no longer known. `startDate`
+      // is unaffected — nothing earlier was added.
+      update[service.path('tournaments', tournamentId, 'endDate')] = null
+
+      await service.update(update)
+    },
+
+    /**
+     * **Off the end only, and only while unpublished.** Both restrictions are
+     * load-bearing rather than cautious.
+     *
+     * Off the end because `matchNumber` is the ordering key. Taking one out of
+     * the middle would renumber every match after it, and every round boundary
+     * is defined against those numbers — the structure would move without
+     * anything saying so.
+     *
+     * Unpublished because that is the window where nothing can reference a
+     * match. A league cannot be created against an unpublished tournament, so
+     * there are no lineups and no points to strand. Once there are, the reason
+     * nothing else in this admin deletes applies here too.
+     */
+    async removeMatches(
+      tournamentId: TournamentId,
+      count: number,
+    ): Promise<void> {
+      if (!Number.isInteger(count) || count < 1) {
+        throw new DataLayerError('unknown', 'Remove at least one match.')
+      }
+
+      const tournament = await service.read<Tournament>(
+        paths.tournaments(tournamentId),
+      )
+      if (tournament === undefined) {
+        throw new DataLayerError('unknown', 'No such tournament.')
+      }
+      if (tournament.publishedAt !== undefined) {
+        throw new DataLayerError(
+          'unknown',
+          'This tournament is published, so its matches may already have lineups and points against them. Matches can only be removed from a draft.',
+        )
+      }
+
+      const ordered = Object.values(tournament.matches ?? {}).sort(
+        (a, b) => a.matchNumber - b.matchNumber,
+      )
+      if (count >= ordered.length) {
+        throw new DataLayerError(
+          'unknown',
+          `A tournament needs at least one match, and this one has ${ordered.length}.`,
+        )
+      }
+
+      const removed = ordered.slice(ordered.length - count)
+      const remaining = ordered.slice(0, ordered.length - count)
+      const survivor = remaining[remaining.length - 1]
+      if (survivor === undefined) {
+        throw new DataLayerError('unknown', 'A tournament needs a match.')
+      }
+
+      const update: Record<string, unknown> = {}
+      const goneIds = new Set(removed.map((match) => match.matchId))
+
+      for (const match of removed) {
+        update[paths.tournamentMatches(tournamentId, match.matchId)] = null
+      }
+
+      // Rounds are trimmed to what is left. One that held nothing but removed
+      // matches goes with them, because an empty round is not a phase of
+      // anything — and the remaining rounds still tile the remaining matches.
+      const numberOf = (matchId: MatchId) =>
+        tournament.matches?.[matchId]?.matchNumber ?? 0
+
+      for (const round of Object.values(tournament.rounds ?? {})) {
+        if (numberOf(round.firstMatchId) > survivor.matchNumber) {
+          update[paths.tournamentRounds(tournamentId, round.roundId)] = null
+          continue
+        }
+        if (goneIds.has(round.lastMatchId)) {
+          update[
+            service.path(
+              'tournaments',
+              tournamentId,
+              'rounds',
+              round.roundId,
+              'lastMatchId',
+            )
+          ] = survivor.matchId
+        }
+      }
+
+      const kept: Record<string, Match> = {}
+      for (const match of remaining) kept[match.matchId] = match
+      Object.assign(update, tournamentDates(tournamentId, kept))
+
+      await service.update(update)
+    },
+
+    /**
+     * **The rounds must tile the matches exactly** — start at match one, no
+     * gaps, no overlaps, and end at the last match. That is checked here rather
+     * than in the form, because the form is convenience and this is the guard.
+     *
+     * Replacing the whole set keeps that rule in one place, and lets a mistaken
+     * split be undone, which matters when nothing deletes.
+     */
+    async setRounds(
+      tournamentId: TournamentId,
+      rounds: readonly TournamentRoundConfig[],
+    ): Promise<void> {
+      const [storedMatches, storedRounds] = await Promise.all([
+        service.read<Record<string, Match>>(
+          paths.tournamentMatches(tournamentId),
+        ),
+        service.read<Record<string, Round>>(
+          paths.tournamentRounds(tournamentId),
+        ),
+      ])
+
+      const matches = Object.values(storedMatches ?? {})
+      if (matches.length === 0) {
+        throw new DataLayerError(
+          'unknown',
+          'This tournament has no matches to put in rounds.',
+        )
+      }
+
+      const byNumber = new Map(matches.map((m) => [m.matchNumber, m.matchId]))
+      const lastNumber = Math.max(...matches.map((m) => m.matchNumber))
+
+      const ordered = [...rounds].sort(
+        (a, b) => a.firstMatchNumber - b.firstMatchNumber,
+      )
+      let expected = 1
+
+      for (const round of ordered) {
+        if (round.roundName.trim() === '') {
+          throw new DataLayerError('unknown', 'Every round needs a name.')
+        }
+        if (round.firstMatchNumber !== expected) {
+          throw new DataLayerError(
+            'unknown',
+            `Rounds must cover every match with no gaps or overlaps. Expected a round starting at match ${expected}.`,
+          )
+        }
+        if (round.lastMatchNumber < round.firstMatchNumber) {
+          throw new DataLayerError('unknown', 'A round cannot be empty.')
+        }
+        expected = round.lastMatchNumber + 1
+      }
+
+      if (expected !== lastNumber + 1) {
+        throw new DataLayerError(
+          'unknown',
+          `Rounds must cover every match. Match ${expected} onwards is in no round.`,
+        )
+      }
+
+      const existing = storedRounds ?? {}
+      const update: Record<string, unknown> = {}
+      const kept = new Set<string>()
+
+      for (const round of ordered) {
+        const roundId = round.roundId ?? (service.generateKey() as RoundId)
+        kept.add(roundId)
+
+        const firstMatchId = byNumber.get(round.firstMatchNumber)
+        const lastMatchId = byNumber.get(round.lastMatchNumber)
+        if (firstMatchId === undefined || lastMatchId === undefined) {
+          throw new DataLayerError('unknown', 'A round names a missing match.')
+        }
+
+        // Anything recorded against a round that keeps its id survives — today
+        // that is the eliminated teams.
+        const eliminatedTeams = existing[roundId]?.eliminatedTeams
+        const hasEliminated =
+          eliminatedTeams !== undefined &&
+          Object.keys(eliminatedTeams).length > 0
+
+        update[paths.tournamentRounds(tournamentId, roundId)] = {
+          roundId,
+          roundName: round.roundName.trim(),
+          firstMatchId,
+          lastMatchId,
+          ...(hasEliminated ? { eliminatedTeams } : {}),
+        }
+      }
+
+      for (const roundId of Object.keys(existing)) {
+        if (!kept.has(roundId)) {
+          update[paths.tournamentRounds(tournamentId, roundId as RoundId)] =
+            null
+        }
+      }
+
+      await service.update(update)
     },
 
     // -----------------------------------------------------------------------

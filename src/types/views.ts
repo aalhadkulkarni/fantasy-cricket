@@ -26,6 +26,7 @@ import type {
   LeagueId,
   MatchId,
   PlayerId,
+  RoundId,
   TeamId,
   TournamentId,
   TransferProposalId,
@@ -444,30 +445,69 @@ export interface PlayerConfig {
 }
 
 /**
- * A fixture being created or edited.
+ * A fixture being edited.
  *
- * `matchId` is absent when creating. Any write touching `startTimestamp` must
- * recompute the tournament's `startDate` and `endDate` in the same atomic
- * update, or they drift and every reader is wrong at once.
+ * Every field but the identity is optional, because **a match starts life as a
+ * placeholder** and is filled in later — the teams may not be decided and the
+ * date may not be announced.
+ *
+ * Any write touching `startTimestamp` must recompute the tournament's
+ * `startDate` and `endDate` in the same atomic update, or they drift and every
+ * reader is wrong at once.
  */
 export interface MatchConfig {
-  matchId?: MatchId
-  matchNumber: number
-  team1Id?: string
-  team2Id?: string
+  matchId: MatchId
+  team1Id?: TeamId
+  team2Id?: TeamId
   startTimestamp?: number
   venue?: string
 }
 
 /**
- * A new tournament. Its participating players are prefilled from each player's
- * current team, and creation **never writes back** to those.
+ * A new tournament.
+ *
+ * **Teams and players are not here.** They are set afterwards, through
+ * `updateTournamentParticipants`, using the same editor that changes them
+ * later. The format is not here either — it comes from the base tournament.
+ *
+ * `matchCount` creates that many numbered placeholders and one round covering
+ * all of them, since **every match must belong to exactly one round**.
  */
 export interface TournamentConfig {
   tournamentName: string
-  competitionId: string
-  participatingTeamIds: readonly string[]
-  matches?: readonly MatchConfig[]
+  competitionId: CompetitionId
+  /** At least one. Numbered from 1. */
+  matchCount: number
+}
+
+/**
+ * One round's boundaries, **in match numbers rather than match ids**.
+ *
+ * A round is stored as a first and last match id, but that is storage. What is
+ * being said is "matches 1 to 60", and `matchNumber` is the only legitimate
+ * ordering key — push keys sort by creation time, which is not the fixture
+ * order.
+ *
+ * `roundId` is absent for a round being created. A round that keeps its id
+ * keeps anything else recorded against it.
+ */
+export interface TournamentRoundConfig {
+  roundId?: RoundId
+  roundName: string
+  firstMatchNumber: number
+  lastMatchNumber: number
+}
+
+/**
+ * Every field optional. Omitting all of them returns everything.
+ *
+ * Unpublished tournaments are hidden unless asked for, the same way fully
+ * retired players are. **That is a system admin's request**, and once roles are
+ * enforced the layer has to check rather than trust it.
+ */
+export interface TournamentFilter {
+  competitionId?: CompetitionId
+  includeUnpublished?: boolean
 }
 
 /** One player's score for a match. Blank and zero are equivalent. */

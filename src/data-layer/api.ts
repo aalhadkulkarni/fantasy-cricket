@@ -46,6 +46,7 @@ import type { Environment } from '@/config/environments'
 import type {
   Competition,
   CompetitionId,
+  MatchConfig,
   Player,
   PlayerConfig,
   PlayerFilter,
@@ -55,6 +56,11 @@ import type {
   TeamConfig,
   TeamFilter,
   TeamId,
+  Tournament,
+  TournamentConfig,
+  TournamentFilter,
+  TournamentId,
+  TournamentRoundConfig,
   User,
   UserId,
 } from '@/types'
@@ -191,6 +197,91 @@ export interface Api {
    * since that is indistinguishable from a new player not yet assigned.
    */
   setPlayerRetired(playerId: PlayerId, isRetired: boolean): Promise<void>
+
+  // -- tournaments ---------------------------------------------------------
+
+  /** Unpublished tournaments are excluded unless the filter asks for them. */
+  getTournaments(filter?: TournamentFilter): Promise<Tournament[]>
+
+  getTournament(tournamentId: TournamentId): Promise<Tournament>
+
+  /**
+   * The tournament, its placeholder matches, and **one round covering all of
+   * them**, in one write. Every match belongs to exactly one round, so a
+   * tournament that existed briefly without a round would already be invalid.
+   *
+   * Teams and players are not set here. They come after, through
+   * `updateTournamentParticipants`.
+   */
+  createTournament(config: TournamentConfig): Promise<TournamentId>
+
+  renameTournament(
+    tournamentId: TournamentId,
+    tournamentName: string,
+  ): Promise<void>
+
+  /**
+   * Who is playing, **as a map of player to the team they play for here**.
+   *
+   * One argument rather than teams and players separately, because a player
+   * already names their team and two arguments could disagree. The teams follow
+   * from the players.
+   *
+   * **Frozen at this moment and never written back to the player.** A
+   * cricketer changing clubs next season must not rewrite a tournament that has
+   * already been played.
+   */
+  updateTournamentParticipants(
+    tournamentId: TournamentId,
+    participants: Partial<Record<PlayerId, TeamId>>,
+  ): Promise<void>
+
+  /**
+   * **Also recomputes the tournament's start and end**, in the same write. They
+   * are authoritative for reads rather than derived from the match list, so a
+   * change that misses the recompute makes every reader wrong at once.
+   */
+  updateMatches(
+    tournamentId: TournamentId,
+    matches: readonly MatchConfig[],
+  ): Promise<void>
+
+  /**
+   * Appends placeholders after the last match and extends the final round to
+   * cover them, so the rounds still account for every match.
+   *
+   * A tournament already under way can gain matches; that is expected rather
+   * than exceptional.
+   */
+  addMatches(tournamentId: TournamentId, count: number): Promise<void>
+
+  /**
+   * **The one delete in this admin, and it is narrow on purpose.** Matches come
+   * off the end only, and only while the tournament is unpublished.
+   *
+   * Off the end, because `matchNumber` is the ordering key: removing from the
+   * middle would renumber everything after it, silently moving every round and
+   * gameweek boundary defined against those numbers.
+   *
+   * Unpublished, because that is the window in which nothing can reference a
+   * match. A league cannot exist against an unpublished tournament, so there
+   * are no lineups and no points to strand — which is the reason nothing else
+   * here deletes.
+   */
+  removeMatches(tournamentId: TournamentId, count: number): Promise<void>
+
+  /**
+   * The whole round structure at once, **addressed in match numbers**.
+   *
+   * Replacing the set rather than splitting, merging and renaming separately
+   * means the one rule — the rounds tile the matches exactly — is checked in a
+   * single place. It is also what makes a mistaken split fixable, which matters
+   * because nothing here deletes.
+   */
+  setRounds(
+    tournamentId: TournamentId,
+    rounds: readonly TournamentRoundConfig[],
+  ): Promise<void>
 
   // -- system --------------------------------------------------------------
 
