@@ -22,9 +22,11 @@
  */
 
 import type {
+  CompetitionId,
   LeagueId,
   MatchId,
   PlayerId,
+  TournamentId,
   TransferProposalId,
   UserId,
 } from './ids'
@@ -382,10 +384,15 @@ export interface PlayerFilter {
   includeRetired?: boolean
 }
 
-/** Every field optional. Omitting all of them returns everything. */
+/**
+ * Every field optional. Omitting all of them returns everything.
+ *
+ * The catalogue is small enough that filtering happens after the read rather
+ * than as a database query — the page documents say the same about tournaments.
+ */
 export interface TeamFilter {
-  competitionId?: string
-  tournamentId?: string
+  competitionId?: CompetitionId
+  tournamentId?: TournamentId
   format?: Format
 }
 
@@ -394,10 +401,21 @@ export interface CompetitionConfig {
   formatId: Format
 }
 
+/**
+ * What the create and edit forms submit.
+ *
+ * `competitionIds` is a list here and a set-map in storage, which is the shape
+ * a form naturally produces. The backend converts.
+ *
+ * **Removing a competition is how a team is retired from it**, and there is no
+ * delete anywhere in this admin — `system-admin.md` says removing a team from
+ * its competitions is what takes it out of every tournament that could draw on
+ * it.
+ */
 export interface TeamConfig {
   teamName: string
   teamShortName: string
-  competitionIds: readonly string[]
+  competitionIds: readonly CompetitionId[]
 }
 
 export interface PlayerConfig {
