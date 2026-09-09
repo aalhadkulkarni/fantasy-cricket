@@ -44,10 +44,12 @@
 
 import type { Environment } from '@/config/environments'
 import type {
+  ArchivedLeagueCard,
   Competition,
   CompetitionId,
   FormatRecord,
   JoinableLeague,
+  LeagueCard,
   LeagueId,
   MatchConfig,
   Player,
@@ -359,6 +361,23 @@ export interface Api {
    * Identity comes from the session, never a parameter.
    */
   joinLeague(leagueId: LeagueId, fantasyTeamName: string): Promise<void>
+
+  /**
+   * The leagues you are in, **joined and spectated together**. Separating them
+   * would mean checking two places to answer "what am I involved in", and a
+   * spectator's card differs only in which actions it offers.
+   *
+   * Carries the phase and the member count, neither of which is stored: the
+   * phase is a function of the current time, and a slot counter would fan out to
+   * every member's index entry on every join.
+   */
+  getActiveLeagues(): Promise<LeagueCard[]>
+
+  /** Requested but not yet accepted or rejected. */
+  getPendingLeagues(): Promise<LeagueCard[]>
+
+  /** Read only when that tab is opened, since it grows without bound. */
+  getArchivedLeagues(): Promise<ArchivedLeagueCard[]>
 
   // -- system --------------------------------------------------------------
 

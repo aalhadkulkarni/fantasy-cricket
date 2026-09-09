@@ -23,6 +23,7 @@
  */
 
 import type { ArchivedLeagueCard, LeagueCard } from '@/types'
+import { getApi } from './api'
 import { notImplemented } from './not-implemented'
 import type {
   Subscriber,
@@ -49,17 +50,17 @@ import type {
  * fails the move still happens and the card omits the position.
  */
 export function getActiveLeagues(): Promise<LeagueCard[]> {
-  return notImplemented('getActiveLeagues', {})
+  return getApi().getActiveLeagues()
 }
 
 /** Requested but not yet accepted or rejected. */
 export function getPendingLeagues(): Promise<LeagueCard[]> {
-  return notImplemented('getPendingLeagues', {})
+  return getApi().getPendingLeagues()
 }
 
 /** Reads `users/{uid}/archivedLeagues`, and only when that tab is opened. */
 export function getArchivedLeagues(): Promise<ArchivedLeagueCard[]> {
-  return notImplemented('getArchivedLeagues', {})
+  return getApi().getArchivedLeagues()
 }
 
 /** Fetched only when the side panel is opened. A rejection is soft. */

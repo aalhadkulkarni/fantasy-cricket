@@ -36,9 +36,13 @@ import type {
   CompetitionId,
   FormatRecord,
   GameWeekId,
+  ArchivedLeagueCard,
+  ArchivedLeagueIndexEntry,
   JoinableLeague,
   League,
+  LeagueCard,
   LeagueId,
+  LeagueIndexEntry,
   LeagueJoinCode,
   LeagueMember,
   BannedUser,
@@ -70,6 +74,7 @@ import type {
 } from '@/types'
 
 import { DataLayerError } from '../data-layer-error'
+import { derivePhase } from '../league-phase'
 import {
   AUCTION_PHASE_RECORDS,
   FORMAT_RECORDS,
@@ -370,6 +375,81 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         myRoles: roles,
       },
     }
+  }
+
+  /**
+   * The shared body of the My Leagues reads. Only the filter differs.
+   */
+  async function leagueCards(
+    keep: (entry: LeagueIndexEntry) => boolean,
+  ): Promise<LeagueCard[]> {
+    const session = requireSession()
+    const index = await service.read<Record<string, LeagueIndexEntry>>(
+      paths.userLeagues(session.uid as UserId),
+    )
+
+    const entries = Object.entries(index ?? {}).filter(([, e]) => keep(e))
+    if (entries.length === 0) return []
+
+    // Once per distinct tournament, not once per league.
+    const tournamentIds = [...new Set(entries.map(([, e]) => e.tournamentId))]
+    const startDates = new Map<string, number | undefined>(
+      await Promise.all(
+        tournamentIds.map(
+          async (id) =>
+            [
+              id,
+              await service.read<number>(
+                service.path('tournaments', id, 'startDate'),
+              ),
+            ] as const,
+        ),
+      ),
+    )
+
+    const now = Date.now()
+
+    return Promise.all(
+      entries.map(async ([leagueId, entry]) => {
+        const id = leagueId as LeagueId
+
+        const [members, finishedAt, auctionStartTime, auctionRuntime] =
+          await Promise.all([
+            service.read<Record<string, LeagueMember>>(paths.leagueMembers(id)),
+            service.read<number>(service.path('leagues', id, 'finishedAt')),
+            entry.isAuctionEnabled
+              ? service.read<number>(
+                  service.path(
+                    'leagues',
+                    id,
+                    'auctionDetails',
+                    'auctionStartTime',
+                  ),
+                )
+              : undefined,
+            // Its absence is the normal pre-auction state, never an error.
+            entry.isAuctionEnabled
+              ? service.read<unknown>(service.path('liveAuctions', id))
+              : undefined,
+          ])
+
+        return {
+          ...entry,
+          leagueId: id,
+          filledSlots: Object.values(members ?? {}).filter(
+            (member) => member.leagueRoles?.manager === true,
+          ).length,
+          phase: derivePhase({
+            finishedAt,
+            tournamentStartDate: startDates.get(entry.tournamentId),
+            isAuctionEnabled: entry.isAuctionEnabled,
+            auctionStartTime,
+            auctionHasStarted: auctionRuntime !== undefined,
+            now,
+          }),
+        }
+      }),
+    )
   }
 
   const api: FirebaseApi = {
@@ -1527,6 +1607,50 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       }
 
       await service.update(update)
+    },
+
+    /**
+     * **One read of the index, then a few small ones per league.**
+     *
+     * The index carries what a card renders except two things it cannot: the
+     * phase, which depends on the current time, and the member count, which
+     * would otherwise need a stored counter updated on every member's own entry
+     * on every join.
+     *
+     * **Never reads `leagues/{id}` whole.** That is subtree-shaped and would
+     * drag an auction config — a base price for every player in the tournament
+     * — plus the gameweek structure, per league, to render six fields.
+     *
+     * **The tournament is read once per distinct tournament**, not once per
+     * league, because leagues cluster on tournaments.
+     */
+    async getActiveLeagues(): Promise<LeagueCard[]> {
+      return leagueCards((entry) => entry.membershipStatus === 'Accepted')
+    },
+
+    async getPendingLeagues(): Promise<LeagueCard[]> {
+      return leagueCards((entry) => entry.membershipStatus === 'Pending')
+    },
+
+    /**
+     * A separate node, read only when its tab is opened.
+     *
+     * **The move into it is not built.** A league belongs here once it has been
+     * finished for twenty-four hours, and Phase 1 has no scheduler, so the
+     * documents put that migration on the next My Leagues load as one atomic
+     * update. Nothing can be finished yet, so nothing has needed moving.
+     */
+    async getArchivedLeagues(): Promise<ArchivedLeagueCard[]> {
+      const session = requireSession()
+      const index = await service.read<
+        Record<string, ArchivedLeagueIndexEntry>
+      >(service.path('users', session.uid, 'archivedLeagues'))
+
+      return Object.entries(index ?? {}).map(([leagueId, entry]) => ({
+        ...entry,
+        leagueId: leagueId as LeagueId,
+        phase: 'finished' as const,
+      }))
     },
 
     // -----------------------------------------------------------------------
