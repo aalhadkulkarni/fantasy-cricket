@@ -9,6 +9,7 @@ import { Login } from './pages/login'
 import { MyLeagues } from './pages/my-leagues'
 import { NotFound } from './pages/not-found'
 import { SystemAdmin } from './pages/system-admin'
+import { TournamentAdmin } from './pages/tournament-admin'
 import { Tournaments } from './pages/tournaments'
 import { ROUTES } from './routes'
 
@@ -52,6 +53,14 @@ function App() {
                   element={
                     <RequireSystemAdmin>
                       <SystemAdmin />
+                    </RequireSystemAdmin>
+                  }
+                />
+                <Route
+                  path={ROUTES.adminTournament}
+                  element={
+                    <RequireSystemAdmin>
+                      <TournamentAdmin />
                     </RequireSystemAdmin>
                   }
                 />
