@@ -15,8 +15,8 @@
  * No `enum`. A reference table is not a name-to-value map — a category carries
  * an auction format, a role carries an icon and a short name — so an enum would
  * cover only the key and need a second structure beside it for the rest. The
- * union is also literally the string the database holds, which is the right
- * property for types whose job is to describe stored JSON.
+ * union is also literally the value the app passes around and compares, so
+ * there is never a wrapper to unwrap at a boundary.
  *
  * The display names are not duplicated here. They live in the database and are
  * read at runtime.

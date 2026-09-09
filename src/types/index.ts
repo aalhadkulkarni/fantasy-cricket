@@ -1,54 +1,52 @@
 /**
- * Persistence types: the shapes Firebase Realtime Database actually holds.
+ * The frontend's data types.
  *
- * **They logically represent the schema; they do not mirror its key layout.**
+ * Most of these still mirror the Firebase node they came from, because that is
+ * where the work started. **That is a stage, not the design.** These are the
+ * shapes the interface is built out of, and they are heading towards carrying
+ * resolved entities and derived values, so that a component receives what it
+ * renders rather than ids to go and chase.
  *
- * No derived values and no joins — what a consumer will want but cannot find is
- * recorded as a `DERIVED` or `JOIN` comment on the type itself, never quietly
- * added. But where the wire layout cannot be typed honestly, the grouping may
- * differ, so long as the information is identical.
+ * Three things follow from that:
  *
- * There is one such case today, and it is documented where it occurs:
- * `CurrentSubmittedBids` and `CurrentAcceptedBids` collect their per-player
- * entries under a named field — `submittedBids` and `acceptedBids` — because on
- * the wire those sit beside two fixed keys, and an index signature cannot
- * promise what that shape implies.
+ * - The `DERIVED` and `JOIN` markers scattered through these files are a
+ *   **build list**, not a record of things deliberately left out. Each one names
+ *   something a screen needs and cannot currently find.
+ * - **Resolve where the join is static for the context.** A player's role
+ *   record, their team for the tournament being viewed, whether they are
+ *   overseas — none of those change while a page is open, so resolving them
+ *   once and putting them on the type is pure gain. It also stops six
+ *   components each deriving the same thing slightly differently.
+ * - **Leave out what has no single answer.** Points are per player per match,
+ *   rank needs every manager's total, a gameweek's lock depends on the clock.
+ *   Those belong to per-screen shapes composed from these types, not to the
+ *   entities themselves.
  *
- * The line to hold: **rearranging is allowed, inventing is not.** If a value is
- * not in the database, it does not appear here at any cost.
+ * Each file names the database path it is currently sourced from. Keep those:
+ * knowing where a value comes from stays useful, including in Phase 2. But a
+ * path says where the data is read, not what the type is for.
  *
- * One file per database node, so a file corresponds to something you can fetch
- * in one read. That matters because reads here are subtree-shaped: fetching a
- * path pulls everything beneath it.
- *
- * Whether components should consume these directly, or a separate domain shape
- * mapped from them, is **not yet decided**. These are needed either way — they
- * are what the data layer reads and writes.
+ * Reads are subtree-shaped — fetching a path pulls everything beneath it — and
+ * that governs how the data layer fetches. It is why several of these types are
+ * grouped the way they are.
  *
  * ---
  *
- * **Times are epoch milliseconds.** Every stored instant — `finishedAt`,
+ * **Times are epoch milliseconds.** Every instant — `finishedAt`,
  * `startTimestamp`, `deadline`, `requestedAt`, `bannedAt`, `publishedAt`,
- * `archivedAt` and the rest — is a millisecond count, never seconds. Firebase's
- * server timestamp resolves to exactly that on read, so `new Date(value)` works
- * on any of them directly.
+ * `archivedAt` and the rest — is a millisecond count, never seconds.
  *
- * `Date` was **considered and deferred, not rejected.** It is permitted under
- * the rule above, because converting at the boundary is the data layer's job
- * and a `Date` still logically represents what is stored. It is not here yet
- * for one reason: it would settle the domain-versus-persistence question above
- * as a side effect. If a domain shape appears, `Date` belongs there and these
- * stay numeric. If one never does, these become the app's types and `Date`
- * would have been the better call. **Revisit when that question is settled,
- * not before.**
+ * They stay `number` for now. Firebase's server timestamp arrives as exactly
+ * that and `new Date(value)` takes it directly, so converting costs nothing
+ * wherever a real `Date` is wanted.
  *
- * The reason it is worth revisiting: instants and durations are the same type
- * today. `fantasyLeagueTeamChangesDeadlineOffset`, its standard-league twin in
+ * The reason to revisit: **instants and durations are the same type today.**
+ * `fantasyLeagueTeamChangesDeadlineOffset`, its standard-league twin in
  * `standards.ts`, and the timeline's time limit, time added and time remaining
  * are all millisecond counts too. Assigning a duration where an instant belongs
  * compiles cleanly and is silently wrong.
  *
- * **Durations stay `number` regardless.** That part is decided, not deferred.
+ * **Durations stay `number` regardless.** That part is decided.
  */
 
 export type * from './ids'

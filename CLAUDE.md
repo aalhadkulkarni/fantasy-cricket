@@ -89,6 +89,12 @@ anything above it.
    references.
 3. **All reads, writes and subscriptions go through the layer.**
 4. **Reads and subscriptions are distinct**, with different lifecycles.
+5. **The schema does not leak either.** The layer is the contract between client
+   and server — the equivalent of a set of REST endpoints. **No function may
+   require its caller to know how the backend schema is shaped**, in its
+   parameters or in what it returns. If a caller has to know that lineups are
+   split across two nodes, or that points are held in both a match-major and a
+   player-major copy, the function is wrong.
 
 ### The data layer is the Phase 1 server
 
@@ -192,6 +198,14 @@ to retrofit. Contrast is already handled by the design tokens.
 | `docs/07-design-system.md`   | Tokens, typography, and the rules governing them                 |
 | `docs/design-reference.html` | **Open in a browser.** The source of truth for exact CSS values  |
 | `docs/08-pages/`             | One document per page. Start at `index.md`.                      |
+| `src/types/`                 | The frontend's data types. **Not the schema** — see below        |
+
+**`src/types/` is not a copy of the schema.** It started as one, which is why
+most of it still looks like `docs/data-model.js`. It is being built towards
+types the interface is designed against: resolved entities and derived values,
+so a component receives what it renders rather than ids to chase. The `DERIVED`
+and `JOIN` markers in those files are a build list, not a record of things
+deliberately left out. `src/types/index.ts` states the direction in full.
 
 **Where a general document conflicts with a specific one, the specific document
 wins** — but flag the conflict rather than silently choosing.

@@ -12,6 +12,14 @@ file for exact shapes.
 > comments. It is not imported by anything. It exists so the schema can be read,
 > checked, and parsed.
 
+> **`src/types/` is not this document, and is not `data-model.js`.** Those are
+> the frontend's data types. They began as a mirror of the schema, which is why
+> most of them still resemble it, but they are being built towards what the
+> interface needs — resolved entities and derived values rather than ids to
+> chase. **The two are expected to diverge**, and a difference between them is
+> not automatically a defect in either. This document stays the authority on
+> what Firebase holds.
+
 ---
 
 ## Environments
