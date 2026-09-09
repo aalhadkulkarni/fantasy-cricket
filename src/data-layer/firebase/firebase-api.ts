@@ -38,6 +38,7 @@ import type {
   GameWeekId,
   LeagueId,
   LeagueJoinCode,
+  LeagueMember,
   LineupRules,
   Match,
   MatchConfig,
@@ -59,6 +60,8 @@ import type {
   TournamentConfig,
   TournamentFilter,
   TournamentId,
+  TournamentLeagueCard,
+  TournamentLeagueIndexEntry,
   TournamentRoundConfig,
   User,
   UserId,
@@ -730,6 +733,57 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         )
       }
       return tournament
+    },
+
+    /**
+     * **The index first, then one read per league for its members.**
+     *
+     * The index carries what the row renders and deliberately not how full the
+     * league is: a stored counter would have to be updated on every member's
+     * own index entry on every join. So the count is derived, and the cost is
+     * one small read each — `leagueMembers` only, never the league itself,
+     * which would drag its whole auction config and gameweek structure.
+     */
+    async getLeaguesForTournament(
+      tournamentId: TournamentId,
+    ): Promise<TournamentLeagueCard[]> {
+      const index = await service.read<
+        Record<string, TournamentLeagueIndexEntry>
+      >(service.path('tournaments', tournamentId, 'leagues'))
+
+      const entries = Object.entries(index ?? {})
+      if (entries.length === 0) return []
+
+      const me = service.currentSession()?.uid
+
+      const cards = await Promise.all(
+        entries.map(async ([leagueId, entry]) => {
+          const members = await service.read<Record<string, LeagueMember>>(
+            service.path('leagues', leagueId, 'leagueMembers'),
+          )
+
+          const all = Object.entries(members ?? {})
+
+          return {
+            leagueId: leagueId as LeagueId,
+            leagueName: entry.leagueName,
+            isAuctionEnabled: entry.isAuctionEnabled,
+            leagueEntry: entry.leagueEntry,
+            maxSlots: entry.maxSlots,
+            // Managers only. An owner or admin who does not play holds no
+            // slot, and a ban strips `manager`, so both drop out here for free.
+            filledSlots: all.filter(
+              ([, member]) => member.leagueRoles?.manager === true,
+            ).length,
+            // Empty when not a member. Owning a league is not playing in it,
+            // so the caller has to be able to tell those apart.
+            myRoles:
+              (me === undefined ? undefined : members?.[me]?.leagueRoles) ?? {},
+          }
+        }),
+      )
+
+      return cards.sort((a, b) => a.leagueName.localeCompare(b.leagueName))
     },
 
     /**

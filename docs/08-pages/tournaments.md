@@ -1,13 +1,13 @@
 # Tournaments — list and detail
 
-*Users see "Tournaments". In the model these are `tournaments`; the level above
+_Users see "Tournaments". In the model these are `tournaments`; the level above
 them is `competitions`, shown to users as "Base Tournament". See
-`site-header.md`.*
+`site-header.md`._
 
 ## Public and closed leagues
 
 Leagues are **public** or **closed**. **Closed leagues are visible to
-everyone** — only *entry* is restricted, by admin approval.
+everyone** — only _entry_ is restricted, by admin approval.
 
 > **Consequence:** the league code is a **convenience shortcut, not the access
 > mechanism.** A closed league can be found on its tournament page and requested
@@ -15,7 +15,7 @@ everyone** — only *entry* is restricted, by admin approval.
 
 ## Tournament list
 
-**Tabs:** Upcoming *(default)* · Active · Past
+**Tabs:** Upcoming _(default)_ · Active · Past
 
 > **Upcoming is the default deliberately.** For a tournament already running,
 > people reach their leagues through My Leagues. **Upcoming is where users go to
@@ -34,14 +34,14 @@ everyone** — only *entry* is restricted, by admin approval.
 **Tab membership comes from `startDate` and `completedAt`.** Readers never walk
 the match list to work out tournament timing.
 
-| Tab | When |
-|---|---|
-| **Upcoming** | `startDate` is in the future |
-| **Active** | `startDate` has passed and `completedAt` is absent |
-| **Past** | `completedAt` is set |
+| Tab          | When                                               |
+| ------------ | -------------------------------------------------- |
+| **Upcoming** | `startDate` is in the future                       |
+| **Active**   | `startDate` has passed and `completedAt` is absent |
+| **Past**     | `completedAt` is set                               |
 
 > **Past is a human decision, not a date.** `endDate` is the last match's
-> *start* time, and a match is not over when it starts — a Test runs five days.
+> _start_ time, and a match is not over when it starts — a Test runs five days.
 > Deriving Past from it would drop a tournament out of Active while its final
 > was still being played. Adding a format duration would be right most of the
 > time and wrong on every rain delay and early finish, so the tab follows the
@@ -77,12 +77,23 @@ that it stays **Active**, however long ago its last match was scheduled.
 
 Shows **number of matches** and **rounds**.
 
-**Buttons opening modals:** Teams · Players · **Fixtures** (the full schedule).
+**One button opening a modal: Fixtures** — the full schedule.
+
+> **Players are cut from this page.** Someone here is deciding whether to join a
+> league, and a list of thirty-six cricketers with no context does not help them
+> decide. It is also the expensive read on this page: the tournament stores
+> player ids, so rendering names means reading the entire global catalogue to
+> join against them.
+
+> **Teams are deferred** — see `09-future-exploration.md`. The fixtures modal
+> already names both teams in every match, so a separate teams list is
+> redundant while the fixtures are known. It stops being redundant when they are
+> not, which is the trigger for building it.
 
 **Existing leagues for this tournament** — both public and closed.
 
 > **Rendered with the same league card component as My Leagues, in a variant.**
-> There, cards are for *your* leagues and carry status, spectator tags and
+> There, cards are for _your_ leagues and carry status, spectator tags and
 > go-to-league targets. Here you may have no relationship with the league, so
 > the card carries **join / request to join** and **slots remaining** instead.
 > Shared component with variants, not two implementations.

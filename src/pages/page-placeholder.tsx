@@ -28,7 +28,7 @@ export function PagePlaceholder({
 
         <p className="mt-2 text-sm text-muted-foreground">{intro}</p>
 
-        <div className="mt-8 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
+        <div className="floodlit mt-8 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
           <p className="font-mono text-xs tracking-wide text-subtle-foreground uppercase">
             Placeholder
           </p>

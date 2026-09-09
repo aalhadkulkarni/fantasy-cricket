@@ -57,7 +57,7 @@ export function SystemAdmin() {
           onChanged={catalogueChanged}
         />
 
-        <div className="mt-4 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
+        <div className="floodlit mt-4 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
           <p className="font-mono text-xs tracking-wide text-subtle-foreground uppercase">
             Still to come
           </p>
@@ -108,7 +108,7 @@ function SetUpBasicSystem({ onSetUp }: { onSetUp: () => void }) {
   }
 
   return (
-    <div className="mt-8 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
+    <div className="floodlit mt-8 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
       <h2 className="text-base font-semibold">Set up basic system</h2>
       <p className="mt-2 text-sm text-muted-foreground">
         Writes the reference tables and the standards a new league inherits.

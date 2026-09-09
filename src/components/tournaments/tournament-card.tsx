@@ -1,3 +1,6 @@
+import { Link } from 'react-router'
+
+import { tournamentPath } from '@/routes'
 import type { Tournament, TournamentStatus } from '@/types'
 
 /**
@@ -14,8 +17,8 @@ import type { Tournament, TournamentStatus } from '@/types'
  * detail page has one and so does the header, and a third entry point would
  * compete for space a card does not have.
  *
- * Not a link yet. B2 gives it somewhere to go, and rule 5 then makes the whole
- * body the link.
+ * **The whole body is the link**, per rule 5 of the design system: buttons are
+ * for secondary actions, and a card with one destination does not need one.
  */
 export function TournamentCard({
   tournament,
@@ -36,7 +39,10 @@ export function TournamentCard({
       and no border tint, so it does not spend the live marker that `is-live`
       reserves for an auction running or a deadline closing in.
     */
-    <article className="floodlit flex flex-col gap-3.5 rounded-lg border bg-card p-5 text-card-foreground">
+    <Link
+      to={tournamentPath(tournament.tournamentId)}
+      className="floodlit flex flex-col gap-3.5 rounded-lg border bg-card p-5 text-card-foreground transition-[border-color,background-color,transform] hover:-translate-y-0.5 hover:border-muted-foreground hover:bg-accent"
+    >
       <div>
         <h3 className="text-[17px] leading-tight font-bold tracking-[-0.015em]">
           {tournament.tournamentName}
@@ -44,7 +50,14 @@ export function TournamentCard({
 
         {formatName !== undefined && (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            <span className="rounded-[4px] border px-[7px] py-[3px] font-mono text-[9.5px] tracking-[0.08em] text-muted-foreground uppercase">
+            {/*
+              Blue, on a blue-tinted fill, matching the bloom washing the card.
+
+              This is a departure from rule 1 of the design system, which
+              reserves the accent for live states and names type tags as
+              somewhere it must not go. Recorded rather than silently taken.
+            */}
+            <span className="rounded-[4px] border border-live-text/35 bg-live-text/10 px-[7px] py-[3px] font-mono text-[9.5px] tracking-[0.08em] text-live-text uppercase">
               {formatName}
             </span>
           </div>
@@ -73,7 +86,7 @@ export function TournamentCard({
           {matches} {matches === 1 ? 'match' : 'matches'}
         </span>
       </div>
-    </article>
+    </Link>
   )
 }
 

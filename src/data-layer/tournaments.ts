@@ -8,7 +8,6 @@
  */
 
 import type {
-  LeagueId,
   Match,
   Player,
   Round,
@@ -16,6 +15,7 @@ import type {
   Tournament,
   TournamentFilter,
   TournamentId,
+  TournamentLeagueCard,
   TournamentLeagueIndexEntry,
 } from '@/types'
 import { getApi } from './api'
@@ -94,11 +94,17 @@ export function getPlayersForTournament(
   return notImplemented('getPlayersForTournament', { tournamentId })
 }
 
-/** The thin index carried on the tournament, not full leagues. */
+/**
+ * Every league on this tournament, **public and closed alike**. Closed leagues
+ * are visible to everyone; only entry is restricted, which is why a join code
+ * is a shortcut rather than the access mechanism.
+ *
+ * Carries how full each one is, which nothing stores. See the type.
+ */
 export function getLeaguesForTournament(
   tournamentId: TournamentId,
-): Promise<Record<LeagueId, TournamentLeagueIndexEntry>> {
-  return notImplemented('getLeaguesForTournament', { tournamentId })
+): Promise<TournamentLeagueCard[]> {
+  return getApi().getLeaguesForTournament(tournamentId)
 }
 
 /**
