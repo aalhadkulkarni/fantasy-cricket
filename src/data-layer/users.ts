@@ -33,6 +33,23 @@ import type { Subscriber, Unsubscribe } from './subscriptions'
 export type { SignInOutcome }
 
 /**
+ * Who is signed in, as far as the auth provider is concerned.
+ *
+ * Distinct from a `User`, which is our own record and may not exist yet. This
+ * is available the moment the session resolves; that is not.
+ */
+export interface SignedInIdentity {
+  userId: UserId
+
+  /**
+   * Google's `photoURL`. **Absent when the account has no picture**, which is
+   * one of the two cases an initials fallback has to cover — the other being a
+   * URL that stops loading later.
+   */
+  photoUrl: string | undefined
+}
+
+/**
  * Whether anyone is signed in, and who.
  *
  * Fires with the current answer and again on each change. **It has not fired
@@ -41,10 +58,14 @@ export type { SignInOutcome }
  * page before redirecting, which is why the caller has to tell those apart.
  */
 export function onAuthChanged(
-  callback: Subscriber<UserId | undefined>,
+  callback: Subscriber<SignedInIdentity | undefined>,
 ): Unsubscribe {
   return getFirebaseService().onAuthChanged((session) => {
-    callback(session === undefined ? undefined : (session.uid as UserId))
+    callback(
+      session === undefined
+        ? undefined
+        : { userId: session.uid as UserId, photoUrl: session.photoUrl },
+    )
   })
 }
 

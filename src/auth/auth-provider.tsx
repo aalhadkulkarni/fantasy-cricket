@@ -21,28 +21,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * created the account, which is a different question — someone who abandoned
    * the modal and returned is `isNewUser: false` and still has no record.
    */
-  const loadUser = useCallback(async (userId: UserId) => {
-    try {
-      setState({ status: 'signedIn', userId, user: await getCurrentUser() })
-    } catch {
-      // A failed read must not strand the app in `resolving` forever. Treated
-      // as no record, which routes to the modal, where a retry is possible.
-      setState({ status: 'signedIn', userId, user: undefined })
-    }
-  }, [])
+  const loadUser = useCallback(
+    async (userId: UserId, photoUrl: string | undefined) => {
+      try {
+        setState({
+          status: 'signedIn',
+          userId,
+          photoUrl,
+          user: await getCurrentUser(),
+        })
+      } catch {
+        // A failed read must not strand the app in `resolving` forever. Treated
+        // as no record, which routes to the modal, where a retry is possible.
+        setState({ status: 'signedIn', userId, photoUrl, user: undefined })
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
-    return onAuthChanged((userId) => {
-      if (userId === undefined) {
+    return onAuthChanged((identity) => {
+      if (identity === undefined) {
         setState({ status: 'signedOut' })
         return
       }
-      void loadUser(userId)
+      void loadUser(identity.userId, identity.photoUrl)
     })
   }, [loadUser])
 
   const refreshUser = useCallback(async () => {
-    if (state.status === 'signedIn') await loadUser(state.userId)
+    if (state.status === 'signedIn')
+      await loadUser(state.userId, state.photoUrl)
   }, [state, loadUser])
 
   return (
