@@ -11,7 +11,7 @@ export function MyLeagues() {
   return (
     <PagePlaceholder
       title="My Leagues"
-      intro="Home Test. Every league you have joined or are spectating."
+      intro="Home. Every league you have joined or are spectating."
       coming="Three tabs — Active, Pending and Archived — with a league card each, and an empty state when the first two are both empty. See docs/08-pages/my-leagues.md."
     />
   )
