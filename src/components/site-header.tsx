@@ -1,5 +1,8 @@
 import { MenuIcon } from 'lucide-react'
+import { useState } from 'react'
+import { NavLink as RouterNavLink } from 'react-router'
 
+import { JoinLeagueDialog } from '@/components/join-league-dialog'
 import { PageContainer } from '@/components/layout/page-container'
 import {
   Sheet,
@@ -9,6 +12,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
+import { ROUTES } from '@/routes'
 
 /**
  * Persistent navigation across the whole app. See
@@ -27,19 +31,20 @@ import { cn } from '@/lib/utils'
 
 interface NavItem {
   label: string
-  href: string
+  to: string
 }
 
 /**
  * Home is My Leagues, so the brand and the first item share a destination.
  * That is deliberate — see the opening line of `docs/08-pages/my-leagues.md`.
  *
- * Join a League is absent because it opens a modal rather than going anywhere.
+ * Join a League is not in this list because it opens a modal rather than going
+ * anywhere, so it is rendered alongside as a button rather than a link.
  */
 const NAV_ITEMS: readonly NavItem[] = [
-  { label: 'My Leagues', href: '/' },
-  { label: 'Tournaments', href: '/tournaments' },
-  { label: 'Create a League', href: '/leagues/new' },
+  { label: 'My Leagues', to: ROUTES.home },
+  { label: 'Tournaments', to: ROUTES.tournaments },
+  { label: 'Create a League', to: ROUTES.createLeague },
 ]
 
 /**
@@ -47,7 +52,7 @@ const NAV_ITEMS: readonly NavItem[] = [
  * everyone for now. It stays in the list because 3.3 builds a page per header
  * item and 3.5 routes them — dropping it now would leave `/admin` orphaned.
  */
-const ADMIN_ITEM: NavItem = { label: 'Admin panel', href: '/admin' }
+const ADMIN_ITEM: NavItem = { label: 'Admin panel', to: ROUTES.admin }
 
 /**
  * TODO: real initials, from the signed-in user. `site-header.md` calls for
@@ -65,70 +70,105 @@ const PLACEHOLDER_INITIALS = 'AK'
 const ACTIONS_COUNT = 0
 
 export function SiteHeader() {
+  /*
+    Owned here rather than inside the dialog so the mobile sheet can close
+    itself before this opens. A dialog inside an open sheet means two focus
+    traps stacked on each other.
+  */
+  const [isJoinOpen, setIsJoinOpen] = useState(false)
+
   return (
     <header className="border-b">
       <PageContainer className="flex h-[58px] items-center gap-6 sm:gap-[26px]">
-        <MobileNav />
+        <MobileNav onJoinLeague={() => setIsJoinOpen(true)} />
 
         {/*
           The brand is one of the two named exceptions to rule 1 — see
           `docs/07-design-system.md`. `--live` is otherwise reserved for live
           states, and this is a mark rather than a state.
         */}
-        <a
-          href="/"
+        <RouterNavLink
+          to={ROUTES.home}
           className="text-[15px] font-extrabold tracking-[-0.02em] whitespace-nowrap"
         >
           Fantasy <span className="text-live-text">League</span>
-        </a>
+        </RouterNavLink>
 
         {/* Hidden below 640px, as in the reference. MobileNav carries these there. */}
         <nav className="ml-2 hidden gap-5 sm:flex">
           {[...NAV_ITEMS, ADMIN_ITEM].map((item) => (
-            <NavLink key={item.href} item={item} />
+            <NavLink key={item.to} item={item} />
           ))}
-          <JoinLeagueButton className="text-[13.5px] font-medium text-muted-foreground hover:text-foreground" />
+          <JoinLeagueButton
+            onClick={() => setIsJoinOpen(true)}
+            className="text-[13.5px] font-medium text-muted-foreground hover:text-foreground"
+          />
         </nav>
 
         <div className="ml-auto flex items-center gap-3">
-          <a
-            href="/actions"
-            className="flex items-center gap-2 rounded-sm border px-3.75 py-2.5 text-[13px] font-semibold whitespace-nowrap hover:bg-accent"
+          <RouterNavLink
+            to={ROUTES.actions}
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-2 rounded-sm border px-3.75 py-2.5 text-[13px] font-semibold whitespace-nowrap hover:bg-accent',
+                isActive && 'bg-accent',
+              )
+            }
           >
             Actions
             <ActionsCount count={ACTIONS_COUNT} />
-          </a>
+          </RouterNavLink>
 
           <Avatar initials={PLACEHOLDER_INITIALS} />
         </div>
       </PageContainer>
+
+      <JoinLeagueDialog open={isJoinOpen} onOpenChange={setIsJoinOpen} />
     </header>
   )
 }
 
 /**
- * Real `href` values rather than `#`, so the markup is semantically correct and
- * 3.5 is a swap of `<a>` for the router's `<Link>`.
+ * The active item takes `--foreground` while the rest sit in
+ * `--muted-foreground`, as `.nav a.on` does in the design reference.
  *
- * TODO: the active item takes `--foreground` while the rest are
- * `--muted-foreground`. Which one is active needs the current route, so it
- * arrives with routing.
+ * `end` matters on home: without it, `/` would count as active on every route,
+ * since every path starts with a slash.
  */
 function NavLink({ item }: { item: NavItem }) {
   return (
-    <a
-      href={item.href}
-      className="text-[13.5px] font-medium whitespace-nowrap text-muted-foreground hover:text-foreground"
+    <RouterNavLink
+      to={item.to}
+      end={item.to === ROUTES.home}
+      className={({ isActive }) =>
+        cn(
+          'text-[13.5px] font-medium whitespace-nowrap hover:text-foreground',
+          isActive ? 'text-foreground' : 'text-muted-foreground',
+        )
+      }
     >
       {item.label}
-    </a>
+    </RouterNavLink>
   )
 }
 
-/** TODO: opens the join-by-code modal, which is a later story. */
-function JoinLeagueButton({ className }: { className?: string }) {
+/**
+ * Opens the join-by-code dialog. A button rather than a link because it goes
+ * nowhere — `docs/08-pages/site-header.md` specifies a modal.
+ */
+function JoinLeagueButton({
+  onClick,
+  className,
+}: {
+  onClick: () => void
+  className?: string
+}) {
   return (
-    <button type="button" className={cn('text-left', className)}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn('cursor-pointer text-left', className)}
+    >
       Join a League
     </button>
   )
@@ -179,10 +219,16 @@ function Avatar({ initials }: { initials: string }) {
  * A sheet rather than a hand-rolled panel because an accessible drawer needs a
  * focus trap, escape handling and the right ARIA, and getting those subtly
  * wrong is worse than not having them.
+ *
+ * **Open state is held here so navigating closes it.** With client-side routing
+ * the page swaps underneath without the sheet noticing, so an uncontrolled
+ * sheet would sit open over whichever page you just chose.
  */
-function MobileNav() {
+function MobileNav({ onJoinLeague }: { onJoinLeague: () => void }) {
+  const [isOpen, setIsOpen] = useState(false)
+
   return (
-    <Sheet>
+    <Sheet open={isOpen} onOpenChange={setIsOpen}>
       <SheetTrigger
         aria-label="Open navigation"
         className="-ml-2 grid size-9 shrink-0 place-items-center rounded-sm hover:bg-accent sm:hidden"
@@ -199,15 +245,30 @@ function MobileNav() {
 
         <nav className="flex flex-col gap-1 px-4">
           {[...NAV_ITEMS, ADMIN_ITEM].map((item) => (
-            <a
-              key={item.href}
-              href={item.href}
-              className="rounded-sm px-3 py-2.5 text-sm font-medium hover:bg-accent"
+            <RouterNavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === ROUTES.home}
+              onClick={() => setIsOpen(false)}
+              className={({ isActive }) =>
+                cn(
+                  'rounded-sm px-3 py-2.5 text-sm font-medium hover:bg-accent',
+                  isActive && 'bg-accent text-foreground',
+                )
+              }
             >
               {item.label}
-            </a>
+            </RouterNavLink>
           ))}
-          <JoinLeagueButton className="rounded-sm px-3 py-2.5 text-sm font-medium hover:bg-accent" />
+          <JoinLeagueButton
+            onClick={() => {
+              // Close the sheet first, so the dialog is not a focus trap
+              // opening inside another focus trap.
+              setIsOpen(false)
+              onJoinLeague()
+            }}
+            className="rounded-sm px-3 py-2.5 text-sm font-medium hover:bg-accent"
+          />
         </nav>
       </SheetContent>
     </Sheet>
