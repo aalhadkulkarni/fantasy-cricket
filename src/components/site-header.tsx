@@ -69,10 +69,6 @@ const ADMIN_ITEM: NavItem = { label: 'Admin panel', to: ROUTES.admin }
 /**
  * At most two letters from the display name — "Aalhad Kulkarni" gives AK, a
  * single word gives its first letter.
- *
- * TODO: `photoURL` from Google auth, with this as the fallback. **Two cases
- * need it, not one:** an account with no picture, and a hotlinked Google image
- * that fails to load later because it was changed or removed.
  */
 function initialsFrom(userName: string): string {
   const words = userName.trim().split(/\s+/).filter(Boolean)
@@ -96,6 +92,7 @@ export function SiteHeader() {
   // `RequireAccount`, which is what guarantees that.
   const { state } = useAuth()
   const user = state.status === 'signedIn' ? state.user : undefined
+  const photoUrl = state.status === 'signedIn' ? state.photoUrl : undefined
 
   /*
     Owned here rather than inside the dialog so the mobile sheet can close
@@ -149,6 +146,7 @@ export function SiteHeader() {
           <AccountMenu
             userName={user?.userName ?? ''}
             email={user?.googleEmailId ?? ''}
+            photoUrl={photoUrl}
           />
         </div>
       </PageContainer>
@@ -241,14 +239,22 @@ function ActionsCount({ count }: { count: number }) {
  * hotlinked Google image that fails to load later because it was changed or
  * removed.
  */
-function AccountMenu({ userName, email }: { userName: string; email: string }) {
+function AccountMenu({
+  userName,
+  email,
+  photoUrl,
+}: {
+  userName: string
+  email: string
+  photoUrl: string | undefined
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={`Account: ${userName}`}
-        className="grid size-[30px] shrink-0 place-items-center rounded-full border bg-secondary font-mono text-[10.5px] font-bold text-muted-foreground hover:text-foreground focus-visible:ring-ring"
+        className="grid size-[30px] shrink-0 place-items-center overflow-hidden rounded-full border bg-secondary font-mono text-[10.5px] font-bold text-muted-foreground hover:text-foreground focus-visible:ring-ring"
       >
-        {initialsFrom(userName)}
+        <AvatarImage photoUrl={photoUrl} userName={userName} />
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" className="w-56">
@@ -275,6 +281,46 @@ function AccountMenu({ userName, email }: { userName: string; email: string }) {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+/**
+ * Google's `photoURL`, with initials behind it.
+ *
+ * **Two things can go wrong, and only one is a missing URL.** An account may
+ * have no picture at all, and a URL that worked at sign-in can stop working
+ * later because the person changed or removed it. Checking for `undefined`
+ * covers the first; `onError` is the only thing that covers the second, and
+ * without it the avatar becomes a broken-image icon in the header.
+ *
+ * The failed URL is remembered rather than a boolean, so signing in as someone
+ * else retries with their picture instead of inheriting the last failure.
+ *
+ * `referrerPolicy` matters: Google's image host rejects requests carrying a
+ * referrer from an unrecognised origin, which shows up as an avatar that works
+ * locally and breaks once deployed.
+ */
+function AvatarImage({
+  photoUrl,
+  userName,
+}: {
+  photoUrl: string | undefined
+  userName: string
+}) {
+  const [failedUrl, setFailedUrl] = useState<string | undefined>(undefined)
+
+  if (photoUrl === undefined || photoUrl === failedUrl) {
+    return <>{initialsFrom(userName)}</>
+  }
+
+  return (
+    <img
+      src={photoUrl}
+      alt=""
+      referrerPolicy="no-referrer"
+      onError={() => setFailedUrl(photoUrl)}
+      className="size-full object-cover"
+    />
   )
 }
 

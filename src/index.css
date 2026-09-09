@@ -241,6 +241,39 @@
 }
 
 @layer components {
+  /* ============================================================
+     THE AMBIENT FLOODLIGHT — atmosphere, not a state marker.
+
+     A wash of --bloom from above the frame, for pages whose whole
+     job is to establish the concept. The design reference already
+     does this on .stage::before at 0.1; this is the same idea a
+     little stronger, on a page that is nothing but frame.
+
+     NOT the live card's treatment. That one adds a discrete
+     animated beam (.is-live::after) and means something is
+     happening right now. Rule 3 allows one glowing element per
+     screen, so a beam here would spend a marker the app has not
+     used yet. Ambient light reads as environment; a line reads as
+     a claim.
+     ============================================================ */
+  .floodlit {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .floodlit::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto;
+    height: 420px;
+    pointer-events: none;
+    background: radial-gradient(
+      110% 100% at 50% -25%,
+      rgba(var(--bloom), 0.14),
+      transparent 62%
+    );
+  }
+
   .is-live {
     position: relative;
     overflow: hidden;

@@ -27,7 +27,13 @@ import type { User, UserId } from '@/types'
 export type AuthState =
   | { status: 'resolving' }
   | { status: 'signedOut' }
-  | { status: 'signedIn'; userId: UserId; user: User | undefined }
+  | {
+      status: 'signedIn'
+      userId: UserId
+      /** From the auth session, so it is available before any record exists. */
+      photoUrl: string | undefined
+      user: User | undefined
+    }
 
 export interface AuthContextValue {
   state: AuthState
