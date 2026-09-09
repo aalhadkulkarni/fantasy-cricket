@@ -8,6 +8,7 @@
  */
 
 import type {
+  JoinableLeague,
   Match,
   Player,
   Round,
@@ -15,7 +16,6 @@ import type {
   Tournament,
   TournamentFilter,
   TournamentId,
-  TournamentLeagueCard,
   TournamentLeagueIndexEntry,
 } from '@/types'
 import { getApi } from './api'
@@ -103,7 +103,7 @@ export function getPlayersForTournament(
  */
 export function getLeaguesForTournament(
   tournamentId: TournamentId,
-): Promise<TournamentLeagueCard[]> {
+): Promise<JoinableLeague[]> {
   return getApi().getLeaguesForTournament(tournamentId)
 }
 

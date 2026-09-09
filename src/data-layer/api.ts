@@ -47,6 +47,8 @@ import type {
   Competition,
   CompetitionId,
   FormatRecord,
+  JoinableLeague,
+  LeagueId,
   MatchConfig,
   Player,
   PlayerConfig,
@@ -61,7 +63,6 @@ import type {
   TournamentConfig,
   TournamentFilter,
   TournamentId,
-  TournamentLeagueCard,
   TournamentRoundConfig,
   User,
   UserId,
@@ -236,9 +237,7 @@ export interface Api {
    * that trade open; it is settled in favour of showing it, because a full
    * league cannot be joined and the row has to say so.
    */
-  getLeaguesForTournament(
-    tournamentId: TournamentId,
-  ): Promise<TournamentLeagueCard[]>
+  getLeaguesForTournament(tournamentId: TournamentId): Promise<JoinableLeague[]>
 
   /**
    * The tournament, its placeholder matches, and **one round covering all of
@@ -333,6 +332,33 @@ export interface Api {
     tournamentId: TournamentId,
     officialLeagues?: OfficialLeagues,
   ): Promise<void>
+
+  // -- leagues and membership ----------------------------------------------
+
+  /**
+   * A league from its join code, or nothing if no league has that code.
+   *
+   * **A code is a shortcut, not a bypass.** It finds the league; whether you can
+   * walk in still depends on the league being public, which is why this returns
+   * the same card a tournament row renders rather than joining anything.
+   */
+  getLeagueByCode(leagueJoinCode: string): Promise<JoinableLeague | undefined>
+
+  /**
+   * **Public leagues only, and joining is immediate.**
+   *
+   * Every refusal is decided here rather than hidden in the interface: the join
+   * deadline, the ban, a full league, a closed one. Anyone can read the database
+   * directly with the client SDK, so interface gating is convenience and this is
+   * the guard.
+   *
+   * **Adds `manager` to whatever roles you already hold**, so someone who owns a
+   * league can join and play it. Roles are additive; running a league is not
+   * playing in it.
+   *
+   * Identity comes from the session, never a parameter.
+   */
+  joinLeague(leagueId: LeagueId, fantasyTeamName: string): Promise<void>
 
   // -- system --------------------------------------------------------------
 

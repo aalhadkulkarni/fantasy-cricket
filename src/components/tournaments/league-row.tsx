@@ -1,4 +1,8 @@
-import type { TournamentLeagueCard } from '@/types'
+import { useState } from 'react'
+
+import { JoinLeagueDialog } from '@/components/join-league-dialog'
+import { Button } from '@/components/ui/button'
+import type { JoinableLeague } from '@/types'
 
 /**
  * One league on a tournament page.
@@ -13,10 +17,35 @@ import type { TournamentLeagueCard } from '@/types'
  * code is a shortcut rather than the access mechanism — a closed league can be
  * found here and requested with no code at all.
  *
- * The join action arrives in B4.
+ * **Public leagues only.** A closed one is visible here and says so; requesting
+ * to join it is not built yet.
  */
-export function LeagueRow({ league }: { league: TournamentLeagueCard }) {
+export function LeagueRow({
+  league,
+  onJoined,
+}: {
+  league: JoinableLeague
+  onJoined: () => void
+}) {
+  const [joining, setJoining] = useState(false)
+
+  /*
+    Pinned at mount rather than read during render, which would be impure and
+    would not re-render when the moment passed anyway. The page reloads these
+    rows after a join, and a deadline going by while someone stares at the
+    screen is caught by the data layer, which refuses the join regardless.
+  */
+  const [now] = useState(() => Date.now())
+
   const full = league.filledSlots >= league.maxSlots
+  const closed = league.leagueEntry !== 'Open'
+  const past = now > league.joinDeadline
+  const playing = league.myRoles.manager === true
+  const banned = league.myRoles.bannedFromLeague === true
+
+  // Every one of these is also refused by the data layer. Disabling here is
+  // convenience; saying which one applies is the part that matters.
+  const canJoin = !full && !closed && !past && !playing && !banned
 
   return (
     <article className="floodlit flex flex-col gap-3.5 rounded-lg border bg-card p-5 text-card-foreground">
@@ -58,21 +87,35 @@ export function LeagueRow({ league }: { league: TournamentLeagueCard }) {
         </div>
       </dl>
 
-      <div className="mt-auto flex items-center justify-between gap-2.5 border-t pt-3">
+      <div className="mt-auto flex flex-wrap items-center justify-between gap-2.5 border-t pt-3">
         <div className="flex items-center gap-2 text-[13px] font-semibold">
           <span
             className={`inline-block size-[7px] rounded-full ${
-              full ? 'bg-subtle-foreground' : 'bg-settled'
+              canJoin ? 'bg-settled' : 'bg-subtle-foreground'
             }`}
           />
-          {full ? 'Full' : 'Open for managers'}
+          {standing(league, now)}
         </div>
-        <span className="font-mono text-[10.5px] whitespace-nowrap text-subtle-foreground">
-          {full
-            ? 'no slots left'
-            : `${league.maxSlots - league.filledSlots} left`}
-        </span>
+
+        {canJoin ? (
+          <Button size="sm" onClick={() => setJoining(true)}>
+            Join
+          </Button>
+        ) : (
+          <span className="font-mono text-[10.5px] whitespace-nowrap text-subtle-foreground">
+            {league.filledSlots} of {league.maxSlots}
+          </span>
+        )}
       </div>
+
+      {joining && (
+        <JoinLeagueDialog
+          open
+          onOpenChange={(next) => !next && setJoining(false)}
+          league={league}
+          onJoined={onJoined}
+        />
+      )}
     </article>
   )
 }
@@ -84,7 +127,7 @@ export function LeagueRow({ league }: { league: TournamentLeagueCard }) {
  * can still join, and because someone who both runs a league and plays in it
  * cares more about the second.
  */
-function yourStanding(league: TournamentLeagueCard): string | undefined {
+function yourStanding(league: JoinableLeague): string | undefined {
   const roles = league.myRoles
 
   if (roles.manager === true) return 'You are playing'
@@ -94,6 +137,20 @@ function yourStanding(league: TournamentLeagueCard): string | undefined {
   if (roles.bannedFromLeague === true) return 'You are banned'
 
   return undefined
+}
+
+/**
+ * The one line saying where this league stands for you. **Ordered by what stops
+ * you joining first**, since that is the question the row exists to answer.
+ */
+function standing(league: JoinableLeague, now: number): string {
+  if (league.myRoles.bannedFromLeague === true) return 'You are banned'
+  if (league.myRoles.manager === true) return 'You are playing'
+  if (league.leagueEntry !== 'Open') return 'Closed — admin approves'
+  if (league.filledSlots >= league.maxSlots) return 'Full'
+  if (now > league.joinDeadline) return 'Joining has closed'
+
+  return `${league.maxSlots - league.filledSlots} places left`
 }
 
 function Tag({ children }: { children: React.ReactNode }) {
