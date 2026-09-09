@@ -10,44 +10,139 @@
  *
  * **Every Firebase import in the app is in this folder**, which is rule 2 of the
  * boundary. Nothing above the data layer touches the SDK, and no
- * Firebase-shaped value crosses out of it.
+ * Firebase-shaped value crosses out of it — which is why `app` and `database`
+ * are private, and why `read` unwraps its snapshot rather than returning one.
  *
  * ---
  *
- * ## TODO — the functions have no bodies yet
+ * **These primitives are Firebase's own and stay here.** `ApiService` carries
+ * operations — `getLeague`, `acceptJoinRequest` — because those have a REST
+ * implementation. `update({path: value})` does not: accepting a join request is
+ * one multi-path write here and one POST there, with the server doing both
+ * writes itself. A path *is* the schema, and the fifth boundary rule says the
+ * schema never crosses upward.
  *
- * The app and the database handle are live, but all 143 functions still throw.
- * When they get bodies they reach the handle through `getFirebaseService()`
- * and address it with the builders in `paths.ts`.
+ * ---
  *
- * Auth is not set up either. That arrives with the login story.
+ * ## TODO — the layer's functions have no bodies yet
+ *
+ * All 143 still throw. As each gets implemented it moves onto `ApiService` and
+ * reaches these methods through the Firebase implementation of it. Auth is not
+ * set up either; that arrives with the login story.
  */
 
 import { initializeApp, type FirebaseApp } from 'firebase/app'
-import { getDatabase, type Database } from 'firebase/database'
+import {
+  get,
+  getDatabase,
+  onValue,
+  push,
+  ref,
+  remove,
+  runTransaction,
+  serverTimestamp,
+  set,
+  update,
+  type Database,
+} from 'firebase/database'
 
 import type { Environment } from '@/config/environments'
 import { FIREBASE_CONFIG } from '@/config/firebase'
 import type { ApiService } from '../api-service'
 import { getApiService } from '../api-service'
+import { DataLayerError } from '../data-layer-error'
+import type {
+  Subscriber,
+  SubscriptionErrorHandler,
+  Unsubscribe,
+} from '../subscriptions'
 
 /** Forbidden in an RTDB key. A `/` is included because it would nest silently. */
 const ILLEGAL_IN_KEY = /[/.$#[\]]/
 
-export interface FirebaseService extends ApiService {
-  readonly kind: 'firebase'
+declare const dbPathBrand: unique symbol
+
+/**
+ * A path beneath the active environment root.
+ *
+ * **Only `FirebaseService.path()` can produce one**, which is what makes the
+ * environment impossible to bypass rather than merely easy to remember. Without
+ * the brand every method here would take a plain string, and `read('leagues/x')`
+ * would compile and address a path outside every root — the exact failure the
+ * environment module exists to prevent.
+ *
+ * Branding works in parameter position. It does *not* work for the keys of a
+ * record, which is the limit recorded in `src/types/ids.ts`, so `update`
+ * validates its keys at runtime instead.
+ */
+export type DbPath = string & { readonly [dbPathBrand]: 'DbPath' }
+
+/**
+ * Maps a Firebase error onto something a caller can act on, keeping the
+ * original as `cause`.
+ */
+function asDataLayerError(action: string, cause: unknown): DataLayerError {
+  const raw = cause instanceof Error ? cause.message : String(cause)
+
+  if (raw.includes('permission_denied') || raw.includes('PERMISSION_DENIED')) {
+    return new DataLayerError(
+      'permissionDenied',
+      `${action} was refused by the database rules`,
+      cause,
+    )
+  }
+
+  if (raw.includes('network') || raw.includes('unavailable')) {
+    return new DataLayerError(
+      'unavailable',
+      `${action} could not reach the database`,
+      cause,
+    )
+  }
+
+  return new DataLayerError('unknown', `${action} failed: ${raw}`, cause)
+}
+
+export class FirebaseService implements ApiService {
+  readonly kind = 'firebase' as const
+
+  /** What this service was constructed for. Fixed for its life. */
+  readonly environment: Environment
 
   /** The first segment of every path. The environment, literally. */
   readonly root: Environment
 
-  /** Held so nothing else has to call `initializeApp`. */
-  readonly app: FirebaseApp
+  /** Private so nothing outside can reach the SDK. Rule 2. */
+  readonly #app: FirebaseApp
+  readonly #database: Database
 
-  /**
-   * The database handle. **Not exported above this layer** — it is the most
-   * Firebase-shaped object there is, and rule 2 says it stays inside.
-   */
-  readonly database: Database
+  constructor(environment: Environment) {
+    /*
+      Refuse rather than let the SDK guess. With no `databaseURL` it does not
+      fail: it assumes `https://{projectId}-default-rtdb.firebaseio.com`, the
+      default US region. This database is in `asia-southeast1`, so that guess is
+      wrong and every read would go quietly nowhere. Same reasoning as an
+      unmapped hostname in `environments.ts`.
+    */
+    if (FIREBASE_CONFIG.databaseURL === '') {
+      throw new DataLayerError(
+        'unknown',
+        'firebase: databaseURL is empty in src/config/firebase.ts. Copy it from ' +
+          'the Realtime Database in the Firebase console. Leaving it empty is ' +
+          'deliberate: the SDK would otherwise guess a US-region URL, which is ' +
+          'wrong for this project.',
+      )
+    }
+
+    this.environment = environment
+    this.root = environment
+    this.#app = initializeApp(FIREBASE_CONFIG)
+    this.#database = getDatabase(this.#app)
+  }
+
+  // -------------------------------------------------------------------------
+  // Paths
+  // -------------------------------------------------------------------------
 
   /**
    * Builds a path beneath the root: `path('leagues', leagueId)` gives
@@ -57,79 +152,225 @@ export interface FirebaseService extends ApiService {
    * extra nesting rather than an error, which is the wrong-root problem one
    * level down.
    */
-  path(...segments: readonly string[]): string
-}
+  path(...segments: readonly string[]): DbPath {
+    for (const segment of segments) {
+      if (segment === '') {
+        throw new DataLayerError(
+          'unknown',
+          `firebase: empty path segment in path(${segments.join(', ')})`,
+        )
+      }
+      if (ILLEGAL_IN_KEY.test(segment)) {
+        throw new DataLayerError(
+          'unknown',
+          `firebase: path segment "${segment}" contains a character that is ` +
+            `not allowed in a database key`,
+        )
+      }
+    }
 
-/**
- * Named `create…` rather than `FirebaseService` so the type keeps that name. A
- * factory rather than a class, which sidesteps `erasableSyntaxOnly` forbidding
- * parameter properties, and leaves nothing bound to `this`.
- *
- * Called once, by `setEnvironment`, which is idempotent — so a hot reload
- * cannot initialise the app twice.
- */
-export function createFirebaseService(
-  environment: Environment,
-): FirebaseService {
-  /*
-    Refuse rather than let the SDK guess. With no `databaseURL` it does not
-    fail: it assumes `https://{projectId}-default-rtdb.firebaseio.com`, the
-    default US region. This database is in `asia-southeast1`, so that guess is
-    wrong and every read would go quietly nowhere. Same reasoning as an unmapped
-    hostname in `environments.ts`.
-  */
-  if (FIREBASE_CONFIG.databaseURL === '') {
-    throw new Error(
-      'firebase: databaseURL is empty in src/config/firebase.ts. ' +
-        'Copy it from the Realtime Database in the Firebase console. Leaving it ' +
-        'empty is deliberate: the SDK would otherwise guess a US-region URL, ' +
-        'which is wrong for this project.',
+    return [this.root, ...segments].join('/') as DbPath
+  }
+
+  // -------------------------------------------------------------------------
+  // Reads
+  // -------------------------------------------------------------------------
+
+  /**
+   * One value, or `undefined` if nothing is there.
+   *
+   * **Never an empty object for a missing node.** Absence is meaningful all
+   * over this model — a league with no members, an auction that has not
+   * started — and the two must stay distinguishable.
+   *
+   * **`T` is an assertion, not a guarantee.** Firebase returns whatever is
+   * actually stored and nothing here validates it. That is the honest limit of
+   * the type system at this boundary; runtime validation is a separate
+   * decision.
+   */
+  async read<T>(path: DbPath): Promise<T | undefined> {
+    try {
+      const snapshot = await get(ref(this.#database, path))
+      // Unwrapped here so no DataSnapshot escapes. Rule 2.
+      return snapshot.exists() ? (snapshot.val() as T) : undefined
+    } catch (cause) {
+      throw asDataLayerError(`reading ${path}`, cause)
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Writes
+  // -------------------------------------------------------------------------
+
+  /** Replaces whatever is at the path. Everything beneath it is discarded. */
+  async write(path: DbPath, value: unknown): Promise<void> {
+    try {
+      await set(ref(this.#database, path), value)
+    } catch (cause) {
+      throw asDataLayerError(`writing ${path}`, cause)
+    }
+  }
+
+  /**
+   * **The atomic multi-path write.** Every path lands or none does.
+   *
+   * The model depends on this in at least eight places: archiving a league,
+   * accepting a join request, selling a player, accepting a transfer, deleting
+   * a league, writing both points index orders, handing off the auctioneer, and
+   * recomputing a tournament's dates. Each is several nodes that must never be
+   * observed half-written.
+   *
+   * **Keys are checked at runtime, not by the type system.** A branded key type
+   * would not help: two records with different key brands are mutually
+   * assignable, which is the limit verified in `src/types/ids.ts`. So a key
+   * outside the active root is rejected here.
+   */
+  async update(changes: Readonly<Record<string, unknown>>): Promise<void> {
+    const prefix = `${this.root}/`
+
+    for (const key of Object.keys(changes)) {
+      if (!key.startsWith(prefix)) {
+        throw new DataLayerError(
+          'unknown',
+          `firebase: update path "${key}" is not under the active root ` +
+            `"${this.root}". Build every path with path() or the builders in ` +
+            `paths.ts.`,
+        )
+      }
+    }
+
+    try {
+      await update(ref(this.#database), changes)
+    } catch (cause) {
+      throw asDataLayerError(
+        `updating ${Object.keys(changes).length} paths`,
+        cause,
+      )
+    }
+  }
+
+  /** Deletes the node and everything beneath it. */
+  async remove(path: DbPath): Promise<void> {
+    try {
+      await remove(ref(this.#database, path))
+    } catch (cause) {
+      throw asDataLayerError(`removing ${path}`, cause)
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Keys and claims
+  // -------------------------------------------------------------------------
+
+  /**
+   * A new push key, generated locally with no network call.
+   *
+   * No argument, because a push key does not depend on where it is stored.
+   * Generating offline is what makes it usable inside `update`: the ids have to
+   * exist before the update object can be assembled.
+   *
+   * Push keys are chronologically sortable and unique without coordination,
+   * which is why nothing in this model needs a counter.
+   */
+  generateKey(): string {
+    const key = push(ref(this.#database)).key
+    if (key === null) {
+      throw new DataLayerError('unknown', 'firebase: could not generate a key')
+    }
+    return key
+  }
+
+  /**
+   * Writes the value **only if nothing is there**, and reports whether it won.
+   *
+   * Two things need this, and both would otherwise lose a race: claiming a
+   * Google identity at sign-up, and claiming a league join code at creation.
+   * Reading first and then writing does not work — two tabs both read nothing,
+   * both pass the check, and both write.
+   *
+   * Deliberately narrower than a general transaction. Both real uses are this
+   * exact pattern, and a general primitive with no caller would mean inventing
+   * a shape. Built on `runTransaction`, so widening it later is small.
+   */
+  async claim(path: DbPath, value: unknown): Promise<boolean> {
+    try {
+      const result = await runTransaction(
+        ref(this.#database, path),
+        (current: unknown) => {
+          // Returning undefined aborts the transaction, leaving what is there.
+          if (current !== null) return undefined
+          return value
+        },
+      )
+      return result.committed
+    } catch (cause) {
+      throw asDataLayerError(`claiming ${path}`, cause)
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Subscriptions
+  // -------------------------------------------------------------------------
+
+  /**
+   * Fires on every change at the path, and once immediately with what is there.
+   *
+   * **Returns an unsubscribe handle**, which is what a `useEffect` cleanup
+   * expects. RTDB listeners leak if it is never called.
+   *
+   * Errors go to a separate callback rather than a first argument on the data
+   * one, so a handler that only cares about data is not carrying a parameter it
+   * always ignores. Both of those were the open decisions in `subscriptions.ts`.
+   */
+  subscribe<T>(
+    path: DbPath,
+    onData: Subscriber<T>,
+    onError?: SubscriptionErrorHandler,
+  ): Unsubscribe {
+    return onValue(
+      ref(this.#database, path),
+      (snapshot) => {
+        // Same unwrapping as `read`. No DataSnapshot escapes.
+        onData((snapshot.exists() ? snapshot.val() : undefined) as T)
+      },
+      (cause) => {
+        onError?.(asDataLayerError(`subscribing to ${path}`, cause))
+      },
     )
   }
 
-  const app = initializeApp(FIREBASE_CONFIG)
+  // -------------------------------------------------------------------------
+  // Server time
+  // -------------------------------------------------------------------------
 
-  return Object.freeze({
-    kind: 'firebase' as const,
-    environment,
-    root: environment,
-    app,
-    database: getDatabase(app),
-
-    path(...segments: readonly string[]): string {
-      for (const segment of segments) {
-        if (segment === '') {
-          throw new Error(
-            `firebase: empty path segment in path(${segments.join(', ')})`,
-          )
-        }
-        if (ILLEGAL_IN_KEY.test(segment)) {
-          throw new Error(
-            `firebase: path segment "${segment}" contains a character that is ` +
-              `not allowed in a database key`,
-          )
-        }
-      }
-
-      return [environment, ...segments].join('/')
-    },
-  })
+  /**
+   * A write-only sentinel the server replaces with its own clock.
+   *
+   * Used for every stored instant, so timestamps do not depend on whichever
+   * device happened to write them. It has no value until it is written, which
+   * is why the return type says nothing useful.
+   *
+   * NOT the auction countdown. That needs `.info/serverTimeOffset`, which is a
+   * different thing and is not built yet.
+   */
+  serverTimestamp(): unknown {
+    return serverTimestamp()
+  }
 }
 
 /**
  * The active service, when it is a Firebase one.
  *
  * Throws if the session was set up against a different backend, which is the
- * correct answer rather than a cast that quietly lies. The check is explicit
- * because `ApiService` has one implementation today; it becomes an ordinary
- * discriminated narrow once there are two.
+ * correct answer rather than a cast that quietly lies.
  */
 export function getFirebaseService(): FirebaseService {
   const service = getApiService()
-  if (service.kind !== 'firebase') {
-    throw new Error(
+  if (!(service instanceof FirebaseService)) {
+    throw new DataLayerError(
+      'unknown',
       `firebase: the active API service is "${service.kind}", not Firebase`,
     )
   }
-  return service as FirebaseService
+  return service
 }

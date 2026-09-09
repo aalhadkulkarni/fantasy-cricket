@@ -31,7 +31,7 @@
  */
 
 import type { Environment } from '@/config/environments'
-import { createFirebaseService } from './firebase/firebase-service'
+import { FirebaseService } from './firebase/firebase-service'
 
 export type ApiServiceKind = 'firebase' | 'rest'
 
@@ -72,7 +72,7 @@ export function setEnvironment(environment: Environment): void {
     )
   }
 
-  currentService = createFirebaseService(environment)
+  currentService = new FirebaseService(environment)
 }
 
 /** The active service. Throws until `setEnvironment` has run. */
