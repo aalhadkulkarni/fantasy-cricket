@@ -32,3 +32,8 @@ dist-ssr
 *.tsbuildinfo
 .eslintcache
 coverage
+
+# Firebase CLI local upload cache. Machine-local, and rewritten on every deploy
+# because Vite's asset filenames carry a content hash.
+# `.firebaserc` and `firebase.json` are config and do belong in the repo.
+.firebase/
