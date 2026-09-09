@@ -8,6 +8,17 @@ names here are the agreed vocabulary. Exact signatures, return shapes and how
 calls are grouped into modules are yours to settle — but the boundary rules
 below are not.
 
+**Treat the function lists loosely.** They say roughly what the layer must
+support, what goes into each call and what comes back out. They are not a fixed
+API. Adding a function, splitting one, renaming one, or changing what it takes
+and returns is fine whenever the use case calls for it. Nothing below should be
+preserved just because it is written down.
+
+> **Reads and writes need not use the same shapes.** A write may accept a
+> resolved object and pull the id out of it inside the layer, so the caller
+> never has to unpack anything first. Whether a given call does that is a
+> per-function judgement, not a rule.
+
 ---
 
 ## Why this layer exists
@@ -23,8 +34,32 @@ Four rules follow, and none is negotiable:
 3. **All reads, writes and subscriptions go through the layer.**
 4. **Reads and subscriptions are distinct.** A one-shot fetch and a live
    listener are different things with different lifecycles.
+5. **The schema does not leak either.**
 
 If Firebase leaks upward, the Phase 2 promise breaks and the layer was pointless.
+
+### On the fifth rule
+
+**This layer is the contract between client and server** — the equivalent of a
+set of REST endpoints. Everything above it is a client talking to a server that
+happens to run in the same process for now.
+
+So **no function may require its caller to know how the backend schema is
+shaped**, in its parameters or in what it returns. Concretely, a caller must
+never need to know:
+
+- that lineups are split across `matchBasedLineups` and `gameWeekBasedLineups`
+- that points are held in both a match-major and a player-major copy
+- that a league's tournament name is denormalised into the user's league index
+- that the live auction node does not exist until the auction starts
+
+Each of those is a storage decision made to suit how Realtime Database reads.
+They are the layer's business and nobody else's. A signature that exposes one is
+a signature that Phase 2 will have to break.
+
+> **The test:** could this function be reimplemented against a completely
+> different backend without changing its callers? If not, the schema is showing
+> through.
 
 ---
 
