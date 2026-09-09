@@ -58,7 +58,7 @@ import type {
   UserId,
   UserRole,
 } from '@/types'
-import { getFirebaseService } from './firebase-service'
+import { getFirebaseService, type DbPath } from './firebase-service'
 
 /**
  * Joins the segments that were supplied, and **refuses a gap**.
@@ -71,7 +71,7 @@ import { getFirebaseService } from './firebase-service'
 function under(
   node: string,
   ...segments: readonly (string | undefined)[]
-): string {
+): DbPath {
   const supplied: string[] = []
   let ended = false
 
@@ -110,6 +110,12 @@ export const paths = {
   // -------------------------------------------------------------------------
   // Standards — copied into a league at creation, never resolved at read time
   // -------------------------------------------------------------------------
+
+  /**
+   * Written by the setup routine, read before it runs. Not a reference table —
+   * a marker saying this environment has been seeded.
+   */
+  systemSetup: () => under('systemSetup'),
 
   standardAuctionConfig: () => under('standardAuctionConfig'),
   standardFantasyLineupRules: () => under('standardFantasyLineupRules'),
