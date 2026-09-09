@@ -116,6 +116,7 @@ export function TeamsPanel({
         teams={teams}
         error={error}
         competitions={competitions}
+        playersById={playersById}
         onEdit={setEditing}
       />
 
@@ -141,11 +142,13 @@ function Body({
   teams,
   error,
   competitions,
+  playersById,
   onEdit,
 }: {
   teams: Team[] | undefined
   error: string | undefined
   competitions: Competition[]
+  playersById: Record<string, Player>
   onEdit: (team: Team) => void
 }) {
   if (error !== undefined) {
@@ -197,7 +200,7 @@ function Body({
               </span>
             </span>
             <span className="mt-0.5 block text-xs text-muted-foreground">
-              {competitionNames(team, competitions)}
+              {competitionNames(team, competitions, playersById)}
             </span>
           </button>
         </li>
@@ -212,8 +215,17 @@ function Body({
  * **The count comes from the team's own roster**, not from counting players who
  * name this team. That is the point of showing it: the two are written together
  * and a disagreement between them is the failure this screen can catch by eye.
+ *
+ * **Retired players are not counted.** Retiring only sets a flag and leaves
+ * every membership intact, so they stay in the roster — but a squad of one that
+ * cannot field anybody reads as a squad of one, which is worse than useless.
+ * They are named in the dialog instead.
  */
-function competitionNames(team: Team, competitions: Competition[]): string {
+function competitionNames(
+  team: Team,
+  competitions: Competition[],
+  playersById: Record<string, Player>,
+): string {
   const ids = Object.keys(team.competitionIds ?? {})
   if (ids.length === 0) return 'No base tournaments'
 
@@ -221,7 +233,13 @@ function competitionNames(team: Team, competitions: Competition[]): string {
     .map((id) => {
       const name =
         competitions.find((c) => c.competitionId === id)?.competitionName ?? id
-      return `${name} (${rosterIds(team, id).length})`
+      const roster = rosterIds(team, id)
+      const active = roster.filter(
+        (playerId) => playersById[playerId]?.isRetired !== true,
+      ).length
+      const retired = roster.length - active
+
+      return `${name} (${active}${retired > 0 ? `, ${retired} retired` : ''})`
     })
     .sort()
     .join(' · ')

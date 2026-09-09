@@ -51,6 +51,7 @@ import type {
   PlayerCategory,
   PlayerId,
   PlayerRole,
+  RoundId,
   TeamId,
   TournamentId,
   TransferProposalId,
@@ -144,6 +145,16 @@ export function createPaths(service: FirebaseService) {
     players: (playerId?: PlayerId) => under('players', playerId),
     tournaments: (tournamentId?: TournamentId) =>
       under('tournaments', tournamentId),
+
+    /**
+     * Matches and rounds live **inside** a tournament rather than at the top
+     * level, so reading a tournament brings its whole fixture list with it.
+     * That is what makes the admin page one read.
+     */
+    tournamentMatches: (tournamentId?: TournamentId, matchId?: MatchId) =>
+      under('tournaments', tournamentId, 'matches', matchId),
+    tournamentRounds: (tournamentId?: TournamentId, roundId?: RoundId) =>
+      under('tournaments', tournamentId, 'rounds', roundId),
 
     // -------------------------------------------------------------------------
     // Leagues

@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 import { PlayersPanel } from '@/components/admin/players-panel'
 import { TeamsPanel } from '@/components/admin/teams-panel'
+import { TournamentsPanel } from '@/components/admin/tournaments-panel'
 import { PageContainer } from '@/components/layout/page-container'
 import { Button } from '@/components/ui/button'
 import {
@@ -51,13 +52,18 @@ export function SystemAdmin() {
           onChanged={catalogueChanged}
         />
 
+        <TournamentsPanel
+          catalogueVersion={catalogueVersion}
+          onChanged={catalogueChanged}
+        />
+
         <div className="mt-4 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
           <p className="font-mono text-xs tracking-wide text-subtle-foreground uppercase">
             Still to come
           </p>
           <p className="mt-3 text-sm">
-            Tournaments and their fixtures, rounds, leagues, standard points,
-            and adding another system admin. See docs/08-pages/system-admin.md.
+            Publishing a tournament, leagues, standard points, and adding
+            another system admin. See docs/08-pages/system-admin.md.
           </p>
         </div>
       </PageContainer>

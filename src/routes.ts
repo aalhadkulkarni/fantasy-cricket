@@ -21,9 +21,26 @@ export const ROUTES = {
   createLeague: '/leagues/new',
   actions: '/actions',
   admin: '/admin',
+
+  /**
+   * One tournament, in the admin panel. **Not in the route table in
+   * `docs/04-navigation.md`**, which lists only `/admin` — but a tournament
+   * carries teams, players, matches and rounds, which is more than a panel on a
+   * shared page can hold. `08-pages/system-admin.md` leaves how the admin
+   * groups into screens open.
+   *
+   * Distinct from the user-facing `/tournaments/:tournamentId`, which shows a
+   * published tournament and its leagues.
+   */
+  adminTournament: '/admin/tournaments/:tournamentId',
 } as const
 
 export type RoutePath = (typeof ROUTES)[keyof typeof ROUTES]
+
+/** Built rather than spelled out, for the reason in the header above. */
+export function adminTournamentPath(tournamentId: string): string {
+  return `/admin/tournaments/${tournamentId}`
+}
 
 /**
  * NOT YET ROUTED, and deliberately.

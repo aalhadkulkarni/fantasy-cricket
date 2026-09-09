@@ -14,10 +14,11 @@ import type {
   Round,
   Team,
   Tournament,
+  TournamentFilter,
   TournamentId,
   TournamentLeagueIndexEntry,
-  TournamentStatus,
 } from '@/types'
+import { getApi } from './api'
 import { notImplemented } from './not-implemented'
 import type {
   Subscriber,
@@ -41,9 +42,9 @@ import type {
  * fetched.
  */
 export function getTournaments(
-  status?: TournamentStatus,
+  filter?: TournamentFilter,
 ): Promise<Tournament[]> {
-  return notImplemented('getTournaments', { status })
+  return getApi().getTournaments(filter)
 }
 
 /** Those carrying a `publishedAt`. This populates the create-league dropdown. */
@@ -51,8 +52,12 @@ export function getPublishedTournaments(): Promise<Tournament[]> {
   return notImplemented('getPublishedTournaments', {})
 }
 
+/**
+ * The whole tournament, **including its matches and rounds**. They live inside
+ * it, so this is one read rather than three.
+ */
 export function getTournament(tournamentId: TournamentId): Promise<Tournament> {
-  return notImplemented('getTournament', { tournamentId })
+  return getApi().getTournament(tournamentId)
 }
 
 /**
