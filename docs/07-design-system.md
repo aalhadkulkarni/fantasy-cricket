@@ -119,27 +119,37 @@ league codes, slot counts, match numbers.
 
 These keep the concept coherent. The first is the one that matters most.
 
-**1. `--live` appears nowhere except live states.**
+**1. `--live` is for live states, and for two fixed exceptions.**
 
-An auction running. A deadline imminent. Your turn to pick.
+A live state is an auction running, a deadline imminent, your turn to pick.
 
-**Not** on primary buttons. **Not** on the brand mark. **Not** on active tabs or
-underlines. **Not** on count badges. **Not** on league-type tags — a league being
-an auction league is a _type_, not a state.
+**The two exceptions**, decided deliberately and closed:
 
-> If it is used decoratively, nothing means "live" any more and the metaphor is
-> dead. **This rule is the whole design** — everything else exists so that this
-> one lands.
+| Exception                                                            | Why                                                                                                                                           |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **The brand mark** — the second word carries `--live-text`           | It is the one place blue reads as identity rather than as a claim about state, and it never moves or changes, so nobody learns to scan for it |
+| **The actions count chip** — `--live` fill, `--live-foreground` text | An outstanding action _is_ something waiting on you, which is closer to a live state than to decoration                                       |
+
+**Everywhere else, no.** **Not** on primary buttons. **Not** on active tabs or
+underlines. **Not** on league-type tags — a league being an auction league is a
+_type_, not a state.
+
+> The point of the rule is unchanged: if blue turns up decoratively, nothing
+> means "live" any more and the metaphor is dead. The exceptions are fixed and
+> few for exactly that reason. **Two is the limit** — a third request should be
+> refused rather than added to the table.
 
 **What this forces:** a primary action button uses `--primary`, a near-white
 fill. That is the standard pattern on dark interfaces and reads as clearly
 primary without borrowing the accent. Tags distinguish by _fill_ rather than by
 colour. The focus ring uses `--ring`, not `--live`.
 
-> An earlier version of the reference file broke this rule on its own example
-> page — primary button, brand, badge and tab underline were all `--live`. That
-> was caught in review. If a page ends up with several blue things on it, the
-> rule has been broken somewhere.
+> **This rule was narrower and was widened on purpose.** It previously admitted
+> no exceptions at all, and an early mockup that put blue on the brand, the
+> count, the primary button and the type tags was rejected in review for
+> breaking it. The brand and the count have since been allowed back; the primary
+> button and the type tags have not. If you are working from that mockup, those
+> two remain wrong.
 
 **2. `--settled` for steady positive states** — a gameweek in progress, points
 confirmed. Positive, but not urgent.
