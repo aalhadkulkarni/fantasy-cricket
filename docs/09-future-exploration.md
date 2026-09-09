@@ -110,6 +110,63 @@ Check when picking it up whether `LeagueIndexEntry` still needs its
 
 ---
 
+## 3. How components are grouped in folders
+
+**Undecided, and deliberately left alone.**
+
+`src/components/` currently holds `ui/` for the generated shadcn primitives,
+`layout/` for the app shell, and two files loose at the root. That is fine at
+this size. The question is what happens as it grows, and there are two answers.
+
+**By page** — `components/my-leagues/`, `components/auction/`,
+`components/leaderboard/`. Matches how `docs/08-pages/` is organised and how the
+work is actually being done, one screen at a time. Finding something is easy
+because you already know which screen it was on.
+
+**By domain** — `components/leagues/`, `components/tournaments/`,
+`components/lineups/`. Matches the model, and matches the route segments:
+`/leagues/:leagueId`, `leagues/{leagueId}` and `components/leagues/` would all
+agree.
+
+### What decides it is how much gets shared
+
+Grouping by page only stays clean while components belong to one screen. This
+product has a fair amount that does not, and **two cases are mandated by name**:
+
+> **One derivation shared by both** — do not implement it twice.
+> (`08-pages/my-leagues.md`, on league status)
+
+> **This is the same view as My Team** ... One shared component, not a second
+> implementation. (`08-pages/leaderboard.md`, on viewing another manager's team)
+
+Several more are implied. The league card appears on My Leagues and again in the
+rejected-requests panel "with the same card styling", and a tournament page
+lists leagues too. The member list is read by Members, Admin Center and Auction
+Center. A squad shows on the Squads page and inside a modal during the auction.
+The join dialog opens from the site header and from a tournament page. A player
+row turns up on My Team, Squads, the auction and the transfer offer builder.
+
+**Under page grouping all of those go to `shared/`** — which would then hold the
+league card, the team view, the member list, the player row and the squad view,
+most of the components that matter. The page folders keep the leftovers.
+
+### Why it is not urgent
+
+The two schemes nearly coincide here. My Leagues maps to leagues, Tournaments to
+tournaments, My Team to lineups, Squads to squads, Transfers Center to
+transfers. They only diverge on the shared cases above, and none of those exists
+yet.
+
+**Revisit when the first component is genuinely wanted by two pages.** That is
+the moment the answer stops being theoretical. Until then the flat arrangement
+costs nothing, and `join-league-dialog.tsx` stays at the root of
+`src/components/` rather than being moved twice.
+
+If it goes to domain, the rule that makes it decidable is: **a component lives
+in the folder of the thing it renders, not the page it appears on.**
+
+---
+
 ## Adding to this document
 
 An entry belongs here when it is an optimisation with a real cost that the
