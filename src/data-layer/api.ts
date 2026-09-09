@@ -61,6 +61,7 @@ import type {
   TournamentConfig,
   TournamentFilter,
   TournamentId,
+  TournamentLeagueCard,
   TournamentRoundConfig,
   User,
   UserId,
@@ -225,6 +226,19 @@ export interface Api {
   getTournaments(filter?: TournamentFilter): Promise<Tournament[]>
 
   getTournament(tournamentId: TournamentId): Promise<Tournament>
+
+  /**
+   * The leagues running on a tournament, **public and closed alike**. Closed
+   * leagues are visible to everyone; only entry is restricted.
+   *
+   * Carries how many slots are filled, which is not stored anywhere — it counts
+   * members holding `manager`, one read per league. `docs/data-model.js` leaves
+   * that trade open; it is settled in favour of showing it, because a full
+   * league cannot be joined and the row has to say so.
+   */
+  getLeaguesForTournament(
+    tournamentId: TournamentId,
+  ): Promise<TournamentLeagueCard[]>
 
   /**
    * The tournament, its placeholder matches, and **one round covering all of

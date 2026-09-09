@@ -152,7 +152,7 @@ export function PlayersPanel({
   }
 
   return (
-    <section className="mt-4 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
+    <section className="floodlit mt-4 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold">Players</h2>

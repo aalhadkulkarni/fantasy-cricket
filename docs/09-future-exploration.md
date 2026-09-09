@@ -167,6 +167,35 @@ in the folder of the thing it renders, not the page it appears on.**
 
 ---
 
+## 4. A teams view on the tournament page
+
+**Frontend only.**
+
+The tournament page was specified with three modal buttons — Teams, Players and
+Fixtures. Players is now cut outright: someone on that page is deciding whether
+to join a league, and a list of cricketers does not help them decide.
+
+Teams is a different case. It is not cut, only deferred, because **the fixtures
+modal already names both teams in every match**. While the schedule is known,
+a separate teams list says nothing new, and a second modal earns its place by
+being worth opening.
+
+**What makes it stop being redundant:** a tournament knows its teams before it
+knows its fixtures. Placeholder matches carry no teams at all until a fixture is
+decided, so a knockout tail is exactly the case where the schedule names four
+teams and the tournament has sixteen. A long schedule is the softer version of
+the same problem — sixty matches to scan to answer "who is in this".
+
+**Build it when either is true**: a tournament arrives with undecided fixtures,
+or the schedule grows long enough that scanning it to find the teams is work.
+The read is already cheap — `participatingTeams` is a set of ids and `getTeams`
+is a single catalogue read — so this is a component, not a data change.
+
+> Entry 1 above would make it cheaper still, by carrying the team names on the
+> tournament rather than joining against the global node.
+
+---
+
 ## Adding to this document
 
 An entry belongs here when it is an optimisation with a real cost that the

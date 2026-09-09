@@ -18,6 +18,13 @@ export const ROUTES = {
   home: '/',
   login: '/login',
   tournaments: '/tournaments',
+
+  /**
+   * One tournament, as everyone sees it: its fixtures and the leagues running
+   * on it. Distinct from `/admin/tournaments/:tournamentId`, which is where a
+   * system admin builds one and can see it before it is published.
+   */
+  tournament: '/tournaments/:tournamentId',
   createLeague: '/leagues/new',
   actions: '/actions',
   admin: '/admin',
@@ -38,6 +45,10 @@ export const ROUTES = {
 export type RoutePath = (typeof ROUTES)[keyof typeof ROUTES]
 
 /** Built rather than spelled out, for the reason in the header above. */
+export function tournamentPath(tournamentId: string): string {
+  return `/tournaments/${tournamentId}`
+}
+
 export function adminTournamentPath(tournamentId: string): string {
   return `/admin/tournaments/${tournamentId}`
 }
