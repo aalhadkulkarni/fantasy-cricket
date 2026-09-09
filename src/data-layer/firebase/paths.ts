@@ -58,7 +58,7 @@ import type {
   UserId,
   UserRole,
 } from '@/types'
-import { getFirebaseService } from './firebase-service'
+import { getFirebaseService, type DbPath } from './firebase-service'
 
 /**
  * Joins the segments that were supplied, and **refuses a gap**.
@@ -71,7 +71,7 @@ import { getFirebaseService } from './firebase-service'
 function under(
   node: string,
   ...segments: readonly (string | undefined)[]
-): string {
+): DbPath {
   const supplied: string[] = []
   let ended = false
 
