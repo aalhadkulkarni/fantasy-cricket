@@ -45,7 +45,6 @@ import type {
   CompetitionId,
   Format,
   GameWeekId,
-  GoogleIdentifier,
   LeagueId,
   LeagueJoinCode,
   MatchId,
@@ -126,11 +125,8 @@ export const paths = {
   // Identity
   // -------------------------------------------------------------------------
 
+  /** Keyed by the Firebase Auth UID. There is no translation table. */
   users: (userId?: UserId) => under('users', userId),
-
-  /** Where an auth identity is **claimed transactionally** at sign-up. */
-  googleIdentifierToUserIdMapping: (googleIdentifier?: GoogleIdentifier) =>
-    under('googleIdentifierToUserIdMapping', googleIdentifier),
 
   // -------------------------------------------------------------------------
   // Cricket

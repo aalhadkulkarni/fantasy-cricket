@@ -24,14 +24,23 @@
  *
  * ---
  *
- * ## TODO — the layer's functions have no bodies yet
+ * ## TODO — most of the layer's functions have no bodies yet
  *
- * All 143 still throw. As each gets implemented it moves onto `ApiService` and
- * reaches these methods through the Firebase implementation of it. Auth is not
- * set up either; that arrives with the login story.
+ * As each gets implemented it moves onto `ApiService` and reaches these methods
+ * through the Firebase implementation of it. Identity is the first area with
+ * real bodies.
  */
 
 import { initializeApp, type FirebaseApp } from 'firebase/app'
+import {
+  GoogleAuthProvider,
+  getAuth,
+  onAuthStateChanged,
+  signInWithPopup,
+  signOut,
+  type Auth,
+  type User as FirebaseAuthUser,
+} from 'firebase/auth'
 import {
   get,
   getDatabase,
@@ -78,6 +87,42 @@ declare const dbPathBrand: unique symbol
 export type DbPath = string & { readonly [dbPathBrand]: 'DbPath' }
 
 /**
+ * What the layer knows about whoever is signed in, with nothing
+ * Firebase-shaped in it.
+ *
+ * A `User` from `firebase/auth` is as backend-specific as a `DataSnapshot`, so
+ * it is unwrapped here rather than handed upward. Rule 2.
+ */
+export interface AuthSession {
+  /** The Firebase Auth UID. This is the key `users/` is stored under. */
+  uid: string
+
+  /** Absent if the Google account has no email, which is rare but possible. */
+  email: string | undefined
+
+  /**
+   * The Google account id — the `sub` claim, from `providerData`.
+   *
+   * Stored on the user record as insurance and never read afterwards. If the
+   * Firebase project were deleted, it is the only thing that could say which
+   * person a `uid` belonged to.
+   */
+  googleSubjectId: string | undefined
+
+  /** Google's `photoURL`. Absent when the account has no picture. */
+  photoUrl: string | undefined
+}
+
+/**
+ * Why a sign-in did not complete.
+ *
+ * **Only `blocked` is a failure.** `dismissed` means the person changed their
+ * mind, and rendering "sign-in failed" for that would be wrong. `superseded`
+ * means a second popup replaced the first and nothing should be shown at all.
+ */
+export type SignInOutcome = 'signedIn' | 'dismissed' | 'superseded' | 'blocked'
+
+/**
  * Maps a Firebase error onto something a caller can act on, keeping the
  * original as `cause`.
  */
@@ -115,6 +160,7 @@ export class FirebaseService implements ApiService {
   /** Private so nothing outside can reach the SDK. Rule 2. */
   readonly #app: FirebaseApp
   readonly #database: Database
+  readonly #auth: Auth
 
   constructor(environment: Environment) {
     /*
@@ -138,6 +184,91 @@ export class FirebaseService implements ApiService {
     this.root = environment
     this.#app = initializeApp(FIREBASE_CONFIG)
     this.#database = getDatabase(this.#app)
+    this.#auth = getAuth(this.#app)
+  }
+
+  // -------------------------------------------------------------------------
+  // Auth
+  // -------------------------------------------------------------------------
+
+  /**
+   * Unwraps a Firebase auth user into something that can cross the boundary.
+   *
+   * The Google subject is `providerData`'s `uid` for the Google provider, which
+   * is a different value from the Firebase UID above it. That distinction is
+   * the whole reason this field exists.
+   */
+  #toSession(user: FirebaseAuthUser): AuthSession {
+    const google = user.providerData.find(
+      (p) => p.providerId === GoogleAuthProvider.PROVIDER_ID,
+    )
+
+    return {
+      uid: user.uid,
+      email: user.email ?? undefined,
+      googleSubjectId: google?.uid ?? undefined,
+      photoUrl: user.photoURL ?? undefined,
+    }
+  }
+
+  /**
+   * Fires with the current session, then again on every change.
+   *
+   * **It has not fired yet when the app first renders**, and that gap is real:
+   * restoring an existing session is asynchronous. Treating "not fired" as
+   * "signed out" makes every visit flash the login page before redirecting.
+   * Callers must distinguish the two.
+   */
+  onAuthChanged(callback: Subscriber<AuthSession | undefined>): Unsubscribe {
+    return onAuthStateChanged(this.#auth, (user) => {
+      callback(user === null ? undefined : this.#toSession(user))
+    })
+  }
+
+  /** The session right now, without waiting. Undefined before it has resolved. */
+  currentSession(): AuthSession | undefined {
+    const user = this.#auth.currentUser
+    return user === null ? undefined : this.#toSession(user)
+  }
+
+  /**
+   * Opens the Google sign-in popup and reports what happened.
+   *
+   * **Returns an outcome rather than throwing**, because two of the three
+   * non-success cases are not errors. Someone closing the popup changed their
+   * mind; a superseded popup is noise. Only a blocked popup needs saying out
+   * loud, and only because nothing on screen explains it.
+   *
+   * Popup rather than redirect: `signInWithRedirect` breaks on browsers that
+   * partition third-party storage unless the auth handler is self-hosted, which
+   * makes it the more fragile choice on a product used mostly on phones.
+   *
+   * Anything genuinely unexpected still throws.
+   */
+  async signInWithGoogle(): Promise<SignInOutcome> {
+    try {
+      await signInWithPopup(this.#auth, new GoogleAuthProvider())
+      return 'signedIn'
+    } catch (cause) {
+      switch ((cause as { code?: string }).code) {
+        case 'auth/popup-closed-by-user':
+          return 'dismissed'
+        case 'auth/cancelled-popup-request':
+          return 'superseded'
+        case 'auth/popup-blocked':
+          return 'blocked'
+        default:
+          throw asDataLayerError('signing in', cause)
+      }
+    }
+  }
+
+  async signOut(): Promise<void> {
+    try {
+      await signOut(this.#auth)
+    } catch (cause) {
+      throw asDataLayerError('signing out', cause)
+    }
   }
 
   // -------------------------------------------------------------------------

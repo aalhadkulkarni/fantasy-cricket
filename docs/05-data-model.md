@@ -74,7 +74,7 @@ league configuration.
 | `tournaments`  | IPL 2027 — one running of a competition. **Shown to users simply as "Tournament".** Contains matches, rounds, and participating teams and players. |
 | `teams`        | Cricket teams — RCB, India                                                                                                                         |
 | `players`      | Cricketers                                                                                                                                         |
-| `users`        | Global identity: display name, avatar, email, system role                                                                                          |
+| `users`        | Global identity: display name, avatar, email, system role. **Keyed by the Firebase Auth UID** — see below                                          |
 
 **Reference tables — fixed enums stored as data**
 
@@ -104,7 +104,53 @@ league configuration.
 
 **Indexes**
 
-`googleIdentifierToUserIdMapping` · `leagueCodeToLeagueMapping`
+`leagueCodeToLeagueMapping`
+
+---
+
+## `users` is keyed by the Firebase Auth UID
+
+Every other node created at runtime carries a push key. `users` does not.
+
+**Why.** The UID is the only value a Phase 2 security rule can verify, because
+`auth.uid` resolves to exactly it. It is also immutable, where an email address
+is not. And keying on it **removes the duplicate-account problem rather than
+guarding against it**: two tabs signing in as the same person address the same
+path, so two records for one human cannot happen and there is nothing to claim.
+
+That is why there is no table translating an auth identity into an id of our
+own, and no transactional claim at sign-up.
+
+### What it costs, and why this is written down
+
+**Leaving Firebase Auth changes every user id.** The Google subject stored on
+each record makes the remap _possible_ — it says which person a UID belonged to
+— but the remap itself is the work, and it is larger than it looks.
+
+**User ids appear as values about as often as they appear as keys.** A script
+that rewrites keys alone would leave the database subtly wrong, with membership
+intact but ownership, bids and transfers pointing at ids that no longer exist.
+
+| As keys                                   | As values                                              |
+| ----------------------------------------- | ------------------------------------------------------ |
+| `leagues/{id}/leagueMembers`              | `leagues/{id}/leagueOwner`                             |
+| `matchBasedLineups/{id}`                  | `primaryAuctioneer`, `secondaryAuctioneer`             |
+| `gameWeekBasedLineups/{id}`               | `bannedUsers/{id}/{uid}/bannedBy`                      |
+| `squads/{id}`                             | `manager1`, `manager2`, `proposedBy` on every transfer |
+| `joinRequests/{id}`                       | `managerId` on every accepted bid and no-bid           |
+| `bannedUsers/{id}`                        | `managerId` on every sold player status                |
+| `transferProposalsByManager/{id}`         | `auctionState/currentDraftManagerId`                   |
+| `auctionDetails/draftOrder`               |                                                        |
+| `liveAuctions/{id}/managerStatus`         |                                                        |
+| the bid and no-bid maps in a live auction |                                                        |
+
+So a migration is a walk of the whole tree that has to know, per node, which
+fields hold a user id — not a key rewrite.
+
+**One thing is unrecoverable and is guarded against.** If the Firebase project
+were ever deleted, nothing outside it could say which UID belonged to which
+person. That is why `googleSubjectId` is stored on the user record even though
+nothing reads it.
 
 ---
 
@@ -421,14 +467,15 @@ and there they make things worse, because two distinct records for one person is
 harder to detect than an overwrite.
 
 **That needs a conditional write on the thing that must be unique**, not a
-better key generator. `googleIdentifierToUserIdMapping/{googleIdentifier}` for a
-user, `leagueCodeToLeagueMapping/{code}` for a join code. Claim it with a
-transaction, so **the loser is rejected rather than creating a duplicate.**
+better key generator. `leagueCodeToLeagueMapping/{code}` is the one case left:
+claim it with a transaction, so **the loser is rejected rather than creating a
+duplicate**, then generate another code and try again.
 
-What the loser then does differs by case. A join code simply generates another
-and tries again. An identity cannot be regenerated, so the caller re-reads and
-continues with the record that won. Either way the create is refused, not
-merged. See `docs/06-data-layer.md`.
+> **A user account used to be the second case and no longer is.** Keying
+> `users` by the Firebase Auth UID means two tabs address the same path, so
+> there is no duplicate to prevent and nothing to claim — see above. That is
+> the better answer where it is available: a natural key that is already unique
+> beats a transaction guarding a generated one.
 
 > **`runTransaction` is ruled out for the auction specifically**, where the
 > read/write split makes it unnecessary. Claiming a unique natural key is

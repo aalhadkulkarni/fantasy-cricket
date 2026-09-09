@@ -16,6 +16,7 @@
  */
 export const ROUTES = {
   home: '/',
+  login: '/login',
   tournaments: '/tournaments',
   createLeague: '/leagues/new',
   actions: '/actions',
@@ -30,8 +31,6 @@ export type RoutePath = (typeof ROUTES)[keyof typeof ROUTES]
  * `docs/04-navigation.md` also specifies `/login`, `/tournaments/:tournamentId`
  * and nine sections beneath `/leagues/:leagueId`. None is here yet:
  *
- * - **`/login`** needs auth, and the header it belongs to is the signed-out
- *   variant that does not exist.
  * - **The league sections** need a real `leagueId`, and the entry route
  *   `/leagues/:leagueId` is meant to redirect by league phase — which is
  *   derived from auction state, deadlines and `finishedAt`, none of which can

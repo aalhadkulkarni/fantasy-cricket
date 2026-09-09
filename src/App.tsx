@@ -1,8 +1,10 @@
 import { Route, Routes } from 'react-router'
 
+import { RequireAccount } from './auth/require-account'
 import { SiteHeader } from './components/site-header'
 import { ActionsCenter } from './pages/actions-center'
 import { CreateLeague } from './pages/create-league'
+import { Login } from './pages/login'
 import { MyLeagues } from './pages/my-leagues'
 import { NotFound } from './pages/not-found'
 import { SystemAdmin } from './pages/system-admin'
@@ -30,17 +32,28 @@ import { ROUTES } from './routes'
 function App() {
   return (
     <div className="min-h-svh bg-background text-foreground">
-      <SiteHeader />
-
       <Routes>
-        <Route path={ROUTES.home} element={<MyLeagues />} />
-        <Route path={ROUTES.tournaments} element={<Tournaments />} />
-        <Route path={ROUTES.createLeague} element={<CreateLeague />} />
-        <Route path={ROUTES.actions} element={<ActionsCenter />} />
-        <Route path={ROUTES.admin} element={<SystemAdmin />} />
+        {/* No header. A signed-out visitor has nothing to navigate to. */}
+        <Route path={ROUTES.login} element={<Login />} />
 
-        {/* A not-found state, never a blank page. */}
-        <Route path="*" element={<NotFound />} />
+        <Route
+          path="*"
+          element={
+            <RequireAccount>
+              <SiteHeader />
+              <Routes>
+                <Route path={ROUTES.home} element={<MyLeagues />} />
+                <Route path={ROUTES.tournaments} element={<Tournaments />} />
+                <Route path={ROUTES.createLeague} element={<CreateLeague />} />
+                <Route path={ROUTES.actions} element={<ActionsCenter />} />
+                <Route path={ROUTES.admin} element={<SystemAdmin />} />
+
+                {/* A not-found state, never a blank page. */}
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </RequireAccount>
+          }
+        />
       </Routes>
     </div>
   )

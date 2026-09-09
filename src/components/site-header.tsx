@@ -11,6 +11,16 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
+import { useAuth } from '@/auth/auth-context'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { signOut } from '@/data-layer'
 import { cn } from '@/lib/utils'
 import { ROUTES } from '@/routes'
 
@@ -19,9 +29,11 @@ import { ROUTES } from '@/routes'
  * `docs/08-pages/site-header.md`, and `.hdr` in `docs/design-reference.html`
  * for the exact values transcribed below.
  *
- * **The signed-in header only.** `site-header.md` says the header varies by
- * auth state and that a signed-out visitor sees a minimal one. There is no auth
- * yet, so that variant arrives with login rather than being faked now.
+ * **The signed-in header only, and that is now structural.** It renders inside
+ * `RequireAccount`, so it is never reached without a session. `site-header.md`
+ * calls for a minimal variant for signed-out visitors; the login page carries
+ * its own brand instead, since a header offering nothing but a logo is worse
+ * than no header.
  *
  * **Mobile is not from the reference.** That file hides the nav below 640px and
  * puts nothing in its place, which would leave a phone with no navigation at
@@ -55,10 +67,20 @@ const NAV_ITEMS: readonly NavItem[] = [
 const ADMIN_ITEM: NavItem = { label: 'Admin panel', to: ROUTES.admin }
 
 /**
- * TODO: real initials, from the signed-in user. `site-header.md` calls for
- * `photoURL` with an initials fallback, which needs auth.
+ * At most two letters from the display name — "Aalhad Kulkarni" gives AK, a
+ * single word gives its first letter.
+ *
+ * TODO: `photoURL` from Google auth, with this as the fallback. **Two cases
+ * need it, not one:** an account with no picture, and a hotlinked Google image
+ * that fails to load later because it was changed or removed.
  */
-const PLACEHOLDER_INITIALS = 'AK'
+function initialsFrom(userName: string): string {
+  const words = userName.trim().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return '?'
+  const first = words[0]?.[0] ?? ''
+  const last = words.length > 1 ? (words[words.length - 1]?.[0] ?? '') : ''
+  return (first + last).toUpperCase()
+}
 
 /**
  * TODO: from `getActionsCount()`, which throws today.
@@ -70,6 +92,11 @@ const PLACEHOLDER_INITIALS = 'AK'
 const ACTIONS_COUNT = 0
 
 export function SiteHeader() {
+  // Always a signed-in user with a record: this only renders inside
+  // `RequireAccount`, which is what guarantees that.
+  const { state } = useAuth()
+  const user = state.status === 'signedIn' ? state.user : undefined
+
   /*
     Owned here rather than inside the dialog so the mobile sheet can close
     itself before this opens. A dialog inside an open sheet means two focus
@@ -119,7 +146,10 @@ export function SiteHeader() {
             <ActionsCount count={ACTIONS_COUNT} />
           </RouterNavLink>
 
-          <Avatar initials={PLACEHOLDER_INITIALS} />
+          <AccountMenu
+            userName={user?.userName ?? ''}
+            email={user?.googleEmailId ?? ''}
+          />
         </div>
       </PageContainer>
 
@@ -167,7 +197,7 @@ function JoinLeagueButton({
     <button
       type="button"
       onClick={onClick}
-      className={cn('cursor-pointer text-left', className)}
+      className={cn('text-left', className)}
     >
       Join a League
     </button>
@@ -195,21 +225,56 @@ function ActionsCount({ count }: { count: number }) {
 }
 
 /**
- * `.avatar` from the reference: a 30px circle on the raised surface with a
- * hairline, initials set in mono.
+ * The right corner: display name, avatar and sign out, as `site-header.md`
+ * specifies.
  *
- * TODO: `photoURL` from Google auth, with these initials as the fallback. That
- * is when shadcn's Avatar earns its place; today there is no image to fall back
- * from.
+ * **The name sits inside the menu rather than beside the avatar.** The header
+ * is 1100px wide with five nav items and the Actions control already in it, and
+ * a name inline crowds that at the specified width. One click away, and always
+ * visible once open.
+ *
+ * The avatar itself is `.avatar` from the design reference: a 30px circle on
+ * the raised surface with a hairline, initials in mono.
+ *
+ * TODO: `photoURL` from Google auth, with the initials as the fallback. **Two
+ * cases need that fallback, not one:** an account with no picture, and a
+ * hotlinked Google image that fails to load later because it was changed or
+ * removed.
  */
-function Avatar({ initials }: { initials: string }) {
+function AccountMenu({ userName, email }: { userName: string; email: string }) {
   return (
-    <div
-      aria-hidden
-      className="grid size-[30px] shrink-0 place-items-center rounded-full border bg-secondary font-mono text-[10.5px] font-bold text-muted-foreground"
-    >
-      {initials}
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={`Account: ${userName}`}
+        className="grid size-[30px] shrink-0 place-items-center rounded-full border bg-secondary font-mono text-[10.5px] font-bold text-muted-foreground hover:text-foreground focus-visible:ring-ring"
+      >
+        {initialsFrom(userName)}
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuLabel className="font-normal">
+          <p className="text-sm font-semibold">{userName}</p>
+          {email !== '' && (
+            <p className="mt-0.5 truncate font-mono text-xs text-subtle-foreground">
+              {email}
+            </p>
+          )}
+        </DropdownMenuLabel>
+
+        <DropdownMenuSeparator />
+
+        {/*
+          No confirmation. Signing out destroys nothing and signing back in is
+          two clicks, so a dialog would be friction without a risk behind it.
+
+          Nothing here navigates: the auth state flips, and `RequireAccount`
+          redirects to the login page on the next render.
+        */}
+        <DropdownMenuItem onClick={() => void signOut()}>
+          Sign out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
