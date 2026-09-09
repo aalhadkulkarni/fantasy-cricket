@@ -24,6 +24,7 @@ import type {
   TeamFilter,
   TeamId,
 } from '@/types'
+import { getApi } from './api'
 import { notImplemented } from './not-implemented'
 
 // ---------------------------------------------------------------------------
@@ -31,7 +32,7 @@ import { notImplemented } from './not-implemented'
 // ---------------------------------------------------------------------------
 
 export function getCompetitions(): Promise<Competition[]> {
-  return notImplemented('getCompetitions', {})
+  return getApi().getCompetitions()
 }
 
 export function getCompetition(
@@ -61,13 +62,18 @@ export function updateCompetition(
 // Teams
 // ---------------------------------------------------------------------------
 
-/** By competition, tournament or format. Omitting the filter returns everything. */
+/**
+ * By competition, tournament or format. Omitting the filter returns everything.
+ *
+ * Sorted by name, because every screen that shows teams shows them as a list
+ * and nothing else would give a stable order.
+ */
 export function getTeams(filter?: TeamFilter): Promise<Team[]> {
-  return notImplemented('getTeams', { filter })
+  return getApi().getTeams(filter)
 }
 
 export function createTeam(team: TeamConfig): Promise<TeamId> {
-  return notImplemented('createTeam', { team })
+  return getApi().createTeam(team)
 }
 
 /** Bulk creation, for setting up a competition in one go. */
@@ -75,11 +81,19 @@ export function createTeams(teams: readonly TeamConfig[]): Promise<TeamId[]> {
   return notImplemented('createTeams', { teams })
 }
 
+/**
+ * **Removing a competition takes the team out of it entirely** — its roster
+ * there goes with it, and so does every affected player's record of playing for
+ * it. That is the closest thing this admin has to a delete, and it is
+ * deliberate: nothing here destroys a team outright, because a team removed
+ * from its competitions is already out of every tournament that could draw on
+ * it.
+ */
 export function updateTeam(
   teamId: TeamId,
   changes: Partial<TeamConfig>,
 ): Promise<void> {
-  return notImplemented('updateTeam', { teamId, changes })
+  return getApi().updateTeam(teamId, changes)
 }
 
 // ---------------------------------------------------------------------------

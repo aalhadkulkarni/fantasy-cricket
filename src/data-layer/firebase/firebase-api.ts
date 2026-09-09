@@ -29,7 +29,17 @@ import type {
   SystemSetupResult,
 } from '../api'
 import type { Environment } from '@/config/environments'
-import type { CompetitionId, SystemSetup, User, UserId } from '@/types'
+import type {
+  Competition,
+  CompetitionId,
+  SystemSetup,
+  Team,
+  TeamConfig,
+  TeamFilter,
+  TeamId,
+  User,
+  UserId,
+} from '@/types'
 
 import { DataLayerError } from '../data-layer-error'
 import {
@@ -138,6 +148,114 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
 
       await service.write(paths.users(user.userId), user)
       return user
+    },
+
+    // -----------------------------------------------------------------------
+    // Cricket data
+    // -----------------------------------------------------------------------
+
+    async getCompetitions(): Promise<Competition[]> {
+      const all = await service.read<Record<string, Competition>>(
+        paths.competitions(),
+      )
+      return Object.values(all ?? {})
+    },
+
+    /**
+     * **Filtered after the read, not by a query.** The catalogue is a few dozen
+     * rows and reads here are subtree-shaped anyway, so a query would buy
+     * nothing and cost an index.
+     */
+    async getTeams(filter?: TeamFilter): Promise<Team[]> {
+      const all = await service.read<Record<string, Team>>(paths.teams())
+      let teams = Object.values(all ?? {})
+
+      if (filter?.competitionId !== undefined) {
+        const competitionId = filter.competitionId
+        teams = teams.filter((t) => t.competitionIds?.[competitionId] === true)
+      }
+
+      // TODO: tournamentId and format. Neither has a caller yet, and both need
+      // a second read — the tournament, or the competition behind it.
+
+      return teams.sort((a, b) => a.teamName.localeCompare(b.teamName))
+    },
+
+    async createTeam(team: TeamConfig): Promise<TeamId> {
+      const teamId = service.generateKey() as TeamId
+
+      await service.write(paths.teams(teamId), {
+        teamId,
+        teamName: team.teamName,
+        teamShortName: team.teamShortName,
+        competitionIds: Object.fromEntries(
+          team.competitionIds.map((id) => [id, true]),
+        ),
+        // No `playerIds`. Firebase stores neither an empty object nor a null,
+        // so writing one would change nothing — absent is what "no roster"
+        // looks like everywhere in this model.
+      } satisfies Omit<Team, 'playerIds'> & { teamId: TeamId })
+
+      return teamId
+    },
+
+    /**
+     * **Removing a competition is the closest thing here to a delete**, and it
+     * cascades. The team leaves that competition, its roster there goes, and
+     * every player who listed this team for that competition stops doing so.
+     *
+     * Without the cascade the two sides of membership disagree: a player would
+     * still name a team that no longer lists them, and nothing would detect it.
+     *
+     * One atomic update, so a half-applied removal cannot happen. Every path is
+     * known after the single read below.
+     */
+    async updateTeam(
+      teamId: TeamId,
+      changes: Partial<TeamConfig>,
+    ): Promise<void> {
+      const team = await service.read<Team>(paths.teams(teamId))
+      if (team === undefined) {
+        throw new DataLayerError('unknown', `firebase: no team ${teamId}`)
+      }
+
+      const update: Record<string, unknown> = {}
+      const at = (...segments: string[]) => service.path(...segments)
+
+      if (changes.teamName !== undefined) {
+        update[at('teams', teamId, 'teamName')] = changes.teamName
+      }
+      if (changes.teamShortName !== undefined) {
+        update[at('teams', teamId, 'teamShortName')] = changes.teamShortName
+      }
+
+      if (changes.competitionIds !== undefined) {
+        const wanted = new Set<string>(changes.competitionIds)
+        const current = Object.keys(team.competitionIds ?? {})
+
+        for (const competitionId of current) {
+          if (wanted.has(competitionId)) continue
+
+          // Leaving a competition: drop the membership, the roster, and every
+          // player's record of playing here.
+          update[at('teams', teamId, 'competitionIds', competitionId)] = null
+          update[at('teams', teamId, 'playerIds', competitionId)] = null
+
+          const roster = team.playerIds?.[competitionId as CompetitionId] ?? {}
+          for (const playerId of Object.keys(roster)) {
+            update[at('players', playerId, 'currentTeams', competitionId)] =
+              null
+          }
+        }
+
+        for (const competitionId of wanted) {
+          if (current.includes(competitionId)) continue
+          update[at('teams', teamId, 'competitionIds', competitionId)] = true
+        }
+      }
+
+      if (Object.keys(update).length === 0) return
+      await service.update(update)
     },
 
     // -----------------------------------------------------------------------

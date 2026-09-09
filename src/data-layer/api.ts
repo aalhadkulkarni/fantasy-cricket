@@ -43,7 +43,15 @@
  */
 
 import type { Environment } from '@/config/environments'
-import type { User, UserId } from '@/types'
+import type {
+  Competition,
+  Team,
+  TeamConfig,
+  TeamFilter,
+  TeamId,
+  User,
+  UserId,
+} from '@/types'
 
 import { DataLayerError } from './data-layer-error'
 import { createFirebaseApi } from './firebase/firebase-api'
@@ -108,6 +116,23 @@ export interface Api {
 
   /** Writes the record for the signed-in person. Identity comes from the session. */
   createUser(userName: string): Promise<User>
+
+  // -- cricket data --------------------------------------------------------
+
+  /** The interface calls these Base Tournaments and never "competitions". */
+  getCompetitions(): Promise<Competition[]>
+
+  getTeams(filter?: TeamFilter): Promise<Team[]>
+
+  createTeam(team: TeamConfig): Promise<TeamId>
+
+  /**
+   * **Removing a competition takes the team out of it entirely**, including its
+   * roster there and every affected player's record. That is the closest thing
+   * to a delete this admin has, and it is deliberate — nothing here destroys a
+   * team outright.
+   */
+  updateTeam(teamId: TeamId, changes: Partial<TeamConfig>): Promise<void>
 
   // -- system --------------------------------------------------------------
 
