@@ -57,7 +57,7 @@ import type {
   UserId,
   UserRole,
 } from '@/types'
-import { getFirebaseService, type DbPath } from './firebase-service'
+import type { DbPath, FirebaseService } from './firebase-service'
 
 /**
  * Joins the segments that were supplied, and **refuses a gap**.
@@ -67,147 +67,158 @@ import { getFirebaseService, type DbPath } from './firebase-service'
  * undefined is a mistake at the call site, and quietly returning the shorter
  * path would hand back a subtree far larger than the one asked for.
  */
-function under(
-  node: string,
-  ...segments: readonly (string | undefined)[]
-): DbPath {
-  const supplied: string[] = []
-  let ended = false
+/**
+ * Built against a service rather than reaching for a global one, so a path can
+ * only exist where a backend does. There is no ambient "current service" to
+ * accidentally address the wrong environment through.
+ */
+export function createPaths(service: FirebaseService) {
+  function under(
+    node: string,
+    ...segments: readonly (string | undefined)[]
+  ): DbPath {
+    const supplied: string[] = []
+    let ended = false
 
-  for (const segment of segments) {
-    if (segment === undefined) {
-      ended = true
-      continue
+    for (const segment of segments) {
+      if (segment === undefined) {
+        ended = true
+        continue
+      }
+      if (ended) {
+        throw new Error(
+          `data-layer: path "${node}" was given a segment after an omitted one. ` +
+            `Segments fill in order and cannot be skipped.`,
+        )
+      }
+      supplied.push(segment)
     }
-    if (ended) {
-      throw new Error(
-        `data-layer: path "${node}" was given a segment after an omitted one. ` +
-          `Segments fill in order and cannot be skipped.`,
-      )
-    }
-    supplied.push(segment)
+
+    return service.path(node, ...supplied)
   }
 
-  return getFirebaseService().path(node, ...supplied)
+  return {
+    // -------------------------------------------------------------------------
+    // Reference tables — fixed enums stored as data, keyed semantically
+    // -------------------------------------------------------------------------
+
+    userRoles: (userRole?: UserRole) => under('userRoles', userRole),
+    formats: (format?: Format) => under('formats', format),
+    playerRoles: (playerRole?: PlayerRole) => under('playerRoles', playerRole),
+    playerCategories: (playerCategory?: PlayerCategory) =>
+      under('playerCategories', playerCategory),
+    liveAuctionPhases: (auctionPhase?: string) =>
+      under('liveAuctionPhases', auctionPhase),
+    timelineEvents: (timelineEventId?: string) =>
+      under('timelineEvents', timelineEventId),
+
+    // -------------------------------------------------------------------------
+    // Standards — copied into a league at creation, never resolved at read time
+    // -------------------------------------------------------------------------
+
+    /**
+     * Written by the setup routine, read before it runs. Not a reference table —
+     * a marker saying this environment has been seeded.
+     */
+    systemSetup: () => under('systemSetup'),
+
+    standardAuctionConfig: () => under('standardAuctionConfig'),
+    standardFantasyLineupRules: () => under('standardFantasyLineupRules'),
+    standardFantasyLeagueTeamChangesDeadlineOffset: () =>
+      under('standardFantasyLeagueTeamChangesDeadlineOffset'),
+
+    // -------------------------------------------------------------------------
+    // Identity
+    // -------------------------------------------------------------------------
+
+    /** Keyed by the Firebase Auth UID. There is no translation table. */
+    users: (userId?: UserId) => under('users', userId),
+
+    // -------------------------------------------------------------------------
+    // Cricket
+    // -------------------------------------------------------------------------
+
+    competitions: (competitionId?: CompetitionId) =>
+      under('competitions', competitionId),
+    teams: (teamId?: TeamId) => under('teams', teamId),
+    players: (playerId?: PlayerId) => under('players', playerId),
+    tournaments: (tournamentId?: TournamentId) =>
+      under('tournaments', tournamentId),
+
+    // -------------------------------------------------------------------------
+    // Leagues
+    // -------------------------------------------------------------------------
+
+    /**
+     * Config and thin membership only. **Reading this drags the whole auction
+     * config and gameweek structure**, which is why My Leagues reads
+     * `leagues/{leagueId}/leagueMembers` instead.
+     */
+    leagues: (leagueId?: LeagueId) => under('leagues', leagueId),
+
+    /** Where a join code is **claimed transactionally** at creation. */
+    leagueCodeToLeagueMapping: (leagueJoinCode?: LeagueJoinCode) =>
+      under('leagueCodeToLeagueMapping', leagueJoinCode),
+
+    // -------------------------------------------------------------------------
+    // Everything a league accumulates, split out so reading a league stays cheap
+    // -------------------------------------------------------------------------
+
+    matchBasedLineups: (
+      leagueId?: LeagueId,
+      userId?: UserId,
+      matchId?: MatchId,
+    ) => under('matchBasedLineups', leagueId, userId, matchId),
+
+    gameWeekBasedLineups: (
+      leagueId?: LeagueId,
+      userId?: UserId,
+      gameWeekId?: GameWeekId,
+    ) => under('gameWeekBasedLineups', leagueId, userId, gameWeekId),
+
+    squads: (leagueId?: LeagueId, userId?: UserId, matchId?: MatchId) =>
+      under('squads', leagueId, userId, matchId),
+
+    joinRequests: (leagueId?: LeagueId, userId?: UserId) =>
+      under('joinRequests', leagueId, userId),
+
+    bannedUsers: (leagueId?: LeagueId, userId?: UserId) =>
+      under('bannedUsers', leagueId, userId),
+
+    transferProposals: (
+      leagueId?: LeagueId,
+      transferProposalId?: TransferProposalId,
+    ) => under('transferProposals', leagueId, transferProposalId),
+
+    transferProposalsByManager: (leagueId?: LeagueId, userId?: UserId) =>
+      under('transferProposalsByManager', leagueId, userId),
+
+    /** **Does not exist until `startAuction` creates it.** Absence is normal. */
+    liveAuctions: (leagueId?: LeagueId) => under('liveAuctions', leagueId),
+
+    // -------------------------------------------------------------------------
+    // Points — per player per match, never per manager
+    // -------------------------------------------------------------------------
+
+    /**
+     * These two hold the **same values in both directions**, so a correction has
+     * to write both paths in the same atomic update or the copies diverge
+     * silently. Same for the custom pair below.
+     */
+    standardPointsByMatch: (tournamentId?: TournamentId, matchId?: MatchId) =>
+      under('standardPointsByMatch', tournamentId, matchId),
+
+    standardPointsByPlayer: (
+      tournamentId?: TournamentId,
+      playerId?: PlayerId,
+    ) => under('standardPointsByPlayer', tournamentId, playerId),
+
+    customPointsByMatch: (leagueId?: LeagueId, matchId?: MatchId) =>
+      under('customPointsByMatch', leagueId, matchId),
+
+    customPointsByPlayer: (leagueId?: LeagueId, playerId?: PlayerId) =>
+      under('customPointsByPlayer', leagueId, playerId),
+  } as const
 }
 
-export const paths = {
-  // -------------------------------------------------------------------------
-  // Reference tables — fixed enums stored as data, keyed semantically
-  // -------------------------------------------------------------------------
-
-  userRoles: (userRole?: UserRole) => under('userRoles', userRole),
-  formats: (format?: Format) => under('formats', format),
-  playerRoles: (playerRole?: PlayerRole) => under('playerRoles', playerRole),
-  playerCategories: (playerCategory?: PlayerCategory) =>
-    under('playerCategories', playerCategory),
-  liveAuctionPhases: (auctionPhase?: string) =>
-    under('liveAuctionPhases', auctionPhase),
-  timelineEvents: (timelineEventId?: string) =>
-    under('timelineEvents', timelineEventId),
-
-  // -------------------------------------------------------------------------
-  // Standards — copied into a league at creation, never resolved at read time
-  // -------------------------------------------------------------------------
-
-  /**
-   * Written by the setup routine, read before it runs. Not a reference table —
-   * a marker saying this environment has been seeded.
-   */
-  systemSetup: () => under('systemSetup'),
-
-  standardAuctionConfig: () => under('standardAuctionConfig'),
-  standardFantasyLineupRules: () => under('standardFantasyLineupRules'),
-  standardFantasyLeagueTeamChangesDeadlineOffset: () =>
-    under('standardFantasyLeagueTeamChangesDeadlineOffset'),
-
-  // -------------------------------------------------------------------------
-  // Identity
-  // -------------------------------------------------------------------------
-
-  /** Keyed by the Firebase Auth UID. There is no translation table. */
-  users: (userId?: UserId) => under('users', userId),
-
-  // -------------------------------------------------------------------------
-  // Cricket
-  // -------------------------------------------------------------------------
-
-  competitions: (competitionId?: CompetitionId) =>
-    under('competitions', competitionId),
-  teams: (teamId?: TeamId) => under('teams', teamId),
-  players: (playerId?: PlayerId) => under('players', playerId),
-  tournaments: (tournamentId?: TournamentId) =>
-    under('tournaments', tournamentId),
-
-  // -------------------------------------------------------------------------
-  // Leagues
-  // -------------------------------------------------------------------------
-
-  /**
-   * Config and thin membership only. **Reading this drags the whole auction
-   * config and gameweek structure**, which is why My Leagues reads
-   * `leagues/{leagueId}/leagueMembers` instead.
-   */
-  leagues: (leagueId?: LeagueId) => under('leagues', leagueId),
-
-  /** Where a join code is **claimed transactionally** at creation. */
-  leagueCodeToLeagueMapping: (leagueJoinCode?: LeagueJoinCode) =>
-    under('leagueCodeToLeagueMapping', leagueJoinCode),
-
-  // -------------------------------------------------------------------------
-  // Everything a league accumulates, split out so reading a league stays cheap
-  // -------------------------------------------------------------------------
-
-  matchBasedLineups: (
-    leagueId?: LeagueId,
-    userId?: UserId,
-    matchId?: MatchId,
-  ) => under('matchBasedLineups', leagueId, userId, matchId),
-
-  gameWeekBasedLineups: (
-    leagueId?: LeagueId,
-    userId?: UserId,
-    gameWeekId?: GameWeekId,
-  ) => under('gameWeekBasedLineups', leagueId, userId, gameWeekId),
-
-  squads: (leagueId?: LeagueId, userId?: UserId, matchId?: MatchId) =>
-    under('squads', leagueId, userId, matchId),
-
-  joinRequests: (leagueId?: LeagueId, userId?: UserId) =>
-    under('joinRequests', leagueId, userId),
-
-  bannedUsers: (leagueId?: LeagueId, userId?: UserId) =>
-    under('bannedUsers', leagueId, userId),
-
-  transferProposals: (
-    leagueId?: LeagueId,
-    transferProposalId?: TransferProposalId,
-  ) => under('transferProposals', leagueId, transferProposalId),
-
-  transferProposalsByManager: (leagueId?: LeagueId, userId?: UserId) =>
-    under('transferProposalsByManager', leagueId, userId),
-
-  /** **Does not exist until `startAuction` creates it.** Absence is normal. */
-  liveAuctions: (leagueId?: LeagueId) => under('liveAuctions', leagueId),
-
-  // -------------------------------------------------------------------------
-  // Points — per player per match, never per manager
-  // -------------------------------------------------------------------------
-
-  /**
-   * These two hold the **same values in both directions**, so a correction has
-   * to write both paths in the same atomic update or the copies diverge
-   * silently. Same for the custom pair below.
-   */
-  standardPointsByMatch: (tournamentId?: TournamentId, matchId?: MatchId) =>
-    under('standardPointsByMatch', tournamentId, matchId),
-
-  standardPointsByPlayer: (tournamentId?: TournamentId, playerId?: PlayerId) =>
-    under('standardPointsByPlayer', tournamentId, playerId),
-
-  customPointsByMatch: (leagueId?: LeagueId, matchId?: MatchId) =>
-    under('customPointsByMatch', leagueId, matchId),
-
-  customPointsByPlayer: (leagueId?: LeagueId, playerId?: PlayerId) =>
-    under('customPointsByPlayer', leagueId, playerId),
-} as const
+export type Paths = ReturnType<typeof createPaths>

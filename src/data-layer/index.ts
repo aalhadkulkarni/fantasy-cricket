@@ -53,27 +53,24 @@
  *
  * ## TODO — Firebase is not wired in yet
  *
- * **Nothing in this layer talks to a database.** The Firebase SDK is not
- * installed, there is no client, and all 143 functions still throw.
+ * **Identity and system setup work. Everything else still throws.** As each
+ * area is built, its functions become one-line delegations to `getApi()` and
+ * the backend work lands in `firebase/firebase-api.ts`.
  *
- * What *is* in place is the seam beneath them. `setEnvironment` builds an
- * `ApiService` for the environment it is given, and the Firebase implementation
- * turns that environment into the path prefix every node sits under. Neither is
- * called by anything yet.
+ * ```
+ * component  →  dataLayer.getCurrentUser()     here: backend-agnostic
+ *            →  firebaseApi.getCurrentUser()   one implementation of Api
+ *            →  FirebaseService.read(path)     the client, private to firebase/
+ * ```
  *
- * That order is deliberate. Adding an environment prefix to a layer that
- * already reads and writes without one means finding every path that was
- * composed by hand, and missing one puts real data in the wrong root with
- * nothing to detect it. Having it first means an implementation cannot skip it.
+ * A future `RestApi` sits beside `FirebaseApi`, satisfying the same interface.
+ * **Migration adds rather than replaces**: both can exist, and because the
+ * contract is per-operation, a third implementation could delegate some methods
+ * to one backend and some to another while a move is under way. Nothing above
+ * this file changes when that happens.
  *
- * Remaining, in order:
- *
- * 1. Install the Firebase SDK and initialise the app.
- * 2. Hold the database handle on the service in `firebase/firebase-service.ts`.
- * 3. Grow `ApiService` to carry the operations, and implement the functions by
- *    delegating to the active service.
- * 4. Fill in the test, preprod and prod hostnames in
- *    `src/config/environments.ts` and clear the forced override — see G9.
+ * Still open: filling in the test, preprod and prod hostnames in
+ * `src/config/environments.ts` and clearing the forced override — see G9.
  */
 
 // The only thing this layer exposes about its backend: tell it which
@@ -84,7 +81,8 @@
 // deployment rather than about the backend. Nothing about paths or services is
 // re-exported either — a path is pure schema, and the fifth rule above is that
 // the schema does not leak upward.
-export { setEnvironment } from './api-service'
+export { setEnvironment } from './api'
+export type { Api } from './api'
 
 export * from './users'
 export * from './actions'
