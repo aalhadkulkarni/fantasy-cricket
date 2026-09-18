@@ -119,42 +119,38 @@ league codes, slot counts, match numbers.
 
 These keep the concept coherent. The first is the one that matters most.
 
-**1. The blue is the product's colour. The live *marker* is what stays scarce.**
+**1. The blue is the product's colour. Use it.**
 
-**Revised, deliberately.** This rule used to reserve `--live` for live states
-with two named exceptions, and to refuse a third. In practice that produced
-user-facing pages indistinguishable from the system admin panel: correct
-against the rule and wrong on screen. The concept is called Floodlit; a
-floodlight that never comes on is just a dark room.
+**This rule used to reserve it, and the reservation is gone.** It read
+`--live` is for live states, named two exceptions, and refused a third. What it
+produced was user-facing pages indistinguishable from the system admin panel —
+correct against the rule and wrong on screen, repeatedly. The concept is called
+Floodlit; a floodlight that never comes on is a dark room.
 
-**The split that replaces it.** Two different things were being governed by one
-rule, and separating them is what makes both work.
+So: the accent belongs on surfaces, tags, active navigation, labels, and
+anywhere else it reads well. **There is no budget and nothing to spend.**
 
-| | |
-| --- | --- |
-| **The colour** — `--live-text`, `--bloom` at low alpha | Free to use. The ambient wash on a card or a page, tags, active navigation, headings that need to carry the brand. This is identity and atmosphere. |
-| **The live marker** — the animated beam, the strong bloom, the tinted border, together | Still scarce. **One per screen, maximum.** This says something is happening *right now*: an auction running, a deadline closing in, your turn to bid. |
+| Utility     | Where                                                                     |
+| ----------- | ------------------------------------------------------------------------- |
+| `.floodlit` | A page or a band. Fixed height, so the light falls from above the frame.  |
+| `.lit`      | A content surface. Scales with its box, so a tall card is lit throughout. |
 
 **What still holds.** A primary action button uses `--primary`, a near-white
-fill — the standard pattern on dark interfaces, and it stays that way because
-the accent is now common enough that a blue button would stop reading as
+fill — the standard pattern on dark interfaces, and it stays that way precisely
+because the accent is now common enough that a blue button would stop reading as
 primary. The focus ring uses `--ring`.
 
-> **Why the metaphor survives this.** What made a live card read as live was
-> never the hue on its own — it was movement and a bright edge against a calm
-> surface. Those are untouched. A page washed in blue with one card carrying a
-> beam still says exactly which card is live.
-
-> **The `floodlit` wash is atmosphere.** It carries no beam and no border tint,
-> so it spends nothing. Use it on card faces and on pages whose job is to feel
-> like the product rather than like a form.
+> **The animated beam is a separate question**, covered by rule 3. That one is
+> about motion competing for attention, not about the colour, and it survives
+> this change untouched.
 
 **2. `--settled` for steady positive states** — a gameweek in progress, points
 confirmed. Positive, but not urgent.
 
-**3. Bloom, not glow-everything.** The lit card carries a top-edge radial bloom
-plus a soft animated beam. **One element per screen, maximum.** Two glowing
-things compete and neither reads as important.
+**3. One _animated_ element per screen, maximum.** The beam moves, and two
+moving things compete until neither reads as important. This is a rule about
+motion, not about colour — the ambient wash costs nothing and belongs
+everywhere.
 
 **4. `prefers-reduced-motion` kills the beam animation**, retaining a static
 opacity. The card still reads as live without moving.
