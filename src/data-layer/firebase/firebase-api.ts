@@ -577,6 +577,41 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
     }
   }
 
+  /**
+   * **The next moment a team locks**, which moves on as deadlines pass.
+   *
+   * A match-based league locks at every match, so it is the first match, by
+   * `matchNumber`, whose deadline is still ahead. A gameweek league locks only
+   * at each gameweek's first match, so matches inside a gameweek are not
+   * deadlines and are passed over.
+   *
+   * **Absent when nothing is left, or when the next one is undated.** An
+   * undated match is not skipped in favour of a later dated one: that would
+   * show a deadline that is not the next one. Deadlines come from the scheduled
+   * start and never shift with delays.
+   */
+  async function upcomingDeadline(
+    leagueId: LeagueId,
+    isGameWeeks: boolean,
+  ): Promise<number | undefined> {
+    const { matches, offset } = await leagueFixtures(leagueId)
+
+    const lockers = isGameWeeks
+      ? (await api.getGameWeeks(leagueId))
+          .map((week) => matches.find((m) => m.matchId === week.matchIds[0]))
+          .filter((m): m is Match => m !== undefined)
+      : matches
+
+    const now = Date.now()
+    const next = lockers.find(
+      (m) => m.startTimestamp === undefined || m.startTimestamp - offset > now,
+    )
+
+    return next?.startTimestamp === undefined
+      ? undefined
+      : next.startTimestamp - offset
+  }
+
   // -------------------------------------------------------------------------
   // Scoring
   // -------------------------------------------------------------------------
@@ -2158,29 +2193,36 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         throw new DataLayerError('unknown', 'That league no longer exists.')
       }
 
-      const [tournamentName, startDate, offset, auctionStartTime, runtime] =
-        await Promise.all([
-          service.read<string>(
-            service.path('tournaments', tournamentId, 'tournamentName'),
-          ),
-          service.read<number>(
-            service.path('tournaments', tournamentId, 'startDate'),
-          ),
-          service.read<number>(at('fantasyLeagueTeamChangesDeadlineOffset')),
-          isAuctionEnabled === true
-            ? service.read<number>(
-                service.path(
-                  'leagues',
-                  leagueId,
-                  'auctionDetails',
-                  'auctionStartTime',
-                ),
-              )
-            : undefined,
-          isAuctionEnabled === true
-            ? service.read<unknown>(service.path('liveAuctions', leagueId))
-            : undefined,
-        ])
+      const [
+        tournamentName,
+        startDate,
+        offset,
+        auctionStartTime,
+        runtime,
+        nextDeadline,
+      ] = await Promise.all([
+        service.read<string>(
+          service.path('tournaments', tournamentId, 'tournamentName'),
+        ),
+        service.read<number>(
+          service.path('tournaments', tournamentId, 'startDate'),
+        ),
+        service.read<number>(at('fantasyLeagueTeamChangesDeadlineOffset')),
+        isAuctionEnabled === true
+          ? service.read<number>(
+              service.path(
+                'leagues',
+                leagueId,
+                'auctionDetails',
+                'auctionStartTime',
+              ),
+            )
+          : undefined,
+        isAuctionEnabled === true
+          ? service.read<unknown>(service.path('liveAuctions', leagueId))
+          : undefined,
+        upcomingDeadline(leagueId, isGameWeeksEnabled === true),
+      ])
 
       return {
         leagueId,
@@ -2194,13 +2236,7 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
           auctionHasStarted: runtime !== undefined,
           now: Date.now(),
         }),
-        /*
-          The next moment anything locks: the first match's start minus the
-          offset teams lock by. **Deadlines always come from the scheduled start
-          and never shift with delays.**
-        */
-        nextDeadline:
-          startDate === undefined ? undefined : startDate - (offset ?? 0),
+        ...(nextDeadline === undefined ? {} : { nextDeadline }),
         // Rank is deliberately absent. See the contract.
         deadlineOffset: offset ?? 0,
         changeAllowances: {
