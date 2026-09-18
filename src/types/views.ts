@@ -35,6 +35,7 @@ import type {
 import type { Format, LeagueRole, PlayerRole } from './reference'
 import type { Player } from './player'
 import type { Match } from './tournament'
+import type { Team } from './team'
 import type {
   GameWeek,
   League,
@@ -633,3 +634,19 @@ export interface LeagueGameWeek {
 
 /** One player's score for a match. Blank and zero are equivalent. */
 export type PlayerPoints = Record<PlayerId, number>
+
+/** One side of a fixture, with the players it has in this tournament. */
+export interface MatchSide {
+  team: Team
+  /** Sorted by name. */
+  players: Player[]
+}
+
+/**
+ * Who can be scored in a match: both teams' players in this tournament. Only
+ * ever returned for a match whose two teams are known.
+ */
+export interface MatchPlayers {
+  match: Match
+  sides: [MatchSide, MatchSide]
+}

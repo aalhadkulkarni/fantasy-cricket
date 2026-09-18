@@ -847,9 +847,18 @@ belong to the auction page itself.
   automatically; the layer only records the admin's assertion that every point
   and correction is in.
 
+**Reads — scoring**
+
+- `getPlayersForMatch(tournamentId, matchId)` — both teams' squads in this
+  tournament. Refused while either team is TBD.
+- `getStandardPointsForMatch(tournamentId, matchId)` — to prefill the form.
+
 **Writes — scoring**
 
-- `updateStandardPoints(tournamentId, matchId, playerPoints)`
+- `updateStandardPoints(tournamentId, matchId, playerPoints)` — a full replace.
+  Zero is stored as absent. In the same atomic update it advances the
+  tournament's `pointsUpdatedTillMatchId`, **forward only**, so correcting an
+  earlier match does not pull it back. System admins only, checked here.
 
 **Writes — access**
 

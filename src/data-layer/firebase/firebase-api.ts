@@ -57,6 +57,8 @@ import type {
   MatchConfig,
   MatchId,
   MatchLineup,
+  MatchPlayers,
+  MatchSide,
   Player,
   PlayerConfig,
   PlayerFilter,
@@ -598,6 +600,23 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         'unknown',
         'You are not playing in this league. Join it as a manager first.',
       )
+    }
+  }
+
+  /**
+   * **System admins only**, the same rule the interface uses to show the page:
+   * `systemAdmin` or `systemOwner`. Checked here because hiding a button is
+   * convenience and anyone can write to the database with the client SDK.
+   */
+  async function assertSystemAdmin(): Promise<void> {
+    const session = requireSession()
+
+    const roles = await service.read<User['systemUserRoles']>(
+      service.path('users', session.uid, 'systemUserRoles'),
+    )
+
+    if (roles?.systemAdmin !== true && roles?.systemOwner !== true) {
+      throw new DataLayerError('unknown', 'Only a system admin can do that.')
     }
   }
 
@@ -2170,6 +2189,160 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
           paths.standardPointsByMatch(tournamentId, matchId),
         )) ?? {}
       )
+    },
+
+    /**
+     * **Each side is that team's squad in this tournament**, from
+     * `participatingTeamPlayers`, not the team's current squad, which can have
+     * moved on since. Names come from the whole catalogue, for the same reason
+     * as `getSelectablePlayers`.
+     */
+    async getPlayersForMatch(
+      tournamentId: TournamentId,
+      matchId: MatchId,
+    ): Promise<MatchPlayers> {
+      const [match, squads] = await Promise.all([
+        service.read<Match>(paths.tournamentMatches(tournamentId, matchId)),
+        service.read<Tournament['participatingTeamPlayers']>(
+          service.path('tournaments', tournamentId, 'participatingTeamPlayers'),
+        ),
+      ])
+
+      if (match === undefined) {
+        throw new DataLayerError(
+          'unknown',
+          'That match is not in this tournament.',
+        )
+      }
+
+      const { team1Id, team2Id } = match
+      if (team1Id === undefined || team2Id === undefined) {
+        throw new DataLayerError(
+          'unknown',
+          'Set both teams for this match in the fixtures editor first.',
+        )
+      }
+
+      const [team1, team2, everyone] = await Promise.all([
+        service.read<Team>(paths.teams(team1Id)),
+        service.read<Team>(paths.teams(team2Id)),
+        service.read<Record<string, Player>>(paths.players()),
+      ])
+
+      const side = (team: Team | undefined, teamId: TeamId): MatchSide => {
+        if (team === undefined) {
+          throw new DataLayerError('unknown', `No team with id ${teamId}.`)
+        }
+        const ids = new Set(Object.keys(squads?.[teamId] ?? {}))
+        return {
+          team,
+          players: Object.values(everyone ?? {})
+            .filter((player) => ids.has(player.playerId))
+            .sort((a, b) => a.playerName.localeCompare(b.playerName)),
+        }
+      }
+
+      return { match, sides: [side(team1, team1Id), side(team2, team2Id)] }
+    },
+
+    async getStandardPointsForMatch(
+      tournamentId: TournamentId,
+      matchId: MatchId,
+    ): Promise<PlayerPoints> {
+      return (
+        (await service.read<PlayerPoints>(
+          paths.standardPointsByMatch(tournamentId, matchId),
+        )) ?? {}
+      )
+    },
+
+    /**
+     * **One atomic update carries all three writes**: the match-major node as
+     * a whole, the player-major leaf for every player involved, and the
+     * scored-till marker. Any one landing without the others would leave the
+     * copies disagreeing with nobody told.
+     *
+     * **Zero is stored as absent**, which the model treats as the same thing.
+     *
+     * **The player-major side clears old entries too.** A player scored before
+     * and since moved out of either team would otherwise keep a points leaf the
+     * match-major copy no longer has.
+     */
+    async updateStandardPoints(
+      tournamentId: TournamentId,
+      matchId: MatchId,
+      playerPoints: PlayerPoints,
+    ): Promise<void> {
+      await assertSystemAdmin()
+
+      const { match, sides } = await api.getPlayersForMatch(
+        tournamentId,
+        matchId,
+      )
+      const eligible = new Set(
+        sides.flatMap((s) => s.players.map((p) => p.playerId)),
+      )
+
+      const byMatch: PlayerPoints = {}
+      for (const [playerId, value] of Object.entries(playerPoints)) {
+        if (!eligible.has(playerId as PlayerId)) {
+          throw new DataLayerError(
+            'unknown',
+            'These points include a player who is in neither team for this match.',
+          )
+        }
+        if (!Number.isFinite(value)) {
+          throw new DataLayerError('unknown', 'Points must be numbers.')
+        }
+        if (value !== 0) byMatch[playerId as PlayerId] = value
+      }
+
+      const [previous, tillId] = await Promise.all([
+        api.getStandardPointsForMatch(tournamentId, matchId),
+        service.read<MatchId>(
+          service.path('tournaments', tournamentId, 'pointsUpdatedTillMatchId'),
+        ),
+      ])
+
+      const tillNumber =
+        tillId === undefined
+          ? undefined
+          : await service.read<number>(
+              service.path(
+                'tournaments',
+                tournamentId,
+                'matches',
+                tillId,
+                'matchNumber',
+              ),
+            )
+
+      const changes: Record<string, unknown> = {
+        [paths.standardPointsByMatch(tournamentId, matchId)]:
+          Object.keys(byMatch).length === 0 ? null : byMatch,
+      }
+
+      const involved = new Set([...eligible, ...Object.keys(previous)])
+      for (const playerId of involved) {
+        changes[
+          service.path(
+            'standardPointsByPlayer',
+            tournamentId,
+            playerId,
+            matchId,
+          )
+        ] = byMatch[playerId as PlayerId] ?? null
+      }
+
+      // Forward only, so a correction to an earlier match leaves it alone. A
+      // marker pointing at a match that no longer exists is replaced.
+      if (tillNumber === undefined || match.matchNumber > tillNumber) {
+        changes[
+          service.path('tournaments', tournamentId, 'pointsUpdatedTillMatchId')
+        ] = matchId
+      }
+
+      await service.update(changes)
     },
 
     async getCurrentRound(leagueId: LeagueId): Promise<Round> {

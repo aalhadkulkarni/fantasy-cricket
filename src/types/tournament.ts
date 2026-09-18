@@ -134,6 +134,16 @@ export interface Tournament {
   completedAt?: number
 
   /**
+   * The furthest match, by `matchNumber`, whose standard points have been
+   * entered. Absent until the first match is scored.
+   *
+   * **It only moves forward.** Correcting an earlier match leaves it where it
+   * is, so it always answers "how far has scoring got", and points entry opens
+   * on the match after it.
+   */
+  pointsUpdatedTillMatchId?: MatchId
+
+  /**
    * Earliest and latest match *start* times. Authoritative for reads and
    * maintained on write: any change to a match start recomputes both in the
    * same atomic update, or they drift and every reader is wrong at once.

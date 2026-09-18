@@ -19,6 +19,7 @@ import type {
   LeagueId,
   Match,
   MatchId,
+  MatchPlayers,
   Player,
   PlayerPoints,
   TournamentId,
@@ -88,6 +89,26 @@ export function updateCustomPoints(
   })
 }
 
+// ---------------------------------------------------------------------------
+// Standard points entry
+// ---------------------------------------------------------------------------
+
+/** Both teams' players for a match. Refused while either team is TBD. */
+export function getPlayersForMatch(
+  tournamentId: TournamentId,
+  matchId: MatchId,
+): Promise<MatchPlayers> {
+  return getApi().getPlayersForMatch(tournamentId, matchId)
+}
+
+/** To prefill the entry form. Prefill must be reliable — see the write below. */
+export function getStandardPointsForMatch(
+  tournamentId: TournamentId,
+  matchId: MatchId,
+): Promise<PlayerPoints> {
+  return getApi().getStandardPointsForMatch(tournamentId, matchId)
+}
+
 /**
  * Standard points, entered once at tournament level by a system admin and used
  * by every league that has not opted into its own scoring.
@@ -95,16 +116,13 @@ export function updateCustomPoints(
  * **Never copied into a league.** Copying would mean applying one correction in
  * every league that opted in.
  *
- * Same dual-write rule as `updateCustomPoints`.
+ * Same full-replace and dual-write rules as `updateCustomPoints`, and it moves
+ * the tournament's scored-till marker forward in the same write.
  */
 export function updateStandardPoints(
   tournamentId: TournamentId,
   matchId: MatchId,
   playerPoints: PlayerPoints,
 ): Promise<void> {
-  return notImplemented('updateStandardPoints', {
-    tournamentId,
-    matchId,
-    playerPoints,
-  })
+  return getApi().updateStandardPoints(tournamentId, matchId, playerPoints)
 }

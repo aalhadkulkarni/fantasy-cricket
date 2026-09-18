@@ -61,6 +61,7 @@ import type {
   Match,
   MatchConfig,
   MatchId,
+  MatchPlayers,
   MatchLineup,
   Player,
   PlayerConfig,
@@ -467,6 +468,39 @@ export interface Api {
    * not recorded.
    */
   getPointsForMatch(leagueId: LeagueId, matchId: MatchId): Promise<PlayerPoints>
+
+  /**
+   * **Both teams' players for a match, from this tournament's squads**, for
+   * scoring it. Refused while either team is not yet known, because there is
+   * nobody to score.
+   */
+  getPlayersForMatch(
+    tournamentId: TournamentId,
+    matchId: MatchId,
+  ): Promise<MatchPlayers>
+
+  /** Standard points already entered for a match, to prefill the entry form. */
+  getStandardPointsForMatch(
+    tournamentId: TournamentId,
+    matchId: MatchId,
+  ): Promise<PlayerPoints>
+
+  /**
+   * **A full replace of one match's standard points.** Blank and zero are the
+   * same and stored as absent, so a player missing from `playerPoints` is
+   * zeroed. That is why the form must be prefilled before it is shown.
+   *
+   * **Both index orders, and the tournament's scored-till marker, in one atomic
+   * update.** The marker only moves forward, so correcting an earlier match
+   * does not pull it back.
+   *
+   * System admins only, checked here rather than by hiding the page.
+   */
+  updateStandardPoints(
+    tournamentId: TournamentId,
+    matchId: MatchId,
+    playerPoints: PlayerPoints,
+  ): Promise<void>
 
   /**
    * **Regular leagues: the whole tournament pool.** An auction league picks
