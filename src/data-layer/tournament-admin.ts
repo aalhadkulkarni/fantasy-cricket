@@ -179,5 +179,12 @@ export function markTeamEliminated(
 export function markTournamentComplete(
   tournamentId: TournamentId,
 ): Promise<void> {
-  return notImplemented('markTournamentComplete', { tournamentId })
+  return getApi().markTournamentComplete(tournamentId)
+}
+
+/** Back to Active, for a tournament marked complete too early. */
+export function unmarkTournamentComplete(
+  tournamentId: TournamentId,
+): Promise<void> {
+  return getApi().unmarkTournamentComplete(tournamentId)
 }

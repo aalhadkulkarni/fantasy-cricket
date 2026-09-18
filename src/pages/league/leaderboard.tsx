@@ -1,6 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { useAuth } from '@/auth/auth-context'
+import {
+  ManagerTeamDialog,
+  type LockedPeriod,
+} from '@/components/leagues/manager-team-dialog'
 import {
   Select,
   SelectContent,
@@ -67,6 +71,7 @@ export function Leaderboard() {
   const [rows, setRows] = useState<LeaderboardRow[] | undefined>(undefined)
   const [isScored, setIsScored] = useState(true)
   const [error, setError] = useState<string | undefined>(undefined)
+  const [viewing, setViewing] = useState<LeaderboardRow | undefined>(undefined)
 
   // The schedule and the watermark, which do not change with the filter.
   useEffect(() => {
@@ -156,6 +161,70 @@ export function Leaderboard() {
   const label = (m: Match) =>
     `Match ${m.matchNumber} · ${shortName(m.team1Id)} v ${shortName(m.team2Id)}`
 
+  /*
+    **What the team modal may move between: locked periods only**, in schedule
+    order. Built once per schedule rather than per render, so the modal's
+    loading does not restart whenever this page re-renders.
+  */
+  const lockedPeriods = useMemo<LockedPeriod[]>(() => {
+    const isLocked = (match: Match | undefined) =>
+      match?.startTimestamp !== undefined &&
+      match.startTimestamp - league.deadlineOffset <= now
+    const short = (teamId: string | undefined) =>
+      teamId === undefined
+        ? 'TBD'
+        : (teams.find((t) => t.teamId === teamId)?.teamShortName ?? 'TBD')
+    const fixture = (m: Match | undefined) =>
+      m === undefined ? '' : `${short(m.team1Id)} v ${short(m.team2Id)}`
+
+    if (league.isGameWeeksEnabled) {
+      return weeks
+        .filter((w) =>
+          isLocked(matches.find((m) => m.matchId === w.matchIds[0])),
+        )
+        .map((w) => ({
+          id: w.gameWeek.gameWeekId,
+          label: `Game week ${w.gameWeek.gameWeekNumber}`,
+          subline: [
+            `Game week ${w.gameWeek.gameWeekNumber}`,
+            w.roundName,
+            fixture(matches.find((m) => m.matchId === w.matchIds[0])),
+          ]
+            .filter((part) => part !== '')
+            .join(' · '),
+          matchIds: w.matchIds,
+          ...(w.changeCap === undefined ? {} : { changeCap: w.changeCap }),
+        }))
+    }
+
+    return matches.filter(isLocked).map((m) => ({
+      id: m.matchId,
+      label: `Match ${m.matchNumber}`,
+      subline: `Match ${m.matchNumber} · ${fixture(m)}`,
+      matchIds: [m.matchId],
+    }))
+  }, [
+    matches,
+    weeks,
+    teams,
+    league.isGameWeeksEnabled,
+    league.deadlineOffset,
+    now,
+  ])
+
+  /*
+    **Where the modal opens.** From Overall, the latest locked period. From a
+    filter, that period — or, in a gameweek league filtered to a match, the
+    gameweek holding it, since gameweek teams are kept per gameweek.
+  */
+  const openingId = (() => {
+    if (filter === OVERALL) return lockedPeriods[lockedPeriods.length - 1]?.id
+    const [kind, id] = split(filter)
+    if (kind === 'week' || !league.isGameWeeksEnabled) return id
+    return weeks.find((w) => w.matchIds.includes(id as MatchId))?.gameWeek
+      .gameWeekId
+  })()
+
   return (
     <section className="floodlit rounded-xl border bg-card p-5 text-card-foreground sm:p-7">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -231,9 +300,25 @@ export function Leaderboard() {
             Points not calculated yet.
           </p>
         ) : (
-          <Standings rows={rows} me={me} />
+          <Standings
+            rows={rows}
+            me={me}
+            onOpen={openingId === undefined ? undefined : setViewing}
+          />
         )}
       </div>
+
+      {viewing !== undefined && openingId !== undefined && (
+        <ManagerTeamDialog
+          league={league}
+          managerId={viewing.managerId}
+          managerName={viewing.managerName}
+          teamName={viewing.fantasyTeamName}
+          periods={lockedPeriods}
+          initialId={openingId}
+          onClose={() => setViewing(undefined)}
+        />
+      )}
     </section>
   )
 }
@@ -246,10 +331,27 @@ export function Leaderboard() {
 function Standings({
   rows,
   me,
+  onOpen,
 }: {
   rows: readonly LeaderboardRow[]
   me: string | undefined
+  /** Absent while nothing is locked, when there is no team to open. */
+  onOpen: ((row: LeaderboardRow) => void) | undefined
 }) {
+  // The name and the team name both open the team, per `leaderboard.md`.
+  const opener = (row: LeaderboardRow, text: string, className: string) =>
+    onOpen === undefined ? (
+      <span className={className}>{text}</span>
+    ) : (
+      <button
+        type="button"
+        onClick={() => onOpen(row)}
+        className={`${className} max-w-full cursor-pointer text-left underline-offset-4 hover:underline focus-visible:underline`}
+      >
+        {text}
+      </button>
+    )
+
   const head =
     'px-3 pb-2 font-mono text-[10px] font-normal tracking-[0.14em] text-subtle-foreground uppercase'
 
@@ -286,7 +388,7 @@ function Standings({
                 </td>
                 <td className="max-w-0 px-3 py-3.5">
                   <p className="truncate font-medium">
-                    {row.managerName}
+                    {opener(row, row.managerName, 'font-medium')}
                     {mine && (
                       <span className="ml-2 font-mono text-[10px] tracking-[0.08em] text-subtle-foreground uppercase">
                         You
@@ -295,12 +397,14 @@ function Standings({
                   </p>
                   {row.fantasyTeamName !== undefined && (
                     <p className="truncate text-sm text-muted-foreground sm:hidden">
-                      {row.fantasyTeamName}
+                      {opener(row, row.fantasyTeamName, '')}
                     </p>
                   )}
                 </td>
                 <td className="hidden max-w-0 truncate px-3 py-3.5 text-muted-foreground sm:table-cell">
-                  {row.fantasyTeamName ?? '—'}
+                  {row.fantasyTeamName === undefined
+                    ? '—'
+                    : opener(row, row.fantasyTeamName, '')}
                 </td>
                 <td className="rounded-r-lg px-3 py-3.5 text-right font-semibold">
                   {format(row.points)}

@@ -10,6 +10,7 @@ import type {
   CreateLeagueConfig,
   CreatedLeague,
   LeagueConfig,
+  LeagueDetails,
   LeagueId,
   LeagueSummary,
   LineupRules,
@@ -172,4 +173,12 @@ export function onLeagueConfigChanged(
     callback,
     onError,
   })
+}
+
+/**
+ * A league's configuration for League Details: every setting resolved for
+ * reading, allowances absent where unlimited, rounds in fixture order.
+ */
+export function getLeagueDetails(leagueId: LeagueId): Promise<LeagueDetails> {
+  return getApi().getLeagueDetails(leagueId)
 }

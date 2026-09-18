@@ -393,6 +393,49 @@ export interface LeaderboardRow {
  */
 export type ScoringWatermark = Match | undefined
 
+/** One round of a gameweek league, as League Details shows it. */
+export interface RoundDetails {
+  roundName: string
+  gameWeeks: number
+  /** Most players changeable going into the round. Absent means unlimited. */
+  beforeRoundCap?: number
+  /** Most players changeable between gameweeks inside it. Absent means unlimited. */
+  betweenGameWeeksCap?: number
+  isImpactSubAllowed: boolean
+}
+
+/**
+ * **A league's configuration, resolved for reading.** Owner and tournament come
+ * back as names, allowances as numbers or absent for unlimited, and rounds in
+ * fixture order, so the page never needs to know how any of it is stored.
+ */
+export interface LeagueDetails {
+  leagueId: LeagueId
+  leagueName: string
+  tournamentName: string
+  ownerName: string
+  isAuctionEnabled: boolean
+  isGameWeeksEnabled: boolean
+  leagueEntry: LeagueEntry
+  managers: number
+  maxSlots: number
+  /** Milliseconds before a match's start that teams lock. */
+  deadlineOffset: number
+  isCustomScoringSystem: boolean
+  scoringRulesText?: string
+  /** Match-based leagues only. Absent means unlimited. */
+  changeAllowances: {
+    teamChanges?: number
+    captainChanges?: number
+    viceCaptainChanges?: number
+  }
+  /** Gameweek leagues only, in fixture order. */
+  rounds: RoundDetails[]
+  finishedAt?: number
+  /** The scheduled start of the league's last match, which gates finishing it. */
+  lastMatchStartsAt?: number
+}
+
 /**
  * Standings for one locked match or gameweek.
  *

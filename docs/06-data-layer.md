@@ -101,7 +101,7 @@ and is named accordingly — `targetUserId`, `requestedUserId`, `managerId`.
 
 ```
 banManager(leagueId, targetUserId)        // correct
-getTeamFor(leagueId, managerId, matchId)  // correct
+getTeamForMatch(leagueId, managerId, matchId)  // correct
 ```
 
 > **Why:** a client-supplied "who is asking" is exactly the cheating vector on
@@ -488,7 +488,10 @@ allowances, and the full auction configuration.
 - `unbanUser(leagueId, targetUserId, roleToGrant)`
 - `makeAdmin(leagueId, targetUserId)`
 - `revokeAdmin(leagueId, targetUserId)`
-- `markLeagueFinished(leagueId)`
+- `markLeagueFinished(leagueId)` — refused until the last match has started,
+  since nothing records a match ending. `unmarkLeagueFinished(leagueId)` puts a
+  league finished too early back. Both owner and admins only. Until Admin
+  Center exists, the action lives on League Details.
 - `deleteLeague(leagueId)` — **owner only, and only while the owner is the
   league's only member**
 
@@ -577,12 +580,14 @@ allowances, and the full auction configuration.
   `getPointsForLeague(userId, leagueId)` — one manager's score. The leaderboard
   runs the same computation for every manager from one shared read. Nothing is
   cached between calls, so a correction shows on the next read.
-- `getTeamFor(leagueId, managerId, matchId)` — subject to the visibility rule
+- `getTeamForMatch(leagueId, managerId, matchId)` and
+  `getTeamForGameWeek(leagueId, managerId, gameWeekId)` — subject to the
+  visibility rule, for the leaderboard's team modal
 
 > **Each leaderboard call is one subtree read plus computation**, not one call
 > per manager. See decision 1 above.
 
-> `getTeamFor` **enforces visibility inside the layer.** If the deadline has not
+> Both **enforce visibility inside the layer.** If the deadline has not
 > passed and the requester is not that manager, it returns nothing — it does not
 > return the team and trust the caller to hide it.
 
@@ -606,7 +611,8 @@ allowances, and the full auction configuration.
 
 - `getSquad(leagueId, matchId)` — your own
 - `getAllSquads(leagueId, matchId)`
-- `getLockedTeamFor(leagueId, managerId, matchId)` — for the XI highlighting
+- `getTeamForGameWeek(leagueId, managerId, gameWeekId)` — for the XI
+  highlighting; the same visibility rule gives only the locked XI
 
 > Squads are always public. Only the **locked** XI is highlighted for other
 > managers.
@@ -850,7 +856,7 @@ belong to the auction page itself.
 - `markTeamEliminated(tournamentId, teamId, fromMatchId)`
 - `markTournamentComplete(tournamentId)` — sets `completedAt`. Never set
   automatically; the layer only records the admin's assertion that every point
-  and correction is in.
+  and correction is in. `unmarkTournamentComplete(tournamentId)` clears it.
 
 **Reads — scoring**
 

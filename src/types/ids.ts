@@ -47,7 +47,7 @@
  * keys catch this; branded ones do not. **For this one check, branding is
  * actively worse than not branding.**
  *
- * Kept anyway, because the value is in parameter positions — `getTeamFor` takes
+ * Kept anyway, because the value is in parameter positions — `getTeamForMatch` takes
  * three ids that would otherwise be three indistinguishable strings — and that
  * is where the mistakes actually happen. But nothing here should be trusted to
  * catch a wrongly-typed map.

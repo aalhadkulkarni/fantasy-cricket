@@ -82,7 +82,7 @@ export function getJoinRequests(
 
 /** Name, team name and roles. Used by Members, Admin Center and the auction. */
 export function getMembers(leagueId: LeagueId): Promise<LeagueMemberSummary[]> {
-  return notImplemented('getMembers', { leagueId })
+  return getApi().getMembers(leagueId)
 }
 
 export function getBannedUsers(
@@ -178,7 +178,12 @@ export function revokeAdmin(
  * Archived tab.
  */
 export function markLeagueFinished(leagueId: LeagueId): Promise<void> {
-  return notImplemented('markLeagueFinished', { leagueId })
+  return getApi().markLeagueFinished(leagueId)
+}
+
+/** For a league marked finished too early. Owner and admins only. */
+export function unmarkLeagueFinished(leagueId: LeagueId): Promise<void> {
+  return getApi().unmarkLeagueFinished(leagueId)
 }
 
 /**
