@@ -53,6 +53,7 @@ import type {
   GameWeekLineup,
   JoinableLeague,
   LeagueCard,
+  LeagueGameWeek,
   LeagueId,
   LeagueSummary,
   LineupRules,
@@ -65,6 +66,7 @@ import type {
   PlayerConfig,
   PlayerFilter,
   PlayerId,
+  PlayerPoints,
   PlayerRoleRecord,
   Round,
   Team,
@@ -440,6 +442,33 @@ export interface Api {
   getCurrentGameWeek(leagueId: LeagueId): Promise<GameWeek>
 
   /**
+   * Every gameweek in the league, in order, for moving between them.
+   *
+   * No specified call returns these — a league's gameweeks live under its round
+   * configs, keyed by the tournament's round ids, and resolving which matches
+   * each spans is the layer's job.
+   */
+  getGameWeeks(leagueId: LeagueId): Promise<LeagueGameWeek[]>
+
+  /** Every match in the tournament, in `matchNumber` order. */
+  getFixtures(tournamentId: TournamentId): Promise<Match[]>
+
+  /**
+   * What each player scored in one match.
+   *
+   * **Resolution follows the league's scoring flag, never a search order.** A
+   * custom-scoring league reads only its own store, so a match its admin has
+   * not entered has no points rather than borrowed ones. Falling back per match
+   * would let one league score some matches by its own rules and others by the
+   * standard ones, which is worse than showing nothing because nobody would see
+   * it happen.
+   *
+   * **Zero and absent are equivalent.** The reason a player scored nothing is
+   * not recorded.
+   */
+  getPointsForMatch(leagueId: LeagueId, matchId: MatchId): Promise<PlayerPoints>
+
+  /**
    * **Regular leagues: the whole tournament pool.** An auction league picks
    * from its squad instead, which is filtered by match because squad membership
    * changes with transfers.
@@ -455,6 +484,23 @@ export interface Api {
     leagueId: LeagueId,
     gameWeekId: GameWeekId,
   ): Promise<GameWeekLineup | undefined>
+
+  /**
+   * The eleven that stands going into a gameweek — the one a change is measured
+   * against.
+   *
+   * **The last gameweek with a saved team, not necessarily the one before.** A
+   * team applies forward until changed, so someone who skipped a gameweek is
+   * still fielding what they had. And **after an impact sub, the eleven at the
+   * end of that gameweek**, since that is who is actually in the team next.
+   *
+   * Absent for the first gameweek and for a manager's first ever team, where
+   * there is nothing to differ from.
+   */
+  getMyTeamBeforeGameWeek(
+    leagueId: LeagueId,
+    gameWeekId: GameWeekId,
+  ): Promise<LineupSubmission | undefined>
 
   /**
    * **An illegal team is rejected here**, not merely disabled in the form.

@@ -12,6 +12,7 @@
  */
 
 import type {
+  LeagueGameWeek,
   ChangesRemaining,
   GameWeek,
   GameWeekId,
@@ -43,6 +44,16 @@ export function getCurrentRound(leagueId: LeagueId): Promise<Round> {
   return getApi().getCurrentRound(leagueId)
 }
 
+/**
+ * Every gameweek in the league, in order, for moving between them.
+ *
+ * Each carries the round it belongs to and the matches it spans, both resolved
+ * by `matchNumber` — ids are push keys and sort by creation time.
+ */
+export function getGameWeeks(leagueId: LeagueId): Promise<LeagueGameWeek[]> {
+  return getApi().getGameWeeks(leagueId)
+}
+
 export function getCurrentGameWeek(leagueId: LeagueId): Promise<GameWeek> {
   return getApi().getCurrentGameWeek(leagueId)
 }
@@ -62,6 +73,18 @@ export function getMyTeamForGameWeek(
   gameWeekId: GameWeekId,
 ): Promise<GameWeekLineup | undefined> {
   return getApi().getMyTeamForGameWeek(leagueId, gameWeekId)
+}
+
+/**
+ * The eleven a gameweek's changes are measured from: the last gameweek with a
+ * saved team before this one, after any impact sub. Absent for the first
+ * gameweek and for a manager's first ever team, where nothing is spent.
+ */
+export function getMyTeamBeforeGameWeek(
+  leagueId: LeagueId,
+  gameWeekId: GameWeekId,
+): Promise<LineupSubmission | undefined> {
+  return getApi().getMyTeamBeforeGameWeek(leagueId, gameWeekId)
 }
 
 /** Absent when nothing has been submitted for this match yet. */

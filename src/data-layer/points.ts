@@ -23,6 +23,7 @@ import type {
   PlayerPoints,
   TournamentId,
 } from '@/types'
+import { getApi } from './api'
 import { notImplemented } from './not-implemented'
 
 /**
@@ -34,7 +35,7 @@ export function getPointsForMatch(
   leagueId: LeagueId,
   matchId: MatchId,
 ): Promise<PlayerPoints> {
-  return notImplemented('getPointsForMatch', { leagueId, matchId })
+  return getApi().getPointsForMatch(leagueId, matchId)
 }
 
 // ---------------------------------------------------------------------------

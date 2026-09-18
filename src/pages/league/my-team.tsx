@@ -1,8 +1,14 @@
 import { useEffect, useState } from 'react'
 
 import { JoinLeagueDialog } from '@/components/join-league-dialog'
+import {
+  ChangesSummary,
+  type Allowances,
+  type SavedTeam,
+} from '@/components/leagues/changes-summary'
 import { LineupSummary } from '@/components/leagues/lineup-summary'
 import { LineupView } from '@/components/leagues/lineup-view'
+import { PeriodNav, type Period } from '@/components/leagues/period-nav'
 import { PlayerPicker } from '@/components/leagues/player-picker'
 import { Button } from '@/components/ui/button'
 import {
@@ -12,12 +18,14 @@ import {
   SelectTrigger,
 } from '@/components/ui/select'
 import {
-  getCurrentGameWeek,
   getCurrentMatch,
-  getCurrentRound,
+  getFixtures,
+  getGameWeeks,
   getLineupRules,
+  getMyTeamBeforeGameWeek,
   getMyTeamForGameWeek,
   getMyTeamForMatch,
+  getPointsForMatch,
   getSelectablePlayers,
   getTeams,
   updateTeamForGameWeek,
@@ -25,12 +33,18 @@ import {
 } from '@/data-layer'
 import { useLeague } from '@/hooks/use-league'
 import type {
-  GameWeek,
+  GameWeekId,
+  GameWeekLineup,
+  LeagueGameWeek,
+  LeagueId,
   LineupRules,
+  LineupSubmission,
   Match,
+  MatchId,
+  MatchLineup,
   Player,
   PlayerId,
-  Round,
+  PlayerPoints,
   Team,
 } from '@/types'
 
@@ -74,11 +88,32 @@ export function MyTeam() {
 
   const [pool, setPool] = useState<Player[]>([])
   const [rules, setRules] = useState<LineupRules>({})
-  const [match, setMatch] = useState<Match | undefined>(undefined)
-  const [gameWeek, setGameWeek] = useState<GameWeek | undefined>(undefined)
-  const [round, setRound] = useState<Round | undefined>(undefined)
   const [teams, setTeams] = useState<Team[]>([])
-  const [existing, setExisting] = useState<Player[] | undefined>(undefined)
+
+  /*
+    The whole schedule, loaded once. Navigation walks it, so fetching one period
+    at a time would mean not knowing what is either side of you.
+  */
+  const [matches, setMatches] = useState<Match[]>([])
+  const [gameWeeks, setGameWeeks] = useState<LeagueGameWeek[]>([])
+  const [currentId, setCurrentId] = useState<string | undefined>(undefined)
+  const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
+
+  /*
+    **The saved snapshot, held apart from the draft.** The pickers edit
+    `picks`, `captainId` and `viceCaptainId`; this is what was last written, and
+    the difference between them is what a change costs.
+  */
+  const [snapshot, setSnapshot] = useState<SavedTeam | undefined>(undefined)
+  /*
+    **The previous period's team, which is what a change is measured against.**
+    Not the selected one: a match is not locked until its deadline, so it can be
+    rearranged as often as you like, and only how it differs from the one before
+    it is ever charged.
+  */
+  const [baseline, setBaseline] = useState<SavedTeam | undefined>(undefined)
+  const [savedToken, setSavedToken] = useState(0)
+  const [points, setPoints] = useState<PlayerPoints>({})
 
   const [picks, setPicks] = useState<(PlayerId | undefined)[]>(
     Array.from({ length: XI }, () => undefined),
@@ -93,6 +128,8 @@ export function MyTeam() {
   const [error, setError] = useState<string | undefined>(undefined)
   const [saved, setSaved] = useState(false)
 
+  // The schedule, the pool and the rules — none of which changes with the
+  // selection, so none of it is refetched when you move.
   useEffect(() => {
     let cancelled = false
 
@@ -100,48 +137,36 @@ export function MyTeam() {
       setLoading(true)
       try {
         const current = await getCurrentMatch(league.leagueId)
-        const week = league.isGameWeeksEnabled
-          ? await getCurrentGameWeek(league.leagueId)
-          : undefined
 
-        const [players, lineupRules, mine, currentRound, allTeams] =
+        const [fixtures, weeks, players, lineupRules, allTeams] =
           await Promise.all([
+            getFixtures(league.tournamentId),
+            league.isGameWeeksEnabled
+              ? getGameWeeks(league.leagueId)
+              : Promise.resolve([]),
             getSelectablePlayers(league.leagueId, current.matchId),
             getLineupRules(league.leagueId),
-            week === undefined
-              ? getMyTeamForMatch(league.leagueId, current.matchId)
-              : getMyTeamForGameWeek(league.leagueId, week.gameWeekId),
-            // Named beside the gameweek, per `my-team.md`.
-            week === undefined ? undefined : getCurrentRound(league.leagueId),
             // For the fixture on the subline. Ids only live on a match.
             getTeams(),
           ])
 
         if (cancelled) return
 
-        setMatch(current)
-        setGameWeek(week)
-        setRound(currentRound)
-        setTeams(allTeams)
+        setMatches(fixtures)
+        setGameWeeks(weeks)
         setPool(players)
         setRules(lineupRules)
+        setTeams(allTeams)
 
-        const eleven =
-          mine === undefined
-            ? undefined
-            : 'startingLineup' in mine
-              ? mine.startingLineup
-              : mine.lineup
+        // Where you land: the gameweek holding the current match, or the match
+        // itself. Both are the first thing still open.
+        const landing = league.isGameWeeksEnabled
+          ? weeks.find((w) => w.matchIds.includes(current.matchId))?.gameWeek
+              .gameWeekId
+          : current.matchId
 
-        setExisting(eleven)
-        if (mine !== undefined && eleven !== undefined) {
-          setPicks([
-            ...eleven.map((p) => p.playerId),
-            ...Array.from({ length: XI - eleven.length }, () => undefined),
-          ])
-          setCaptainId(mine.captainId)
-          setViceCaptainId(mine.viceCaptainId)
-        }
+        setCurrentId(landing)
+        setSelectedId(landing)
         setError(undefined)
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
@@ -153,7 +178,130 @@ export function MyTeam() {
     return () => {
       cancelled = true
     }
-  }, [league.leagueId, league.isGameWeeksEnabled])
+  }, [league.leagueId, league.tournamentId, league.isGameWeeksEnabled])
+
+  /*
+    Everything below follows from the selection. A gameweek league selects a
+    gameweek and picks for its first match; a match league selects the match
+    itself.
+  */
+  const gameWeek = gameWeeks.find((w) => w.gameWeek.gameWeekId === selectedId)
+
+  const match = league.isGameWeeksEnabled
+    ? matches.find((m) => m.matchId === gameWeek?.matchIds[0])
+    : matches.find((m) => m.matchId === selectedId)
+
+  const periods: Period[] = league.isGameWeeksEnabled
+    ? gameWeeks.map((w) => ({
+        id: w.gameWeek.gameWeekId,
+        label: `Game week ${w.gameWeek.gameWeekNumber}`,
+      }))
+    : matches.map((m) => ({
+        id: m.matchId,
+        label: `Match ${m.matchNumber}`,
+      }))
+
+  /*
+    **Matches are all reachable for viewing; gameweeks stop at the next one.**
+    `my-team.md` says so, and the reason is that a gameweek further out has no
+    team to look at and no deadline worth showing.
+  */
+  const currentIndex = periods.findIndex((p) => p.id === currentId)
+  const reachable = new Set(
+    league.isGameWeeksEnabled
+      ? periods.filter((_, i) => i <= currentIndex + 1).map((p) => p.id)
+      : periods.map((p) => p.id),
+  )
+
+  // The period before this one, or nothing on the first. Found by position in the
+  // ordered schedule, which is fixture order rather than id order.
+  const previousId =
+    periods[periods.findIndex((p) => p.id === selectedId) - 1]?.id
+
+  // Loaded per selection, so moving between matches refetches only these.
+  useEffect(() => {
+    if (selectedId === undefined || match === undefined) return
+    let cancelled = false
+
+    void (async () => {
+      try {
+        const teamFor = (id: string) =>
+          league.isGameWeeksEnabled
+            ? getMyTeamForGameWeek(league.leagueId, id as GameWeekId)
+            : getMyTeamForMatch(league.leagueId, id as MatchId)
+
+        /*
+          A gameweek is measured from the last team saved before it, which may
+          be further back than the one before and may carry an impact sub, so
+          the layer finds it. A match is measured from the match before, which
+          is always stored because match lineups are written densely.
+        */
+        const [mine, previous, scored] = await Promise.all([
+          teamFor(selectedId),
+          league.isGameWeeksEnabled
+            ? getMyTeamBeforeGameWeek(league.leagueId, selectedId as GameWeekId)
+            : previousId === undefined
+              ? undefined
+              : getMyTeamForMatch(league.leagueId, previousId as MatchId),
+          // A gameweek aggregates across its matches; a match is just itself.
+          gameWeekPoints(
+            league.leagueId,
+            gameWeek?.matchIds ?? [match.matchId],
+          ),
+        ])
+
+        if (cancelled) return
+
+        const eleven =
+          mine === undefined
+            ? undefined
+            : 'startingLineup' in mine
+              ? mine.startingLineup
+              : mine.lineup
+
+        setSnapshot(toSaved(mine))
+        setBaseline(toSaved(previous))
+        setPoints(scored)
+
+        // The form starts from whatever is already there, or empty.
+        setPicks(
+          eleven === undefined
+            ? Array.from({ length: XI }, () => undefined)
+            : [
+                ...eleven.map((p) => p.playerId),
+                ...Array.from({ length: XI - eleven.length }, () => undefined),
+              ],
+        )
+        setCaptainId(mine?.captainId)
+        setViceCaptainId(mine?.viceCaptainId)
+        setSaved(false)
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    league.leagueId,
+    league.isGameWeeksEnabled,
+    selectedId,
+    previousId,
+    match,
+    gameWeek?.matchIds,
+    savedToken,
+  ])
+
+  /*
+    **A gameweek league caps each transition, not the league.** Its cap is the
+    gameweek's own, and captain and vice captain changes are unlimited there, so
+    only the team allowance is set. A match league reads its three from the
+    league.
+  */
+  const allowances: Allowances = league.isGameWeeksEnabled
+    ? { teamChanges: gameWeek?.changeCap }
+    : league.changeAllowances
 
   const chosen = picks.filter((id): id is PlayerId => id !== undefined)
   const selected = chosen
@@ -195,14 +343,16 @@ export function MyTeam() {
       if (gameWeek !== undefined) {
         await updateTeamForGameWeek(
           league.leagueId,
-          gameWeek.gameWeekId,
+          gameWeek.gameWeek.gameWeekId,
           submission,
         )
       } else if (match !== undefined) {
         await updateTeamForMatch(league.leagueId, match.matchId, submission)
       }
       setSaved(true)
-      setExisting(selected)
+      // Re-read rather than patch: the remaining counters were worked out in
+      // the layer, and guessing them here would be a second implementation.
+      setSavedToken((n) => n + 1)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -268,27 +418,44 @@ export function MyTeam() {
   if (locked) {
     return (
       <section className="floodlit rounded-xl border bg-card p-5 text-card-foreground sm:p-7">
-        <h2 className="text-xl font-bold tracking-tight sm:text-2xl">
+        <Nav
+          periods={periods}
+          selectedId={selectedId}
+          reachable={reachable}
+          onSelect={setSelectedId}
+        />
+
+        <h2 className="mt-5 text-xl font-bold tracking-tight sm:text-2xl">
           Your XI
         </h2>
         <p className="mt-2 font-mono text-sm font-medium text-muted-foreground">
-          {subline(match, gameWeek, round, teams, deadline, true)}
+          {subline(match, gameWeek, teams, deadline, true)}
         </p>
 
-        {existing === undefined ||
+        {snapshot === undefined ||
         captainId === undefined ||
         viceCaptainId === undefined ? (
           <p className="mt-6 max-w-prose text-sm text-subtle-foreground">
-            You did not submit a team in time. You score nothing for this period
-            and resume normally — a missed deadline never removes you from a
-            league, and your next team simply applies from the following match.
+            You did not submit a team for this one. You score nothing for it and
+            resume normally — a missed deadline never removes you from a league,
+            and your next team simply applies from the following match.
           </p>
         ) : (
           <div className="mt-6">
             <LineupView
-              lineup={existing}
+              lineup={snapshot.lineup}
               captainId={captainId}
               viceCaptainId={viceCaptainId}
+              points={points}
+              totalLabel="Total"
+            />
+
+            <ChangesSummary
+              baseline={baseline}
+              allowances={allowances}
+              lineup={snapshot.lineup}
+              captainId={snapshot.captainId}
+              viceCaptainId={snapshot.viceCaptainId}
             />
           </div>
         )}
@@ -298,20 +465,27 @@ export function MyTeam() {
 
   return (
     <section className="floodlit rounded-xl border bg-card p-5 text-card-foreground sm:p-7">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <Nav
+        periods={periods}
+        selectedId={selectedId}
+        reachable={reachable}
+        onSelect={setSelectedId}
+      />
+
+      <div className="mt-5 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold tracking-tight sm:text-2xl">
-            {existing === undefined ? 'Pick your XI' : 'Your XI'}
+            {snapshot === undefined ? 'Pick your XI' : 'Your XI'}
           </h2>
           <p className="mt-2 font-mono text-sm font-medium text-muted-foreground">
-            {subline(match, gameWeek, round, teams, deadline, false)}
+            {subline(match, gameWeek, teams, deadline, false)}
           </p>
         </div>
 
         <Button onClick={() => void submit()} disabled={!canSubmit}>
           {saving
             ? 'Submitting…'
-            : existing === undefined
+            : snapshot === undefined
               ? 'Submit team'
               : 'Save team'}
         </Button>
@@ -367,6 +541,18 @@ export function MyTeam() {
             viceCaptainId={viceCaptainId}
           />
 
+          {/*
+            Always shown. With no previous period there is nothing to differ
+            from, so it reads as nothing spent rather than being absent.
+          */}
+          <ChangesSummary
+            baseline={baseline}
+            allowances={allowances}
+            lineup={selected}
+            captainId={captainId}
+            viceCaptainId={viceCaptainId}
+          />
+
           {saved && <p className="mt-3 text-sm text-settled">Team saved.</p>}
           {error !== undefined && (
             <p className="mt-3 text-sm text-destructive">{error}</p>
@@ -387,6 +573,84 @@ export function MyTeam() {
   )
 }
 
+function Nav({
+  periods,
+  selectedId,
+  reachable,
+  onSelect,
+}: {
+  periods: readonly Period[]
+  selectedId: string | undefined
+  reachable: ReadonlySet<string>
+  onSelect: (id: string) => void
+}) {
+  // Nothing to move between until the schedule has loaded, or in a tournament
+  // of one match.
+  if (selectedId === undefined || periods.length < 2) return null
+
+  return (
+    <PeriodNav
+      periods={periods}
+      selectedId={selectedId}
+      reachable={reachable}
+      onSelect={onSelect}
+    />
+  )
+}
+
+/**
+ * A stored team as the change box reads it. **The remaining counters ride
+ * along**, since they are what "of N" is measured from.
+ *
+ * A gameweek team carries none, because its cap is per transition rather than a
+ * running total, so "of N" is the gameweek's cap every time.
+ */
+function toSaved(
+  mine: MatchLineup | GameWeekLineup | LineupSubmission | undefined,
+): SavedTeam | undefined {
+  if (mine === undefined) return undefined
+
+  const lineup = 'startingLineup' in mine ? mine.startingLineup : mine.lineup
+
+  return {
+    lineup,
+    captainId: mine.captainId,
+    viceCaptainId: mine.viceCaptainId,
+    ...('changesRemaining' in mine
+      ? {
+          changesRemaining: mine.changesRemaining,
+          captainChangesRemaining: mine.captainChangesRemaining,
+          viceCaptainChangesRemaining: mine.viceCaptainChangesRemaining,
+        }
+      : {}),
+  }
+}
+
+/**
+ * Points across a set of matches, summed per player.
+ *
+ * **A gameweek's figure is an aggregate**, which is option 2 in `my-team.md` —
+ * one column of totals rather than one column per match, because the per-match
+ * table cannot fit a phone without a scroll. A match-based league passes one
+ * match and gets it back unchanged.
+ */
+async function gameWeekPoints(
+  leagueId: LeagueId,
+  matchIds: readonly MatchId[],
+): Promise<PlayerPoints> {
+  const perMatch = await Promise.all(
+    matchIds.map((matchId) => getPointsForMatch(leagueId, matchId)),
+  )
+
+  const total: PlayerPoints = {}
+  for (const scores of perMatch) {
+    for (const [playerId, value] of Object.entries(scores)) {
+      total[playerId as PlayerId] = (total[playerId as PlayerId] ?? 0) + value
+    }
+  }
+  return total
+}
+
 /**
  * What is being picked for, the fixture, and the deadline — the three parts the
  * mockup carries.
@@ -401,8 +665,7 @@ export function MyTeam() {
  */
 function subline(
   match: Match | undefined,
-  gameWeek: GameWeek | undefined,
-  round: Round | undefined,
+  gameWeek: LeagueGameWeek | undefined,
   teams: readonly Team[],
   deadline: number | undefined,
   locked: boolean,
@@ -410,8 +673,8 @@ function subline(
   const parts: string[] = []
 
   if (gameWeek !== undefined) {
-    parts.push(`Game week ${gameWeek.gameWeekNumber}`)
-    if (round !== undefined) parts.push(round.roundName)
+    parts.push(`Game week ${gameWeek.gameWeek.gameWeekNumber}`)
+    if (gameWeek.roundName !== '') parts.push(gameWeek.roundName)
   } else if (match !== undefined) {
     parts.push(`Match ${match.matchNumber}`)
   }
