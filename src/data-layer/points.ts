@@ -16,6 +16,7 @@
  */
 
 import type {
+  GameWeekId,
   LeagueId,
   Match,
   MatchId,
@@ -23,6 +24,7 @@ import type {
   Player,
   PlayerPoints,
   TournamentId,
+  UserId,
 } from '@/types'
 import { getApi } from './api'
 import { notImplemented } from './not-implemented'
@@ -32,11 +34,44 @@ import { notImplemented } from './not-implemented'
  * `isCustomScoringSystem`. Zero and absent are equivalent; the reason a player
  * scored nothing is not recorded.
  */
-export function getPointsForMatch(
+export function getPlayerPointsForMatch(
   leagueId: LeagueId,
   matchId: MatchId,
 ): Promise<PlayerPoints> {
-  return getApi().getPointsForMatch(leagueId, matchId)
+  return getApi().getPlayerPointsForMatch(leagueId, matchId)
+}
+
+// ---------------------------------------------------------------------------
+// A manager's points
+// ---------------------------------------------------------------------------
+
+/**
+ * One manager's score for one match: their eleven, each player's points, the
+ * captain doubled and the vice-captain at one and a half.
+ */
+export function getPointsForMatch(
+  userId: UserId,
+  leagueId: LeagueId,
+  matchId: MatchId,
+): Promise<number> {
+  return getApi().getPointsForMatch(userId, leagueId, matchId)
+}
+
+/** Summed over the gameweek's matches. */
+export function getPointsForGameWeek(
+  userId: UserId,
+  leagueId: LeagueId,
+  gameWeekId: GameWeekId,
+): Promise<number> {
+  return getApi().getPointsForGameWeek(userId, leagueId, gameWeekId)
+}
+
+/** Every match, plus the manager's transfer points adjustment. */
+export function getPointsForLeague(
+  userId: UserId,
+  leagueId: LeagueId,
+): Promise<number> {
+  return getApi().getPointsForLeague(userId, leagueId)
 }
 
 // ---------------------------------------------------------------------------

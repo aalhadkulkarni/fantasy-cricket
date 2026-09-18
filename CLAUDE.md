@@ -127,7 +127,7 @@ them.**
 | **A league's phase is never stored**               | It is derived from auction state, deadlines and `finishedAt`. The old system had it as a constant in source, so advancing a league required a redeploy.                                                                        |
 | **Illegal squads are permitted at auction**        | A manager can buy ten batsmen. The consequence lands later — they score zero for a gameweek they cannot field a legal XI for.                                                                                                  |
 | **Selling in the auction is manual**               | The system does not auto-resolve on timeout, so the auctioneer can make allowances for someone with connection trouble.                                                                                                        |
-| **Match-based lineups are stored densely**         | One entry per match, with values copied forward. Gameweek leagues store one entry per gameweek and are not affected. Sparse storage is a known optimisation, deliberately deferred — it only matters at 60+ match tournaments. |
+| **Lineups are stored densely**                     | One entry per match (or per gameweek), with values copied forward: saving writes the same team to every later match or gameweek. Sparse storage is a known optimisation, deliberately deferred — it only matters at 60+ match tournaments. |
 
 ---
 

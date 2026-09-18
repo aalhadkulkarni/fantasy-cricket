@@ -541,7 +541,7 @@ allowances, and the full auction configuration.
 - `getSquad(leagueId, matchId)` — auction leagues; what may be selected
 - `getSelectablePlayers(leagueId, matchId)` — regular leagues; the tournament
   pool
-- `getPointsForMatch(leagueId, matchId)` — reads custom **or** standard
+- `getPlayerPointsForMatch(leagueId, matchId)` — reads custom **or** standard
   according to the league's `isCustomScoringSystem` flag. **Not a fallback
   chain:** a custom-scoring league never reads standard points, so a match its
   admin has not entered yet has no points rather than borrowed ones.
@@ -572,6 +572,11 @@ allowances, and the full auction configuration.
 - `getLeaderboardForGameWeek(leagueId, gameWeekId)`
 - `getLeaderboardForMatch(leagueId, matchId)`
 - `getScoringWatermark(leagueId)` — the match up to which points are entered
+- `getPointsForMatch(userId, leagueId, matchId)`,
+  `getPointsForGameWeek(userId, leagueId, gameWeekId)` and
+  `getPointsForLeague(userId, leagueId)` — one manager's score. The leaderboard
+  runs the same computation for every manager from one shared read. Nothing is
+  cached between calls, so a correction shows on the next read.
 - `getTeamFor(leagueId, managerId, matchId)` — subject to the visibility rule
 
 > **Each leaderboard call is one subtree read plus computation**, not one call

@@ -1179,8 +1179,11 @@ const dataModel = {
         the league first to know how to interpret what you just fetched. Split,
         the PATH is the discriminant and each node has one concrete shape.
 
-    Density is unchanged: match-based is one entry per match copied forward,
-    game-week is one per game week and never was dense.
+    Both are dense: saving writes the same team to that match or game week
+    and every later one, because a team applies until it is changed. Game
+    week lineups were once one entry per game week, written only when saved;
+    they are copied forward now so a game week always has a team once one has
+    been submitted. A copy replaces the whole node, clearing any impact sub.
     =========================================================
   */
 
