@@ -274,9 +274,16 @@ interface LeagueBase {
 interface MatchBasedLeague extends LeagueBase {
   isGameWeeksEnabled: false
   isAuctionEnabled: false
-  totalChangesAllowed: number
-  totalCaptainChangesAllowed: number
-  totalViceCaptainChangesAllowed: number
+
+  /**
+   * **Absent means unlimited**, as with `LineupRule.max` and the per-round
+   * allowances on a gameweek league. These were required numbers, which left a
+   * gameweek league able to express unlimited and a match-based one unable to
+   * say the same thing.
+   */
+  totalChangesAllowed?: number
+  totalCaptainChangesAllowed?: number
+  totalViceCaptainChangesAllowed?: number
 }
 
 /** Changes are configured per round instead, and lineups are stored per gameweek. */

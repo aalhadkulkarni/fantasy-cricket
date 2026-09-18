@@ -8,7 +8,14 @@ import { CreateLeague } from './pages/create-league'
 import { Login } from './pages/login'
 import { MyLeagues } from './pages/my-leagues'
 import { NotFound } from './pages/not-found'
+import { LeagueDetails } from './pages/league/league-details'
+import { Leaderboard } from './pages/league/leaderboard'
+import { Members } from './pages/league/members'
+import { MyTeam } from './pages/league/my-team'
+import { LeagueHome, LeagueLanding } from './pages/league-home'
 import { SystemAdmin } from './pages/system-admin'
+import { TournamentAdmin } from './pages/tournament-admin'
+import { TournamentHome } from './pages/tournament-home'
 import { Tournaments } from './pages/tournaments'
 import { ROUTES } from './routes'
 
@@ -45,13 +52,34 @@ function App() {
               <Routes>
                 <Route path={ROUTES.home} element={<MyLeagues />} />
                 <Route path={ROUTES.tournaments} element={<Tournaments />} />
+                <Route path={ROUTES.tournament} element={<TournamentHome />} />
                 <Route path={ROUTES.createLeague} element={<CreateLeague />} />
                 <Route path={ROUTES.actions} element={<ActionsCenter />} />
+                {/*
+                  League home wraps its sections, so the summary strip and the
+                  sidebar are not remounted when moving between them.
+                */}
+                <Route path={ROUTES.league} element={<LeagueHome />}>
+                  <Route index element={<LeagueLanding />} />
+                  <Route path="details" element={<LeagueDetails />} />
+                  <Route path="team" element={<MyTeam />} />
+                  <Route path="leaderboard" element={<Leaderboard />} />
+                  <Route path="members" element={<Members />} />
+                </Route>
+
                 <Route
                   path={ROUTES.admin}
                   element={
                     <RequireSystemAdmin>
                       <SystemAdmin />
+                    </RequireSystemAdmin>
+                  }
+                />
+                <Route
+                  path={ROUTES.adminTournament}
+                  element={
+                    <RequireSystemAdmin>
+                      <TournamentAdmin />
                     </RequireSystemAdmin>
                   }
                 />

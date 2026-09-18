@@ -6,16 +6,17 @@
  */
 
 import type {
+  JoinableLeague,
   CreateLeagueConfig,
   CreatedLeague,
   LeagueConfig,
   LeagueId,
-  LeagueJoinCode,
   LeagueSummary,
   LineupRules,
   StandardAuctionConfig,
   UserId,
 } from '@/types'
+import { getApi } from './api'
 import { notImplemented } from './not-implemented'
 import type {
   Subscriber,
@@ -34,9 +35,9 @@ import type {
  * approval, so finding it this way does not join it.
  */
 export function getLeagueByCode(
-  leagueJoinCode: LeagueJoinCode,
-): Promise<LeagueSummary | undefined> {
-  return notImplemented('getLeagueByCode', { leagueJoinCode })
+  leagueJoinCode: string,
+): Promise<JoinableLeague | undefined> {
+  return getApi().getLeagueByCode(leagueJoinCode)
 }
 
 // ---------------------------------------------------------------------------
@@ -66,7 +67,7 @@ export function createLeague(
 
 /** League home. Name, code, phase, next deadline, your rank. */
 export function getLeagueSummary(leagueId: LeagueId): Promise<LeagueSummary> {
-  return notImplemented('getLeagueSummary', { leagueId })
+  return getApi().getLeagueSummary(leagueId)
 }
 
 /**
@@ -136,6 +137,11 @@ export function getStandardAuctionConfig(): Promise<StandardAuctionConfig> {
 }
 
 /** Default per-role composition limits. Copied at creation, same as above. */
+/** This league's own composition limits, copied at creation and owned since. */
+export function getLineupRules(leagueId: LeagueId): Promise<LineupRules> {
+  return getApi().getLineupRules(leagueId)
+}
+
 export function getStandardLineupRules(): Promise<LineupRules> {
   return notImplemented('getStandardLineupRules', {})
 }

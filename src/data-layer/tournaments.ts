@@ -8,16 +8,17 @@
  */
 
 import type {
-  LeagueId,
+  JoinableLeague,
   Match,
   Player,
   Round,
   Team,
   Tournament,
+  TournamentFilter,
   TournamentId,
   TournamentLeagueIndexEntry,
-  TournamentStatus,
 } from '@/types'
+import { getApi } from './api'
 import { notImplemented } from './not-implemented'
 import type {
   Subscriber,
@@ -41,9 +42,9 @@ import type {
  * fetched.
  */
 export function getTournaments(
-  status?: TournamentStatus,
+  filter?: TournamentFilter,
 ): Promise<Tournament[]> {
-  return notImplemented('getTournaments', { status })
+  return getApi().getTournaments(filter)
 }
 
 /** Those carrying a `publishedAt`. This populates the create-league dropdown. */
@@ -51,8 +52,12 @@ export function getPublishedTournaments(): Promise<Tournament[]> {
   return notImplemented('getPublishedTournaments', {})
 }
 
+/**
+ * The whole tournament, **including its matches and rounds**. They live inside
+ * it, so this is one read rather than three.
+ */
 export function getTournament(tournamentId: TournamentId): Promise<Tournament> {
-  return notImplemented('getTournament', { tournamentId })
+  return getApi().getTournament(tournamentId)
 }
 
 /**
@@ -89,11 +94,17 @@ export function getPlayersForTournament(
   return notImplemented('getPlayersForTournament', { tournamentId })
 }
 
-/** The thin index carried on the tournament, not full leagues. */
+/**
+ * Every league on this tournament, **public and closed alike**. Closed leagues
+ * are visible to everyone; only entry is restricted, which is why a join code
+ * is a shortcut rather than the access mechanism.
+ *
+ * Carries how full each one is, which nothing stores. See the type.
+ */
 export function getLeaguesForTournament(
   tournamentId: TournamentId,
-): Promise<Record<LeagueId, TournamentLeagueIndexEntry>> {
-  return notImplemented('getLeaguesForTournament', { tournamentId })
+): Promise<JoinableLeague[]> {
+  return getApi().getLeaguesForTournament(tournamentId)
 }
 
 /**

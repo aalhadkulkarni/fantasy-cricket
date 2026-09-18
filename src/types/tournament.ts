@@ -42,7 +42,15 @@ export interface Match {
   team1Id?: TeamId
   team2Id?: TeamId
 
-  startTimestamp: number
+  /**
+   * Absent until the date is announced. **A match is created as a placeholder**
+   * and filled in from inside the tournament, so an undated match is the normal
+   * starting state rather than an error.
+   *
+   * The publish gate is what guarantees at least match one has one before
+   * anybody outside the admin panel can see the tournament.
+   */
+  startTimestamp?: number
 
   /** Optional. Extra work for the admin, so absent means show no venue. */
   venue?: string
@@ -132,8 +140,13 @@ export interface Tournament {
    *
    * `endDate` is absent while any match is undated, which is what makes a
    * tournament published with only match one dated behave correctly.
+   *
+   * **`startDate` is absent too until some match has a date.** A tournament is
+   * created with nothing but placeholders, so it has no earliest start yet.
+   * `docs/data-model.js` shows it present, but that example is a published
+   * tournament, where the publish gate has already guaranteed a dated match.
    */
-  startDate: number
+  startDate?: number
   endDate?: number
 
   /**

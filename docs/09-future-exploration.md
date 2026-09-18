@@ -167,6 +167,77 @@ in the folder of the thing it renders, not the page it appears on.**
 
 ---
 
+## 4. A teams view on the tournament page
+
+**Frontend only.**
+
+The tournament page was specified with three modal buttons — Teams, Players and
+Fixtures. Players is now cut outright: someone on that page is deciding whether
+to join a league, and a list of cricketers does not help them decide.
+
+Teams is a different case. It is not cut, only deferred, because **the fixtures
+modal already names both teams in every match**. While the schedule is known,
+a separate teams list says nothing new, and a second modal earns its place by
+being worth opening.
+
+**What makes it stop being redundant:** a tournament knows its teams before it
+knows its fixtures. Placeholder matches carry no teams at all until a fixture is
+decided, so a knockout tail is exactly the case where the schedule names four
+teams and the tournament has sixteen. A long schedule is the softer version of
+the same problem — sixty matches to scan to answer "who is in this".
+
+**Build it when either is true**: a tournament arrives with undecided fixtures,
+or the schedule grows long enough that scanning it to find the teams is work.
+The read is already cheap — `participatingTeams` is a set of ids and `getTeams`
+is a single catalogue read — so this is a component, not a data change.
+
+> Entry 1 above would make it cheaper still, by carrying the team names on the
+> tournament rather than joining against the global node.
+
+---
+
+## 5. Gameweek length on an official league
+
+**Frontend only.**
+
+Publishing a tournament can open an official gameweek league, and it currently
+makes **one gameweek per round** with no choice offered.
+
+**Why that was chosen.** Gameweeks are equal length within a round, so the only
+available lengths are divisors of the round's match count. The playtest series
+is three matches in one round, which allows one or three:
+
+| Length | Result          | Impact sub |
+| ------ | --------------- | ---------- |
+| 1      | three gameweeks | forced off |
+| 3      | one gameweek    | available  |
+
+A gameweek of a single match has no "during the gameweek", so the model forces
+the impact sub off there. Performing an impact sub is part of what the milestone
+is meant to exercise, so length one would have made it untestable. Length three
+was the only other option and it was the right one.
+
+**Why it stops being right.** A sixty-match IPL group stage becomes one
+sixty-match gameweek, which is nobody's idea of a gameweek. The larger the
+round, the worse the default gets, and there is no size at which "the whole
+round" is a considered answer rather than an accident of there being only two
+divisors.
+
+**What to build.** `08-pages/create-league.md` already specifies the shape: for
+each round, a dropdown of that round's divisors, including 1 and N. Either ask
+it on the publish screen beside the two official-league checkboxes, or leave the
+default and make the gameweek structure editable on the league itself, which
+`08-pages/league-details.md` says is allowed until a team has been submitted.
+
+> The second is better if only one is built, because it also covers a league
+> created through the normal form later. The publish screen is the cheaper one.
+
+**Nothing stored changes.** The gameweeks are already written per round under
+`leagues/{leagueId}/roundConfigs`, and writing four of them instead of one is
+the same shape.
+
+---
+
 ## Adding to this document
 
 An entry belongs here when it is an optimisation with a real cost that the

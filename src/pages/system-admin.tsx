@@ -1,9 +1,14 @@
 import { useState } from 'react'
 
+import { PlayersPanel } from '@/components/admin/players-panel'
+import { TeamsPanel } from '@/components/admin/teams-panel'
+import { TournamentsPanel } from '@/components/admin/tournaments-panel'
 import { PageContainer } from '@/components/layout/page-container'
 import { Button } from '@/components/ui/button'
 import {
+  createSamplePlayers,
   setUpBasicSystem,
+  type SamplePlayersResult,
   type SystemSetupResult,
 } from '@/data-layer/system-setup'
 
@@ -17,6 +22,15 @@ import {
  * below being safe to press twice is what makes that tolerable for now.
  */
 export function SystemAdmin() {
+  /*
+    The panels share a catalogue, so a write in one can invalidate what another
+    is showing: a team created above is a dropdown option below. Bumping this
+    reloads every panel, which is cheap at this size and cannot go stale the way
+    passing individual lists between them would.
+  */
+  const [catalogueVersion, setCatalogueVersion] = useState(0)
+  const catalogueChanged = () => setCatalogueVersion((n) => n + 1)
+
   return (
     <main className="py-10 sm:py-14">
       <PageContainer>
@@ -28,16 +42,32 @@ export function SystemAdmin() {
           Cricket reference data, tournaments and scoring.
         </p>
 
-        <SetUpBasicSystem />
+        <SetUpBasicSystem onSetUp={catalogueChanged} />
 
-        <div className="mt-4 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
+        <CreateSamplePlayers onCreated={catalogueChanged} />
+
+        <TeamsPanel
+          catalogueVersion={catalogueVersion}
+          onChanged={catalogueChanged}
+        />
+
+        <PlayersPanel
+          catalogueVersion={catalogueVersion}
+          onChanged={catalogueChanged}
+        />
+
+        <TournamentsPanel
+          catalogueVersion={catalogueVersion}
+          onChanged={catalogueChanged}
+        />
+
+        <div className="floodlit mt-4 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
           <p className="font-mono text-xs tracking-wide text-subtle-foreground uppercase">
-            Placeholder
+            Still to come
           </p>
           <p className="mt-3 text-sm">
-            Competitions, teams, players, fixtures and standard points, plus
-            publishing a tournament and marking one complete. See
-            docs/08-pages/system-admin.md.
+            Publishing a tournament, leagues, standard points, and adding
+            another system admin. See docs/08-pages/system-admin.md.
           </p>
         </div>
       </PageContainer>
@@ -61,13 +91,16 @@ type State =
  * Safe to press twice: the routine reads its own marker first and does nothing
  * if the environment is already set up.
  */
-function SetUpBasicSystem() {
+function SetUpBasicSystem({ onSetUp }: { onSetUp: () => void }) {
   const [state, setState] = useState<State>({ status: 'idle' })
 
   async function run() {
     setState({ status: 'running' })
     try {
       setState({ status: 'done', result: await setUpBasicSystem() })
+      // It writes the competitions and the reference tables, which every panel
+      // below reads.
+      onSetUp()
     } catch (error) {
       setState({
         status: 'failed',
@@ -79,7 +112,7 @@ function SetUpBasicSystem() {
   }
 
   return (
-    <div className="mt-8 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
+    <div className="floodlit mt-8 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
       <h2 className="text-base font-semibold">Set up basic system</h2>
       <p className="mt-2 text-sm text-muted-foreground">
         Writes the reference tables and the standards a new league inherits.
@@ -143,6 +176,97 @@ function Outcome({ state }: { state: State }) {
           </li>
         ))}
         <li>standards · 3</li>
+      </ul>
+    </div>
+  )
+}
+
+type SampleState =
+  | { status: 'idle' }
+  | { status: 'running' }
+  | { status: 'done'; result: SamplePlayersResult }
+  | { status: 'failed'; message: string }
+
+/**
+ * Two international T20 squads, so there is something to pick from.
+ *
+ * **Test data, not reference data.** Nothing depends on these existing, and a
+ * real environment enters its own catalogue through the players panel. This is
+ * here so testing does not start with half an hour of typing.
+ *
+ * Safe to press twice: a name already in the catalogue is skipped rather than
+ * duplicated, so a second press adds only what the first one missed.
+ */
+function CreateSamplePlayers({ onCreated }: { onCreated: () => void }) {
+  const [state, setState] = useState<SampleState>({ status: 'idle' })
+
+  async function run() {
+    setState({ status: 'running' })
+    try {
+      setState({ status: 'done', result: await createSamplePlayers() })
+      onCreated()
+    } catch (error) {
+      setState({
+        status: 'failed',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  return (
+    <div className="floodlit mt-4 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
+      <h2 className="text-base font-semibold">Create sample players</h2>
+      <p className="mt-2 text-sm text-muted-foreground">
+        India and Australia, twenty-three players between them, all in the T20
+        Series. Creates the two teams if they do not exist.
+      </p>
+
+      <div className="mt-5">
+        <Button
+          variant="outline"
+          onClick={() => void run()}
+          disabled={state.status === 'running'}
+        >
+          {state.status === 'running' ? 'Creating…' : 'Create sample players'}
+        </Button>
+      </div>
+
+      <SampleOutcome state={state} />
+    </div>
+  )
+}
+
+function SampleOutcome({ state }: { state: SampleState }) {
+  if (state.status === 'idle' || state.status === 'running') return null
+
+  if (state.status === 'failed') {
+    return (
+      <div className="mt-5 text-sm">
+        <p className="font-semibold text-destructive">Could not create them</p>
+        <p className="mt-1 font-mono text-xs text-muted-foreground">
+          {state.message}
+        </p>
+      </div>
+    )
+  }
+
+  const { result } = state
+
+  return (
+    <div className="mt-5 text-sm">
+      <p className="font-semibold text-settled">
+        {result.created === 0
+          ? 'Nothing to add — they are all here already.'
+          : `Created ${result.created} ${result.created === 1 ? 'player' : 'players'} in ${result.competitionName}.`}
+      </p>
+
+      <ul className="mt-2 space-y-0.5 font-mono text-xs text-muted-foreground">
+        {result.teamsCreated.length > 0 && (
+          <li>teams created · {result.teamsCreated.join(', ')}</li>
+        )}
+        {result.skipped.length > 0 && (
+          <li>already present · {result.skipped.length}</li>
+        )}
       </ul>
     </div>
   )

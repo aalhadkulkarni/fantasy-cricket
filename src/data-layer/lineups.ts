@@ -27,6 +27,7 @@ import type {
   RoundId,
   UserId,
 } from '@/types'
+import { getApi } from './api'
 import { notImplemented } from './not-implemented'
 
 // ---------------------------------------------------------------------------
@@ -43,11 +44,11 @@ export function getCurrentRound(leagueId: LeagueId): Promise<Round> {
 }
 
 export function getCurrentGameWeek(leagueId: LeagueId): Promise<GameWeek> {
-  return notImplemented('getCurrentGameWeek', { leagueId })
+  return getApi().getCurrentGameWeek(leagueId)
 }
 
 export function getCurrentMatch(leagueId: LeagueId): Promise<Match> {
-  return notImplemented('getCurrentMatch', { leagueId })
+  return getApi().getCurrentMatch(leagueId)
 }
 
 // ---------------------------------------------------------------------------
@@ -55,18 +56,20 @@ export function getCurrentMatch(leagueId: LeagueId): Promise<Match> {
 // ---------------------------------------------------------------------------
 
 /** The lineup for the gameweek, plus the impact sub if one has been made. */
+/** Absent when nothing has been submitted for this gameweek yet. */
 export function getMyTeamForGameWeek(
   leagueId: LeagueId,
   gameWeekId: GameWeekId,
-): Promise<GameWeekLineup> {
-  return notImplemented('getMyTeamForGameWeek', { leagueId, gameWeekId })
+): Promise<GameWeekLineup | undefined> {
+  return getApi().getMyTeamForGameWeek(leagueId, gameWeekId)
 }
 
+/** Absent when nothing has been submitted for this match yet. */
 export function getMyTeamForMatch(
   leagueId: LeagueId,
   matchId: MatchId,
-): Promise<MatchLineup> {
-  return notImplemented('getMyTeamForMatch', { leagueId, matchId })
+): Promise<MatchLineup | undefined> {
+  return getApi().getMyTeamForMatch(leagueId, matchId)
 }
 
 /**
@@ -79,7 +82,7 @@ export function getSelectablePlayers(
   leagueId: LeagueId,
   matchId: MatchId,
 ): Promise<Player[]> {
-  return notImplemented('getSelectablePlayers', { leagueId, matchId })
+  return getApi().getSelectablePlayers(leagueId, matchId)
 }
 
 /** Asked per round, because a gameweek league configures allowances per round. */
@@ -140,7 +143,7 @@ export function updateTeamForMatch(
   matchId: MatchId,
   lineup: LineupSubmission,
 ): Promise<void> {
-  return notImplemented('updateTeamForMatch', { leagueId, matchId, lineup })
+  return getApi().updateTeamForMatch(leagueId, matchId, lineup)
 }
 
 export function updateTeamForGameWeek(
@@ -148,11 +151,7 @@ export function updateTeamForGameWeek(
   gameWeekId: GameWeekId,
   lineup: LineupSubmission,
 ): Promise<void> {
-  return notImplemented('updateTeamForGameWeek', {
-    leagueId,
-    gameWeekId,
-    lineup,
-  })
+  return getApi().updateTeamForGameWeek(leagueId, gameWeekId, lineup)
 }
 
 /**
