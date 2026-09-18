@@ -6,7 +6,7 @@
  */
 export function Leaderboard() {
   return (
-    <section className="rounded-xl border bg-card p-5 text-card-foreground sm:p-7">
+    <section className="floodlit rounded-xl border bg-card p-5 text-card-foreground sm:p-7">
       <h2 className="text-xl font-bold tracking-tight sm:text-2xl">
         Leaderboard
       </h2>

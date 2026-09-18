@@ -40,7 +40,7 @@ import { notImplemented } from './not-implemented'
  * beneath them.
  */
 export function getCurrentRound(leagueId: LeagueId): Promise<Round> {
-  return notImplemented('getCurrentRound', { leagueId })
+  return getApi().getCurrentRound(leagueId)
 }
 
 export function getCurrentGameWeek(leagueId: LeagueId): Promise<GameWeek> {

@@ -11,7 +11,7 @@ export function LeagueDetails() {
   const { league } = useLeague()
 
   return (
-    <section className="rounded-xl border bg-card p-5 text-card-foreground sm:p-7">
+    <section className="floodlit rounded-xl border bg-card p-5 text-card-foreground sm:p-7">
       <h2 className="text-xl font-bold tracking-tight sm:text-2xl">
         League Details
       </h2>
@@ -21,8 +21,8 @@ export function LeagueDetails() {
       </p>
 
       <p className="mt-5 text-sm text-subtle-foreground">
-        The full configuration and its edit locks are not built yet. See
-        docs/08-pages/league-details.md.
+        The full configuration and which parts an admin can still change are not
+        built yet. See docs/08-pages/league-details.md.
       </p>
     </section>
   )

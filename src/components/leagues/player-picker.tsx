@@ -48,7 +48,7 @@ export function PlayerPicker({
     >
       <SelectTrigger
         aria-label={`Player ${index + 1}`}
-        className="h-auto w-full justify-between gap-3 rounded-xl border bg-secondary/40 px-4 py-3.5 hover:bg-secondary/70 data-[size=default]:h-auto"
+        className="lit h-auto w-full justify-between gap-3 rounded-xl border bg-secondary/40 px-4 py-3.5 hover:bg-secondary/70 data-[size=default]:h-auto"
       >
         <span className="flex min-w-0 items-center gap-3.5">
           <span className="w-5 shrink-0 text-right font-mono text-xs text-subtle-foreground">
