@@ -62,6 +62,9 @@ import type {
   MatchConfig,
   MatchId,
   MatchPlayers,
+  PeriodLeaderboard,
+  LeaderboardRow,
+  ScoringWatermark,
   MatchLineup,
   Player,
   PlayerConfig,
@@ -467,7 +470,58 @@ export interface Api {
    * **Zero and absent are equivalent.** The reason a player scored nothing is
    * not recorded.
    */
-  getPointsForMatch(leagueId: LeagueId, matchId: MatchId): Promise<PlayerPoints>
+  getPlayerPointsForMatch(
+    leagueId: LeagueId,
+    matchId: MatchId,
+  ): Promise<PlayerPoints>
+
+  /**
+   * **One manager's score for one match**: their eleven for it, each player's
+   * points, the captain doubled and the vice-captain at one and a half. Zero
+   * with no team or no points.
+   */
+  getPointsForMatch(
+    userId: UserId,
+    leagueId: LeagueId,
+    matchId: MatchId,
+  ): Promise<number>
+
+  /** The sum of `getPointsForMatch` over the gameweek's matches. */
+  getPointsForGameWeek(
+    userId: UserId,
+    leagueId: LeagueId,
+    gameWeekId: GameWeekId,
+  ): Promise<number>
+
+  /**
+   * A manager's league total: every match, plus their `pointsAdjustment` from
+   * transfers, which is zero outside an auction league.
+   */
+  getPointsForLeague(userId: UserId, leagueId: LeagueId): Promise<number>
+
+  /**
+   * **Overall standings, managers only.** Lineups and points are each read
+   * once for the whole league and every total is computed from them, never one
+   * read per manager. Nothing is kept once the rows are returned.
+   *
+   * Ties share a rank and the next rank skips by the number tied.
+   */
+  getLeaderboard(leagueId: LeagueId): Promise<LeaderboardRow[]>
+
+  /** **Refused before the gameweek's first match deadline.** */
+  getLeaderboardForGameWeek(
+    leagueId: LeagueId,
+    gameWeekId: GameWeekId,
+  ): Promise<PeriodLeaderboard>
+
+  /** **Refused before the match's deadline.** */
+  getLeaderboardForMatch(
+    leagueId: LeagueId,
+    matchId: MatchId,
+  ): Promise<PeriodLeaderboard>
+
+  /** The match points are entered up to. Absent before any are. */
+  getScoringWatermark(leagueId: LeagueId): Promise<ScoringWatermark>
 
   /**
    * **Both teams' players for a match, from this tournament's squads**, for
@@ -549,6 +603,7 @@ export interface Api {
     lineup: LineupSubmission,
   ): Promise<void>
 
+  /** **Propagates forward** to every later gameweek, like a match team. */
   updateTeamForGameWeek(
     leagueId: LeagueId,
     gameWeekId: GameWeekId,

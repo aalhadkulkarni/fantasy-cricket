@@ -59,6 +59,9 @@ import type {
   MatchLineup,
   MatchPlayers,
   MatchSide,
+  PeriodLeaderboard,
+  LeaderboardRow,
+  ScoringWatermark,
   Player,
   PlayerConfig,
   PlayerFilter,
@@ -572,6 +575,259 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       rounds: roundConfigs ?? {},
       offset: offset ?? 0,
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Scoring
+  // -------------------------------------------------------------------------
+
+  /** Fixed, and the vice-captain is never promoted when the captain does not play. */
+  const CAPTAIN_MULTIPLIER = 2
+  const VICE_CAPTAIN_MULTIPLIER = 1.5
+
+  /**
+   * Everything a score is computed from, for one league.
+   *
+   * **Read once per call and never kept.** A loader returns this, the caller
+   * computes from it and returns numbers, and nothing else holds a reference,
+   * so it is garbage the moment the call resolves. There is deliberately no
+   * cache: a points correction must show on the next read, and a stale cache
+   * is exactly the kind of drift that storing totals was rejected for.
+   */
+  interface Scoring {
+    /** In `matchNumber` order. */
+    matches: Match[]
+    offset: number
+    isGameWeeks: boolean
+    /** Empty in a match-based league. */
+    weeks: LeagueGameWeek[]
+    /** Match-major, for the whole tournament or league, in one read. */
+    points: Partial<Record<MatchId, PlayerPoints>>
+    /** Per manager, keyed by match or by gameweek according to the league. */
+    lineups: Partial<
+      Record<UserId, Record<string, StoredLineup | StoredGameWeekLineup>>
+    >
+    members: Partial<Record<UserId, LeagueMember>>
+    watermark: ScoringWatermark
+  }
+
+  /**
+   * **Three subtree reads, not one per manager**: the league's lineups, the
+   * points node, and its members. `only` narrows the lineups and members to one
+   * manager, for the single-manager reads.
+   */
+  async function loadScoring(
+    leagueId: LeagueId,
+    only?: UserId,
+  ): Promise<Scoring> {
+    const [fixtures, isCustom, isGameWeeks] = await Promise.all([
+      leagueFixtures(leagueId),
+      service.read<boolean>(
+        service.path('leagues', leagueId, 'isCustomScoringSystem'),
+      ),
+      service.read<boolean>(
+        service.path('leagues', leagueId, 'isGameWeeksEnabled'),
+      ),
+    ])
+
+    const node =
+      isGameWeeks === true ? 'gameWeekBasedLineups' : 'matchBasedLineups'
+
+    const [points, lineups, members, weeks, tillId] = await Promise.all([
+      service.read<Scoring['points']>(
+        isCustom === true
+          ? paths.customPointsByMatch(leagueId)
+          : paths.standardPointsByMatch(fixtures.tournamentId),
+      ),
+      only === undefined
+        ? service.read<Scoring['lineups']>(service.path(node, leagueId))
+        : service
+            .read<Record<string, StoredLineup | StoredGameWeekLineup>>(
+              service.path(node, leagueId, only),
+            )
+            .then((mine) => (mine === undefined ? {} : { [only]: mine })),
+      only === undefined
+        ? service.read<Scoring['members']>(paths.leagueMembers(leagueId))
+        : service
+            .read<LeagueMember>(paths.leagueMembers(leagueId, only))
+            .then((member) => (member === undefined ? {} : { [only]: member })),
+      isGameWeeks === true ? api.getGameWeeks(leagueId) : Promise.resolve([]),
+      isCustom === true
+        ? Promise.resolve(undefined)
+        : service.read<MatchId>(
+            service.path(
+              'tournaments',
+              fixtures.tournamentId,
+              'pointsUpdatedTillMatchId',
+            ),
+          ),
+    ])
+
+    return {
+      matches: fixtures.matches,
+      offset: fixtures.offset,
+      isGameWeeks: isGameWeeks === true,
+      weeks,
+      points: points ?? {},
+      lineups: lineups ?? {},
+      members: members ?? {},
+      watermark: watermarkOf(
+        fixtures.matches,
+        isCustom === true,
+        tillId,
+        points,
+      ),
+    }
+  }
+
+  /**
+   * Standard scoring has a marker written with the points. Custom scoring has
+   * none yet, so it is the furthest match with anything entered.
+   */
+  function watermarkOf(
+    matches: readonly Match[],
+    isCustom: boolean,
+    tillId: MatchId | undefined,
+    points: Scoring['points'] | undefined,
+  ): ScoringWatermark {
+    if (!isCustom) return matches.find((m) => m.matchId === tillId)
+
+    return [...matches]
+      .reverse()
+      .find((m) => Object.keys(points?.[m.matchId] ?? {}).length > 0)
+  }
+
+  /**
+   * The eleven a manager fielded in one match. A gameweek league uses that
+   * gameweek's team, switching to the post-sub eleven from the impact sub's
+   * match onward.
+   */
+  function elevenFor(
+    scoring: Scoring,
+    userId: UserId,
+    match: Match,
+  ): StoredLineup | undefined {
+    const mine = scoring.lineups[userId]
+    if (mine === undefined) return undefined
+
+    if (!scoring.isGameWeeks) {
+      return mine[match.matchId] as StoredLineup | undefined
+    }
+
+    const week = scoring.weeks.find((w) => w.matchIds.includes(match.matchId))
+    const stored =
+      week === undefined
+        ? undefined
+        : (mine[week.gameWeek.gameWeekId] as StoredGameWeekLineup | undefined)
+    if (stored === undefined) return undefined
+
+    const from = scoring.matches.find(
+      (m) => m.matchId === stored.impactSub?.applicableFromMatch,
+    )
+    const subbed =
+      stored.postImpactSubLineup !== undefined &&
+      from !== undefined &&
+      match.matchNumber >= from.matchNumber
+
+    return {
+      lineup: subbed
+        ? (stored.postImpactSubLineup ?? stored.startingLineup)
+        : stored.startingLineup,
+      captainId: stored.captainId,
+      viceCaptainId: stored.viceCaptainId,
+    }
+  }
+
+  /** No team, or no points for the match, scores zero. */
+  function matchScore(scoring: Scoring, userId: UserId, match: Match): number {
+    const eleven = elevenFor(scoring, userId, match)
+    if (eleven === undefined) return 0
+
+    const points = scoring.points[match.matchId] ?? {}
+
+    return eleven.lineup.reduce((sum, playerId) => {
+      const multiplier =
+        playerId === eleven.captainId
+          ? CAPTAIN_MULTIPLIER
+          : playerId === eleven.viceCaptainId
+            ? VICE_CAPTAIN_MULTIPLIER
+            : 1
+      return sum + (points[playerId] ?? 0) * multiplier
+    }, 0)
+  }
+
+  function weekScore(
+    scoring: Scoring,
+    userId: UserId,
+    week: LeagueGameWeek,
+  ): number {
+    return scoring.matches
+      .filter((m) => week.matchIds.includes(m.matchId))
+      .reduce((sum, match) => sum + matchScore(scoring, userId, match), 0)
+  }
+
+  /** Every match, plus the transfer adjustment, which is absent outside auctions. */
+  function leagueScore(scoring: Scoring, userId: UserId): number {
+    return (
+      scoring.matches.reduce(
+        (sum, match) => sum + matchScore(scoring, userId, match),
+        0,
+      ) + (scoring.members[userId]?.pointsAdjustment ?? 0)
+    )
+  }
+
+  function isLocked(match: Match | undefined, offset: number): boolean {
+    return (
+      match?.startTimestamp !== undefined &&
+      match.startTimestamp - offset <= Date.now()
+    )
+  }
+
+  function isScored(scoring: Scoring, match: Match | undefined): boolean {
+    return (
+      match !== undefined &&
+      scoring.watermark !== undefined &&
+      match.matchNumber <= scoring.watermark.matchNumber
+    )
+  }
+
+  /**
+   * **Managers only**, so an owner who does not play, a spectator and a banned
+   * member are all absent. Highest first, then by name; a tie shares a rank and
+   * the next rank skips by the number tied — 1, 2, 2, 4.
+   */
+  async function rank(
+    scoring: Scoring,
+    scoreOf: (userId: UserId) => number,
+  ): Promise<LeaderboardRow[]> {
+    const managers = Object.entries(scoring.members).filter(
+      ([, member]) => member?.leagueRoles?.manager === true,
+    ) as [UserId, LeagueMember][]
+
+    const names = await Promise.all(
+      managers.map(([userId]) =>
+        service.read<string>(service.path('users', userId, 'userName')),
+      ),
+    )
+
+    const unranked = managers.map(([userId, member], index) => ({
+      managerId: userId,
+      managerName: names[index] ?? 'Unknown',
+      ...(member.fantasyTeamName === undefined
+        ? {}
+        : { fantasyTeamName: member.fantasyTeamName }),
+      points: scoreOf(userId),
+    }))
+
+    unranked.sort(
+      (a, b) =>
+        b.points - a.points || a.managerName.localeCompare(b.managerName),
+    )
+
+    return unranked.map((row) => ({
+      ...row,
+      rank: unranked.findIndex((other) => other.points === row.points) + 1,
+    }))
   }
 
   /**
@@ -2159,7 +2415,7 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
      * caller reads as zero — the model treats zero and absent as the same
      * thing, and does not record why a player scored nothing.
      */
-    async getPointsForMatch(
+    async getPlayerPointsForMatch(
       leagueId: LeagueId,
       matchId: MatchId,
     ): Promise<PlayerPoints> {
@@ -2343,6 +2599,122 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       }
 
       await service.update(changes)
+    },
+
+    async getPointsForMatch(
+      userId: UserId,
+      leagueId: LeagueId,
+      matchId: MatchId,
+    ): Promise<number> {
+      const scoring = await loadScoring(leagueId, userId)
+      const match = scoring.matches.find((m) => m.matchId === matchId)
+      if (match === undefined) {
+        throw new DataLayerError('unknown', 'That match is not in this league.')
+      }
+      return matchScore(scoring, userId, match)
+    },
+
+    async getPointsForGameWeek(
+      userId: UserId,
+      leagueId: LeagueId,
+      gameWeekId: GameWeekId,
+    ): Promise<number> {
+      const scoring = await loadScoring(leagueId, userId)
+      const week = scoring.weeks.find(
+        (w) => w.gameWeek.gameWeekId === gameWeekId,
+      )
+      if (week === undefined) {
+        throw new DataLayerError('unknown', 'No such gameweek in this league.')
+      }
+      return weekScore(scoring, userId, week)
+    },
+
+    async getPointsForLeague(
+      userId: UserId,
+      leagueId: LeagueId,
+    ): Promise<number> {
+      return leagueScore(await loadScoring(leagueId, userId), userId)
+    },
+
+    async getLeaderboard(leagueId: LeagueId): Promise<LeaderboardRow[]> {
+      const scoring = await loadScoring(leagueId)
+      return rank(scoring, (userId) => leagueScore(scoring, userId))
+    },
+
+    async getLeaderboardForGameWeek(
+      leagueId: LeagueId,
+      gameWeekId: GameWeekId,
+    ): Promise<PeriodLeaderboard> {
+      const scoring = await loadScoring(leagueId)
+      const week = scoring.weeks.find(
+        (w) => w.gameWeek.gameWeekId === gameWeekId,
+      )
+      if (week === undefined) {
+        throw new DataLayerError('unknown', 'No such gameweek in this league.')
+      }
+
+      // A gameweek locks, and starts scoring, with its first match.
+      const first = scoring.matches.find((m) => m.matchId === week.matchIds[0])
+      if (!isLocked(first, scoring.offset)) {
+        throw new DataLayerError(
+          'unknown',
+          'That gameweek has not reached its deadline yet.',
+        )
+      }
+
+      return {
+        rows: await rank(scoring, (userId) => weekScore(scoring, userId, week)),
+        isScored: isScored(scoring, first),
+      }
+    },
+
+    async getLeaderboardForMatch(
+      leagueId: LeagueId,
+      matchId: MatchId,
+    ): Promise<PeriodLeaderboard> {
+      const scoring = await loadScoring(leagueId)
+      const match = scoring.matches.find((m) => m.matchId === matchId)
+      if (match === undefined) {
+        throw new DataLayerError('unknown', 'That match is not in this league.')
+      }
+      if (!isLocked(match, scoring.offset)) {
+        throw new DataLayerError(
+          'unknown',
+          'That match has not reached its deadline yet.',
+        )
+      }
+
+      return {
+        rows: await rank(scoring, (userId) =>
+          matchScore(scoring, userId, match),
+        ),
+        isScored: isScored(scoring, match),
+      }
+    },
+
+    /**
+     * Lighter than a leaderboard: standard scoring needs only the marker.
+     * Custom scoring has no marker yet, so it reads its points to find one.
+     */
+    async getScoringWatermark(leagueId: LeagueId): Promise<ScoringWatermark> {
+      const [{ tournamentId, matches }, isCustom] = await Promise.all([
+        leagueFixtures(leagueId),
+        service.read<boolean>(
+          service.path('leagues', leagueId, 'isCustomScoringSystem'),
+        ),
+      ])
+
+      if (isCustom === true) {
+        const points = await service.read<Scoring['points']>(
+          paths.customPointsByMatch(leagueId),
+        )
+        return watermarkOf(matches, true, undefined, points)
+      }
+
+      const tillId = await service.read<MatchId>(
+        service.path('tournaments', tournamentId, 'pointsUpdatedTillMatchId'),
+      )
+      return watermarkOf(matches, false, tillId, undefined)
     },
 
     async getCurrentRound(leagueId: LeagueId): Promise<Round> {
@@ -2682,9 +3054,10 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
 
       /*
         **A cap on each transition, measured from the team standing before this
-        gameweek.** Nothing is stored between gameweeks, so re-saving before the
-        deadline is always measured from the same baseline and can never spend
-        twice. Captain and vice-captain changes have no allowance here.
+        gameweek.** A save here writes this gameweek and later ones, never an
+        earlier one, so re-saving before the deadline is always measured from the
+        same baseline and can never spend twice. Captain and vice-captain changes
+        have no allowance here.
       */
       const [weeks, before] = await Promise.all([
         api.getGameWeeks(leagueId),
@@ -2709,14 +3082,35 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         }
       }
 
-      await service.write(
-        service.path('gameWeekBasedLineups', leagueId, session.uid, gameWeekId),
-        {
-          startingLineup: lineup.lineup.map((player) => player.playerId),
-          captainId: lineup.captainId,
-          viceCaptainId: lineup.viceCaptainId,
-        },
-      )
+      /*
+        **Copied forward, like a match-based team.** A team applies until it is
+        changed, so saving here writes the same eleven to this gameweek and every
+        later one, in one atomic update. Each node is replaced whole, which
+        clears a later gameweek's impact sub: its team has changed, and every
+        later gameweek is still before its deadline because this one is.
+      */
+      const from = weeks.findIndex((w) => w.gameWeek.gameWeekId === gameWeekId)
+      const team: StoredGameWeekLineup = {
+        startingLineup: lineup.lineup.map((player) => player.playerId),
+        captainId: lineup.captainId,
+        viceCaptainId: lineup.viceCaptainId,
+      }
+
+      // A gameweek missing from the resolved schedule is written alone rather
+      // than guessing where "later" starts.
+      const targets =
+        from === -1
+          ? [gameWeekId]
+          : weeks.slice(from).map((w) => w.gameWeek.gameWeekId)
+
+      const changes: Record<string, unknown> = {}
+      for (const id of targets) {
+        changes[
+          service.path('gameWeekBasedLineups', leagueId, session.uid, id)
+        ] = team
+      }
+
+      await service.update(changes)
     },
 
     // -----------------------------------------------------------------------

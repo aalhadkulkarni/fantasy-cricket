@@ -25,7 +25,7 @@ import {
   getMyTeamBeforeGameWeek,
   getMyTeamForGameWeek,
   getMyTeamForMatch,
-  getPointsForMatch,
+  getPlayerPointsForMatch,
   getSelectablePlayers,
   getTeams,
   updateTeamForGameWeek,
@@ -124,6 +124,13 @@ export function MyTeam() {
   )
 
   const [loading, setLoading] = useState(true)
+  /*
+    **Which selection the team below was loaded for.** Until it matches the
+    current one, the saved team is unknown rather than absent, so the screen
+    says it is loading instead of offering "Pick your XI" to someone who has
+    already picked.
+  */
+  const [loadedFor, setLoadedFor] = useState<string | undefined>(undefined)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
   const [saved, setSaved] = useState(false)
@@ -275,6 +282,7 @@ export function MyTeam() {
         setCaptainId(mine?.captainId)
         setViceCaptainId(mine?.viceCaptainId)
         setSaved(false)
+        setLoadedFor(selectedId)
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
       }
@@ -411,6 +419,31 @@ export function MyTeam() {
         <p className="mt-5 text-sm text-subtle-foreground">
           This tournament has no players yet, so there is nothing to pick from.
         </p>
+      </section>
+    )
+  }
+
+  if (loadedFor !== selectedId) {
+    return (
+      <section className="floodlit rounded-xl border bg-card p-5 text-card-foreground sm:p-7">
+        <Nav
+          periods={periods}
+          selectedId={selectedId}
+          reachable={reachable}
+          onSelect={setSelectedId}
+        />
+        {error !== undefined ? (
+          <div className="mt-5 text-sm">
+            <p className="font-semibold text-destructive">
+              Could not load your team
+            </p>
+            <p className="mt-1 font-mono text-xs text-muted-foreground">
+              {error}
+            </p>
+          </div>
+        ) : (
+          <p className="mt-5 text-sm text-muted-foreground">Loading…</p>
+        )}
       </section>
     )
   }
@@ -652,7 +685,7 @@ async function gameWeekPoints(
   matchIds: readonly MatchId[],
 ): Promise<PlayerPoints> {
   const perMatch = await Promise.all(
-    matchIds.map((matchId) => getPointsForMatch(leagueId, matchId)),
+    matchIds.map((matchId) => getPlayerPointsForMatch(leagueId, matchId)),
   )
 
   const total: PlayerPoints = {}

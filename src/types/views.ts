@@ -389,6 +389,17 @@ export interface LeaderboardRow {
  */
 export type ScoringWatermark = Match | undefined
 
+/**
+ * Standings for one locked match or gameweek.
+ *
+ * **Locked is not the same as scored.** `isScored` is false when its points are
+ * not in yet, so the interface can say so rather than rank everyone on zero.
+ */
+export interface PeriodLeaderboard {
+  rows: LeaderboardRow[]
+  isScored: boolean
+}
+
 // ---------------------------------------------------------------------------
 // Transfers
 // ---------------------------------------------------------------------------
