@@ -636,3 +636,34 @@ export const SAMPLE_TEAM_SHORT_NAMES: Readonly<Record<string, string>> = {
   India: 'IND',
   Australia: 'AUS',
 }
+
+// ---------------------------------------------------------------------------
+// Change allowances for an official league
+// ---------------------------------------------------------------------------
+
+/**
+ * How many changes a manager gets **for the whole league**, by how many matches
+ * the tournament has. The same number serves team changes, captain changes and
+ * vice-captain changes, which are counted separately against their own
+ * allowances.
+ *
+ * | Matches | Allowance |
+ * | ------- | --------- |
+ * | 1 to 5  | 4 |
+ * | 6 to 15 | 6 |
+ * | 16 to 25 | 8 |
+ * | 26 or more | 11 |
+ *
+ * **The boundary at 15 was given twice** — as the end of one band and the start
+ * of the next. Read here as 15 belonging to the lower band, so a fifteen-match
+ * tournament allows six. Say so if it should be eight.
+ *
+ * Only an official league created by publishing uses these. A league made
+ * through the create form sets its own.
+ */
+export function changeAllowanceFor(matchCount: number): number {
+  if (matchCount <= 5) return 4
+  if (matchCount <= 15) return 6
+  if (matchCount <= 25) return 8
+  return 11
+}

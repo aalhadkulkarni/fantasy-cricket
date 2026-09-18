@@ -68,7 +68,7 @@ export function getTournament(tournamentId: TournamentId): Promise<Tournament> {
  * compares numbers.
  */
 export function getFixtures(tournamentId: TournamentId): Promise<Match[]> {
-  return notImplemented('getFixtures', { tournamentId })
+  return getApi().getFixtures(tournamentId)
 }
 
 export function getTeamsForTournament(

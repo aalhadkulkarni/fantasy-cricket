@@ -45,6 +45,7 @@ import type {
   JoinableLeague,
   League,
   LeagueCard,
+  LeagueGameWeek,
   LeagueId,
   LeagueIndexEntry,
   LeagueJoinCode,
@@ -60,6 +61,7 @@ import type {
   PlayerConfig,
   PlayerFilter,
   PlayerId,
+  PlayerPoints,
   PlayerRoleRecord,
   Round,
   RoundConfig,
@@ -83,6 +85,7 @@ import { DataLayerError } from '../data-layer-error'
 import { derivePhase } from '../league-phase'
 import {
   AUCTION_PHASE_RECORDS,
+  changeAllowanceFor,
   FORMAT_RECORDS,
   PLAYER_CATEGORY_RECORDS,
   PLAYER_ROLE_RECORDS,
@@ -331,6 +334,10 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
     const leagueId = service.generateKey() as LeagueId
     const leagueJoinCode = await claimJoinCode(leagueId)
 
+    const allowance = changeAllowanceFor(
+      Object.keys(tournament.matches ?? {}).length,
+    )
+
     const leagueName = `${tournament.tournamentName} — Official ${
       gameWeeks ? 'Gameweek' : 'Match'
     } League`
@@ -360,9 +367,19 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
             isGameWeeksEnabled: true,
             roundConfigs: oneGameWeekPerRound(tournament),
           }
-        : // No change allowances at all. Absent is unlimited, which is what an
-          // open league everybody can walk into should be.
-          { ...base, isGameWeeksEnabled: false },
+        : {
+            ...base,
+            isGameWeeksEnabled: false,
+            /*
+              **One allowance for the whole league, sized by the tournament.**
+              The same figure serves all three, because they are counted
+              separately against their own allowances rather than sharing one
+              pool. See `changeAllowanceFor`.
+            */
+            totalChangesAllowed: allowance,
+            totalCaptainChangesAllowed: allowance,
+            totalViceCaptainChangesAllowed: allowance,
+          },
 
       // The tournament page's list of its leagues. Exactly the fields that row
       // renders, and no more, or it drifts into a second copy of the league.
@@ -467,6 +484,17 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
     )
   }
 
+  /**
+   * Firebase stores neither `undefined` nor `null` as a value, so a key carrying
+   * one simply would not exist. Dropping them here makes that explicit rather
+   * than leaving it to the client to do quietly.
+   */
+  function omitUndefined<T extends Record<string, unknown>>(value: T): T {
+    return Object.fromEntries(
+      Object.entries(value).filter(([, v]) => v !== undefined),
+    ) as T
+  }
+
   /** What is stored under a lineup: ids, not players. */
   interface StoredLineup {
     lineup: PlayerId[]
@@ -506,7 +534,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
   async function leagueFixtures(leagueId: LeagueId): Promise<{
     tournamentId: TournamentId
     matches: Match[]
-    rounds: RoundConfig[]
+    /** Keyed by the tournament's round id, which is how they are stored. */
+    rounds: Record<string, RoundConfig>
     offset: number
   }> {
     const [tournamentId, offset, roundConfigs] = await Promise.all([
@@ -538,7 +567,7 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       matches: Object.values(stored ?? {}).sort(
         (a, b) => a.matchNumber - b.matchNumber,
       ),
-      rounds: Object.values(roundConfigs ?? {}),
+      rounds: roundConfigs ?? {},
       offset: offset ?? 0,
     }
   }
@@ -1834,6 +1863,9 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         isGameWeeksEnabled,
         finishedAt,
         me,
+        teamAllowance,
+        captainAllowance,
+        viceCaptainAllowance,
       ] = await Promise.all([
         service.read<string>(at('leagueName')),
         service.read<string>(at('leagueJoinCode')),
@@ -1842,6 +1874,9 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         service.read<boolean>(at('isGameWeeksEnabled')),
         service.read<number>(at('finishedAt')),
         service.read<LeagueMember>(paths.leagueMembers(leagueId, userId)),
+        service.read<number>(at('totalChangesAllowed')),
+        service.read<number>(at('totalCaptainChangesAllowed')),
+        service.read<number>(at('totalViceCaptainChangesAllowed')),
       ])
 
       if (leagueName === undefined || tournamentId === undefined) {
@@ -1893,6 +1928,17 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
           startDate === undefined ? undefined : startDate - (offset ?? 0),
         // Rank is deliberately absent. See the contract.
         deadlineOffset: offset ?? 0,
+        changeAllowances: {
+          ...(teamAllowance === undefined
+            ? {}
+            : { teamChanges: teamAllowance }),
+          ...(captainAllowance === undefined
+            ? {}
+            : { captainChanges: captainAllowance }),
+          ...(viceCaptainAllowance === undefined
+            ? {}
+            : { viceCaptainChanges: viceCaptainAllowance }),
+        },
         isAuctionEnabled: isAuctionEnabled === true,
         isGameWeeksEnabled: isGameWeeksEnabled === true,
         myRoles: me?.leagueRoles ?? {},
@@ -1970,6 +2016,162 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
      * **Found by `matchNumber`.** A round stores a first and last match id, and
      * ids are push keys that sort by creation time rather than fixture order.
      */
+
+    /**
+     * **Ordered by `matchNumber`, and resolved the same way.** A gameweek
+     * stores a first and last match id, and ids are push keys sorting by
+     * creation time rather than fixture order, so membership is worked out by
+     * number here rather than left to a caller to get wrong.
+     */
+    async getGameWeeks(leagueId: LeagueId): Promise<LeagueGameWeek[]> {
+      const { tournamentId, matches, rounds } = await leagueFixtures(leagueId)
+
+      const tournamentRounds = await service.read<Record<string, Round>>(
+        paths.tournamentRounds(tournamentId),
+      )
+
+      const numberOf = (matchId: MatchId) =>
+        matches.find((m) => m.matchId === matchId)?.matchNumber ?? 0
+
+      const entries: { roundId: string; week: LeagueGameWeek }[] = []
+
+      for (const [roundId, config] of Object.entries(rounds)) {
+        const roundName = tournamentRounds?.[roundId]?.roundName ?? ''
+
+        for (const gameWeek of Object.values(config.gameWeeks ?? {})) {
+          const first = numberOf(gameWeek.startMatchId)
+          const last = numberOf(gameWeek.endMatchId)
+
+          const spanned = matches.filter(
+            (m) => first <= m.matchNumber && m.matchNumber <= last,
+          )
+
+          entries.push({
+            roundId,
+            week: {
+              gameWeek,
+              roundName,
+              matchIds: spanned.map((m) => m.matchId),
+              startsAt: spanned[0]?.startTimestamp,
+            },
+          })
+        }
+      }
+
+      entries.sort(
+        (a, b) =>
+          a.week.gameWeek.gameWeekNumber - b.week.gameWeek.gameWeekNumber,
+      )
+
+      /*
+        **The cap on changes going into each gameweek, from the one before.**
+
+        The first gameweek has nothing before it, so it has no cap. After that,
+        a gameweek that opens a new round is limited by that round's "before the
+        round starts" allowance, and one inside the same round by its "between
+        gameweeks" allowance. Absent in either means unlimited.
+      */
+      return entries.map(({ roundId, week }, index) => {
+        if (index === 0) return week
+
+        const config = rounds[roundId]
+        const cap =
+          entries[index - 1]?.roundId === roundId
+            ? config?.maxNumberOfChangesAllowedBetweenGameWeeks
+            : config?.maxNumberOfChangesAllowedBeforeRoundStart
+
+        return cap === undefined ? week : { ...week, changeCap: cap }
+      })
+    },
+
+    /**
+     * **The last saved team before this gameweek, not necessarily the previous
+     * one.** A team applies forward until it is changed, so a manager who
+     * skipped a gameweek is still fielding what they had, and that is what the
+     * next change is measured from.
+     *
+     * **After an impact sub, the eleven that finished that gameweek.** The sub
+     * changes who is in the team from its chosen match onward, and the next
+     * gameweek starts from there, not from the starting eleven.
+     */
+    async getMyTeamBeforeGameWeek(
+      leagueId: LeagueId,
+      gameWeekId: GameWeekId,
+    ): Promise<LineupSubmission | undefined> {
+      const session = requireSession()
+      const weeks = await api.getGameWeeks(leagueId)
+
+      const index = weeks.findIndex((w) => w.gameWeek.gameWeekId === gameWeekId)
+      if (index <= 0) return undefined
+
+      const saved = await service.read<Record<string, StoredGameWeekLineup>>(
+        service.path('gameWeekBasedLineups', leagueId, session.uid),
+      )
+
+      for (let i = index - 1; i >= 0; i -= 1) {
+        const earlier = saved?.[weeks[i]?.gameWeek.gameWeekId ?? '']
+        if (earlier === undefined) continue
+
+        const ids = earlier.postImpactSubLineup ?? earlier.startingLineup
+        return {
+          lineup: await resolvePlayers(ids),
+          captainId: earlier.captainId,
+          viceCaptainId: earlier.viceCaptainId,
+        }
+      }
+
+      return undefined
+    },
+
+    async getFixtures(tournamentId: TournamentId): Promise<Match[]> {
+      const stored = await service.read<Record<string, Match>>(
+        paths.tournamentMatches(tournamentId),
+      )
+
+      return Object.values(stored ?? {}).sort(
+        (a, b) => a.matchNumber - b.matchNumber,
+      )
+    },
+
+    /**
+     * **The flag decides the store, and there is no second look.** A
+     * custom-scoring league reads its own node only; every other league reads
+     * the tournament's. A match nobody has scored comes back empty, which the
+     * caller reads as zero — the model treats zero and absent as the same
+     * thing, and does not record why a player scored nothing.
+     */
+    async getPointsForMatch(
+      leagueId: LeagueId,
+      matchId: MatchId,
+    ): Promise<PlayerPoints> {
+      const [isCustom, tournamentId] = await Promise.all([
+        service.read<boolean>(
+          service.path('leagues', leagueId, 'isCustomScoringSystem'),
+        ),
+        service.read<TournamentId>(
+          service.path('leagues', leagueId, 'tournamentId'),
+        ),
+      ])
+
+      if (isCustom === true) {
+        return (
+          (await service.read<PlayerPoints>(
+            paths.customPointsByMatch(leagueId, matchId),
+          )) ?? {}
+        )
+      }
+
+      if (tournamentId === undefined) {
+        throw new DataLayerError('unknown', 'That league no longer exists.')
+      }
+
+      return (
+        (await service.read<PlayerPoints>(
+          paths.standardPointsByMatch(tournamentId, matchId),
+        )) ?? {}
+      )
+    },
+
     async getCurrentRound(leagueId: LeagueId): Promise<Round> {
       const current = await api.getCurrentMatch(leagueId)
       const { tournamentId, matches } = await leagueFixtures(leagueId)
@@ -2003,7 +2205,7 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       const numberOf = (matchId: MatchId) =>
         matches.find((m) => m.matchId === matchId)?.matchNumber ?? 0
 
-      for (const round of rounds) {
+      for (const round of Object.values(rounds)) {
         for (const gameWeek of Object.values(round.gameWeeks ?? {})) {
           if (
             numberOf(gameWeek.startMatchId) <= current.matchNumber &&
@@ -2131,11 +2333,127 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
 
       await assertLegal(leagueId, lineup)
 
-      const stored = {
-        lineup: lineup.lineup.map((player) => player.playerId),
+      /*
+        **What this submission costs, and what is left after it.**
+
+        One change is one player out and one player in, so swapping three spends
+        three. Captain and vice-captain changes are counted separately against
+        their own allowances and are neither team changes nor each other.
+
+        **The baseline is the PREVIOUS match, never this one.** A match is not
+        locked until its deadline, so until then you can rearrange as often as
+        you like, and what is being measured is how this match differs from the
+        one before it. Comparing against this match's own stored team would
+        charge a second change for swapping Virat for Rohit after already
+        swapping Hardik for Virat, when the answer is still one: Hardik out,
+        Rohit in.
+
+        Found by `matchNumber`, not by id — ids are push keys and sort by
+        creation time rather than fixture order.
+
+        **Match one has no previous match**, and neither does a manager's first
+        ever submission wherever it happens. Nothing is spent in either case,
+        which is why "the first team is free" needs no rule of its own.
+      */
+      const before = matches
+        .filter((match) => match.matchNumber < from.matchNumber)
+        .sort((a, b) => b.matchNumber - a.matchNumber)[0]
+
+      const previous =
+        before === undefined
+          ? undefined
+          : await service.read<StoredLineup>(
+              service.path(
+                'matchBasedLineups',
+                leagueId,
+                session.uid,
+                before.matchId,
+              ),
+            )
+
+      /*
+        Three leaves, never the league itself. A league read is subtree-shaped
+        and would drag an auction config — a base price for every player in the
+        tournament — plus the gameweek structure, to fetch three numbers.
+      */
+      const at = (field: string) => service.path('leagues', leagueId, field)
+
+      const [teamAllowance, captainAllowance, viceCaptainAllowance] =
+        await Promise.all([
+          service.read<number>(at('totalChangesAllowed')),
+          service.read<number>(at('totalCaptainChangesAllowed')),
+          service.read<number>(at('totalViceCaptainChangesAllowed')),
+        ])
+
+      const next = lineup.lineup.map((player) => player.playerId)
+
+      const spentOnTeam =
+        previous === undefined
+          ? 0
+          : previous.lineup.filter((id) => !next.includes(id)).length
+
+      const spentOnCaptain =
+        previous !== undefined && previous.captainId !== lineup.captainId
+          ? 1
+          : 0
+
+      const spentOnViceCaptain =
+        previous !== undefined &&
+        previous.viceCaptainId !== lineup.viceCaptainId
+          ? 1
+          : 0
+
+      /*
+        Absent stays absent, which is how the model says unlimited, and an
+        unlimited allowance can never be overspent.
+
+        **An overspend is refused, not clamped.** Clamping at zero let a manager
+        with one change left make five and read 0, which made the allowance a
+        display rather than a rule. Nothing is written when this throws.
+      */
+      const remaining = (
+        beforeThis: number | undefined,
+        configured: number | undefined,
+        spent: number,
+        what: string,
+      ): number | undefined => {
+        const start = beforeThis ?? configured
+        if (start === undefined) return undefined
+
+        if (spent > start) {
+          const noun = (n: number) => (n === 1 ? what : `${what}s`)
+          throw new DataLayerError(
+            'unknown',
+            `You have ${start} ${noun(start)} left and this uses ${spent}.`,
+          )
+        }
+        return start - spent
+      }
+
+      const stored: StoredLineup = {
+        lineup: next,
         captainId: lineup.captainId,
         viceCaptainId: lineup.viceCaptainId,
-        // No change counters. Absent is unlimited, and nothing configures them.
+        ...omitUndefined({
+          changesRemaining: remaining(
+            previous?.changesRemaining,
+            teamAllowance,
+            spentOnTeam,
+            'transfer',
+          ),
+          captainChangesRemaining: remaining(
+            previous?.captainChangesRemaining,
+            captainAllowance,
+            spentOnCaptain,
+            'captain change',
+          ),
+          viceCaptainChangesRemaining: remaining(
+            previous?.viceCaptainChangesRemaining,
+            viceCaptainAllowance,
+            spentOnViceCaptain,
+            'vice captain change',
+          ),
+        }),
       }
 
       const update: Record<string, unknown> = {}
@@ -2165,7 +2483,7 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
 
       const { matches, rounds, offset } = await leagueFixtures(leagueId)
 
-      const gameWeek = rounds
+      const gameWeek = Object.values(rounds)
         .flatMap((round) => Object.values(round.gameWeeks ?? {}))
         .find((gw) => gw.gameWeekId === gameWeekId)
 
@@ -2188,6 +2506,35 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       }
 
       await assertLegal(leagueId, lineup)
+
+      /*
+        **A cap on each transition, measured from the team standing before this
+        gameweek.** Nothing is stored between gameweeks, so re-saving before the
+        deadline is always measured from the same baseline and can never spend
+        twice. Captain and vice-captain changes have no allowance here.
+      */
+      const [weeks, before] = await Promise.all([
+        api.getGameWeeks(leagueId),
+        api.getMyTeamBeforeGameWeek(leagueId, gameWeekId),
+      ])
+
+      const cap = weeks.find(
+        (w) => w.gameWeek.gameWeekId === gameWeekId,
+      )?.changeCap
+
+      if (cap !== undefined && before !== undefined) {
+        const next = lineup.lineup.map((player) => player.playerId)
+        const spent = before.lineup.filter(
+          (player) => !next.includes(player.playerId),
+        ).length
+
+        if (spent > cap) {
+          throw new DataLayerError(
+            'unknown',
+            `You can change ${cap} ${cap === 1 ? 'player' : 'players'} going into this gameweek, and this changes ${spent}.`,
+          )
+        }
+      }
 
       await service.write(
         service.path('gameWeekBasedLineups', leagueId, session.uid, gameWeekId),
