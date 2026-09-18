@@ -6,7 +6,9 @@ import { TournamentsPanel } from '@/components/admin/tournaments-panel'
 import { PageContainer } from '@/components/layout/page-container'
 import { Button } from '@/components/ui/button'
 import {
+  createSamplePlayers,
   setUpBasicSystem,
+  type SamplePlayersResult,
   type SystemSetupResult,
 } from '@/data-layer/system-setup'
 
@@ -41,6 +43,8 @@ export function SystemAdmin() {
         </p>
 
         <SetUpBasicSystem onSetUp={catalogueChanged} />
+
+        <CreateSamplePlayers onCreated={catalogueChanged} />
 
         <TeamsPanel
           catalogueVersion={catalogueVersion}
@@ -172,6 +176,97 @@ function Outcome({ state }: { state: State }) {
           </li>
         ))}
         <li>standards · 3</li>
+      </ul>
+    </div>
+  )
+}
+
+type SampleState =
+  | { status: 'idle' }
+  | { status: 'running' }
+  | { status: 'done'; result: SamplePlayersResult }
+  | { status: 'failed'; message: string }
+
+/**
+ * Two international T20 squads, so there is something to pick from.
+ *
+ * **Test data, not reference data.** Nothing depends on these existing, and a
+ * real environment enters its own catalogue through the players panel. This is
+ * here so testing does not start with half an hour of typing.
+ *
+ * Safe to press twice: a name already in the catalogue is skipped rather than
+ * duplicated, so a second press adds only what the first one missed.
+ */
+function CreateSamplePlayers({ onCreated }: { onCreated: () => void }) {
+  const [state, setState] = useState<SampleState>({ status: 'idle' })
+
+  async function run() {
+    setState({ status: 'running' })
+    try {
+      setState({ status: 'done', result: await createSamplePlayers() })
+      onCreated()
+    } catch (error) {
+      setState({
+        status: 'failed',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  return (
+    <div className="floodlit mt-4 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
+      <h2 className="text-base font-semibold">Create sample players</h2>
+      <p className="mt-2 text-sm text-muted-foreground">
+        India and Australia, twenty-three players between them, all in the T20
+        Series. Creates the two teams if they do not exist.
+      </p>
+
+      <div className="mt-5">
+        <Button
+          variant="outline"
+          onClick={() => void run()}
+          disabled={state.status === 'running'}
+        >
+          {state.status === 'running' ? 'Creating…' : 'Create sample players'}
+        </Button>
+      </div>
+
+      <SampleOutcome state={state} />
+    </div>
+  )
+}
+
+function SampleOutcome({ state }: { state: SampleState }) {
+  if (state.status === 'idle' || state.status === 'running') return null
+
+  if (state.status === 'failed') {
+    return (
+      <div className="mt-5 text-sm">
+        <p className="font-semibold text-destructive">Could not create them</p>
+        <p className="mt-1 font-mono text-xs text-muted-foreground">
+          {state.message}
+        </p>
+      </div>
+    )
+  }
+
+  const { result } = state
+
+  return (
+    <div className="mt-5 text-sm">
+      <p className="font-semibold text-settled">
+        {result.created === 0
+          ? 'Nothing to add — they are all here already.'
+          : `Created ${result.created} ${result.created === 1 ? 'player' : 'players'} in ${result.competitionName}.`}
+      </p>
+
+      <ul className="mt-2 space-y-0.5 font-mono text-xs text-muted-foreground">
+        {result.teamsCreated.length > 0 && (
+          <li>teams created · {result.teamsCreated.join(', ')}</li>
+        )}
+        {result.skipped.length > 0 && (
+          <li>already present · {result.skipped.length}</li>
+        )}
       </ul>
     </div>
   )

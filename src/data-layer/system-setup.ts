@@ -12,10 +12,24 @@
  * hides the button, but that is convenience — the layer is the actual check.
  */
 
-import { getApi, type SystemSetupResult } from './api'
+import { getApi, type SamplePlayersResult, type SystemSetupResult } from './api'
 
-export type { SystemSetupResult }
+export type { SamplePlayersResult, SystemSetupResult }
 
 export function setUpBasicSystem(): Promise<SystemSetupResult> {
   return getApi().setUpBasicSystem()
+}
+
+/**
+ * Two international T20 squads, so there is something to pick from.
+ *
+ * **Test data rather than reference data**, so it has no marker and no
+ * once-per-environment guard. Names already in the catalogue are skipped, which
+ * is what makes pressing it twice safe.
+ *
+ * It needs the basic system first, since the base tournament it puts them in is
+ * seeded by that.
+ */
+export function createSamplePlayers(): Promise<SamplePlayersResult> {
+  return getApi().createSamplePlayers()
 }

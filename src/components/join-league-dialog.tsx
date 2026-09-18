@@ -14,6 +14,17 @@ import { Label } from '@/components/ui/label'
 import { getLeagueByCode, joinLeague } from '@/data-layer'
 import type { JoinableLeague } from '@/types'
 
+/**
+ * The few fields this dialog renders. Narrower than `JoinableLeague` so a
+ * caller holding only a league summary can open it — an owner joining their own
+ * league has no reason to fetch the joining view of it first.
+ */
+export type JoinTarget = Pick<
+  JoinableLeague,
+  'leagueId' | 'leagueName' | 'tournamentName'
+> &
+  Partial<Pick<JoinableLeague, 'filledSlots' | 'maxSlots'>>
+
 /** Long enough to be a name, short enough for a leaderboard row. */
 const MAX_TEAM_NAME = 40
 
@@ -43,12 +54,15 @@ export function JoinLeagueDialog({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** Skips the code step. Absent from the header, present from a league row. */
-  league?: JoinableLeague
+  /**
+   * Skips the code step. Absent from the header, present from a league row and
+   * from inside a league you are already in without playing.
+   */
+  league?: JoinTarget
   onJoined?: () => void
 }) {
   const [code, setCode] = useState('')
-  const [found, setFound] = useState<JoinableLeague | undefined>(undefined)
+  const [found, setFound] = useState<JoinTarget | undefined>(undefined)
   const [teamName, setTeamName] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
@@ -105,7 +119,9 @@ export function JoinLeagueDialog({
           <DialogDescription>
             {league === undefined
               ? 'Enter the code you were given. A closed league will still ask its admin to approve you.'
-              : `${league.tournamentName} · ${league.filledSlots} of ${league.maxSlots} managers`}
+              : league.maxSlots === undefined
+                ? league.tournamentName
+                : `${league.tournamentName} · ${league.filledSlots ?? 0} of ${league.maxSlots} managers`}
           </DialogDescription>
         </DialogHeader>
 

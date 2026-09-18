@@ -5,6 +5,7 @@ import {
   CardTag,
   LeagueCard,
 } from '@/components/leagues/league-card'
+import { leaguePath } from '@/routes'
 import type {
   ArchivedLeagueCard,
   LeagueCard as Card,
@@ -26,8 +27,9 @@ import type {
  * node, which at forty managers across sixty matches is a quarter to half a
  * megabyte per league. It lives on league home instead.
  *
- * **Not a link yet.** The card body is meant to be the link to league home,
- * which does not exist as a route.
+ * **The card body is the link to league home**, per rule 5 — buttons are
+ * reserved for secondary actions, which keeps the card clean as roles multiply.
+ * A pending request is not a link, because there is nothing yet to open.
  */
 export function MyLeagueCard({
   league,
@@ -35,19 +37,25 @@ export function MyLeagueCard({
   league: Card | ArchivedLeagueCard
 }) {
   const archived = 'archivedAt' in league
-  const spectating = league.myRoles.spectator === true
-  const banned = league.myRoles.bannedFromLeague === true
   const pending = league.membershipStatus === 'Pending'
 
   return (
     <LeagueCard
+      // Nothing to open on a request that has not been accepted.
+      to={pending ? undefined : leaguePath(league.leagueId)}
       name={league.leagueName}
       tags={
         <>
           <CardTag>{league.isAuctionEnabled ? 'Auction' : 'Regular'}</CardTag>
-          {/* A spectator is in the league without playing in it. */}
-          {spectating && <CardTag>Spectating</CardTag>}
-          {banned && <CardTag>Banned</CardTag>}
+          {/*
+            Which relationship you have, because a league you run without
+            playing looks identical to one you play in otherwise. Playing is
+            checked first: someone who both runs a league and plays in it cares
+            more about the second.
+          */}
+          {standing(league) !== undefined && (
+            <CardTag>{standing(league)}</CardTag>
+          )}
         </>
       }
       meta={
@@ -74,6 +82,19 @@ export function MyLeagueCard({
       }
     />
   )
+}
+
+/** Your relationship with this league, or nothing if you have none. */
+function standing(league: Card | ArchivedLeagueCard): string | undefined {
+  const roles = league.myRoles
+
+  if (roles.bannedFromLeague === true) return 'Banned'
+  if (roles.manager === true) return 'Playing'
+  if (roles.leagueOwner === true) return 'You run this'
+  if (roles.leagueAdmin === true) return 'You admin this'
+  if (roles.spectator === true) return 'Spectating'
+
+  return undefined
 }
 
 /**

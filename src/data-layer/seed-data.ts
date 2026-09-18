@@ -435,3 +435,204 @@ export const STANDARD_FANTASY_LINEUP_RULES: LineupRules = {
  * commit against their own deadline.
  */
 export const STANDARD_TEAM_CHANGES_DEADLINE_OFFSET = 0
+
+// ---------------------------------------------------------------------------
+// Sample players — test data, not reference data
+// ---------------------------------------------------------------------------
+
+/**
+ * Two international T20 squads, for having something to pick from while the
+ * rest of the app is built.
+ *
+ * **Not reference data**, unlike everything above it. Nothing depends on these
+ * existing, and a real environment would have its own catalogue entered through
+ * the players panel. They are here so testing does not start with half an hour
+ * of typing.
+ *
+ * **Every one plays the T20 Series and nothing else.** That is the smallest
+ * setup that makes a tournament, a league and a legal eleven all possible.
+ *
+ * Names are exactly as given, including two that look like slips — see the
+ * note where this is written.
+ */
+export const SAMPLE_PLAYERS: readonly {
+  playerName: string
+  playerShortName: string
+  country: string
+  playerRole: PlayerRole
+  teamName: string
+}[] = [
+  // India
+  {
+    playerName: 'Sanju Samson',
+    playerShortName: 'Sanju',
+    country: 'India',
+    playerRole: 'wicketKeeper',
+    teamName: 'India',
+  },
+  {
+    playerName: 'Vaibhav Sooryavanshi',
+    playerShortName: 'Sooryavanshi',
+    country: 'India',
+    playerRole: 'batsman',
+    teamName: 'India',
+  },
+  {
+    playerName: 'Ishan Kishan',
+    playerShortName: 'Kishan',
+    country: 'India',
+    playerRole: 'wicketKeeper',
+    teamName: 'India',
+  },
+  {
+    playerName: 'Shreyas Iyer',
+    playerShortName: 'Shreyas',
+    country: 'India',
+    playerRole: 'batsman',
+    teamName: 'India',
+  },
+  {
+    playerName: 'Tilak Verma',
+    playerShortName: 'Tilak',
+    country: 'India',
+    playerRole: 'batsman',
+    teamName: 'India',
+  },
+  {
+    playerName: 'Hardik Pandya',
+    playerShortName: 'Hardik',
+    country: 'India',
+    playerRole: 'allRounder',
+    teamName: 'India',
+  },
+  {
+    playerName: 'Wanshington Sundar',
+    playerShortName: 'Sundar',
+    country: 'India',
+    playerRole: 'allRounder',
+    teamName: 'India',
+  },
+  {
+    playerName: 'Arshdeep Singh',
+    playerShortName: 'Arshdeep',
+    country: 'India',
+    playerRole: 'bowler',
+    teamName: 'India',
+  },
+  {
+    playerName: 'Shivam Dube',
+    playerShortName: 'Dube',
+    country: 'India',
+    playerRole: 'allRounder',
+    teamName: 'India',
+  },
+  {
+    playerName: 'Axar Patel',
+    playerShortName: 'Axar',
+    country: 'India',
+    playerRole: 'bowler',
+    teamName: 'India',
+  },
+  {
+    playerName: 'Mohammed Siraj',
+    playerShortName: 'Siraj',
+    country: 'India',
+    playerRole: 'bowler',
+    teamName: 'India',
+  },
+  {
+    playerName: 'Varun Chakravarthy',
+    playerShortName: 'Varun',
+    country: 'India',
+    playerRole: 'bowler',
+    teamName: 'India',
+  },
+
+  // Australia
+  {
+    playerName: 'Mitchell Marsh',
+    playerShortName: 'Marsh',
+    country: 'Australia',
+    playerRole: 'allRounder',
+    teamName: 'Australia',
+  },
+  {
+    playerName: 'Travis Head',
+    playerShortName: 'Head',
+    country: 'Australia',
+    playerRole: 'batsman',
+    teamName: 'Australia',
+  },
+  {
+    playerName: 'Cooper Connolly',
+    playerShortName: 'Connolly',
+    country: 'Australia',
+    playerRole: 'allRounder',
+    teamName: 'Australia',
+  },
+  {
+    playerName: 'Josh Inglish',
+    playerShortName: 'Inglis',
+    country: 'Australia',
+    playerRole: 'wicketKeeper',
+    teamName: 'Australia',
+  },
+  {
+    playerName: 'Alex Carey',
+    playerShortName: 'Carey',
+    country: 'Australia',
+    playerRole: 'wicketKeeper',
+    teamName: 'Australia',
+  },
+  {
+    playerName: 'Matt Renshaw',
+    playerShortName: 'Renshaw',
+    country: 'Australia',
+    playerRole: 'batsman',
+    teamName: 'Australia',
+  },
+  {
+    playerName: 'Adam Zampa',
+    playerShortName: 'Zampa',
+    country: 'Australia',
+    playerRole: 'bowler',
+    teamName: 'Australia',
+  },
+  {
+    playerName: 'Josh Hazlewood',
+    playerShortName: 'Hazlewood',
+    country: 'Australia',
+    playerRole: 'bowler',
+    teamName: 'Australia',
+  },
+  {
+    playerName: 'Nathan Ellis',
+    playerShortName: 'Ellis',
+    country: 'Australia',
+    playerRole: 'bowler',
+    teamName: 'Australia',
+  },
+  {
+    playerName: 'Mitchell Starc',
+    playerShortName: 'Starc',
+    country: 'Australia',
+    playerRole: 'bowler',
+    teamName: 'Australia',
+  },
+  {
+    playerName: 'Glenn Maxwell',
+    playerShortName: 'Maxwell',
+    country: 'Australia',
+    playerRole: 'allRounder',
+    teamName: 'Australia',
+  },
+]
+
+/** The base tournament the sample squads play, by name. */
+export const SAMPLE_COMPETITION_NAME = 'T20 Series'
+
+/** Short names for the two teams, created if they do not already exist. */
+export const SAMPLE_TEAM_SHORT_NAMES: Readonly<Record<string, string>> = {
+  India: 'IND',
+  Australia: 'AUS',
+}

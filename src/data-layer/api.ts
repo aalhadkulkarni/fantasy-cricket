@@ -48,10 +48,19 @@ import type {
   Competition,
   CompetitionId,
   FormatRecord,
+  GameWeek,
+  GameWeekId,
+  GameWeekLineup,
   JoinableLeague,
   LeagueCard,
   LeagueId,
+  LeagueSummary,
+  LineupRules,
+  LineupSubmission,
+  Match,
   MatchConfig,
+  MatchId,
+  MatchLineup,
   Player,
   PlayerConfig,
   PlayerFilter,
@@ -126,6 +135,23 @@ export interface OfficialLeagues {
   matchBased?: boolean
   /** One gameweek per round, so the impact sub exists wherever a round has more than one match. */
   gameWeekBased?: boolean
+}
+
+/**
+ * What creating the sample squads did.
+ *
+ * **Safe to press twice.** Names already present are skipped rather than
+ * duplicated, so a second run adds whatever the first one missed and nothing
+ * else.
+ */
+export interface SamplePlayersResult {
+  created: number
+  /** Names already in the catalogue. Re-running is safe rather than doubling it. */
+  skipped: readonly string[]
+  /** Teams that had to be created because they did not exist yet. */
+  teamsCreated: readonly string[]
+  /** The base tournament they were all put in. */
+  competitionName: string
 }
 
 /** What seeding an environment did, so a caller can say more than "done". */
@@ -379,9 +405,79 @@ export interface Api {
   /** Read only when that tab is opened, since it grows without bound. */
   getArchivedLeagues(): Promise<ArchivedLeagueCard[]>
 
+  /**
+   * The strip at the top of league home, and what the sidebar needs to know
+   * which sections exist.
+   *
+   * **Rank is absent until the league is active.** Working it out needs every
+   * manager's lineups across every match plus the points node, and before a ball
+   * is bowled everyone is on zero, so the cost buys nothing.
+   */
+  getLeagueSummary(leagueId: LeagueId): Promise<LeagueSummary>
+
+  /** The composition limits a legal XI must satisfy in this league. */
+  getLineupRules(leagueId: LeagueId): Promise<LineupRules>
+
+  /**
+   * The match a team is being picked for: the earliest whose deadline has not
+   * passed, or the last one once they all have.
+   *
+   * **Its own read rather than something taken from config**, because someone
+   * may sit on the page long enough for a deadline to pass beneath them.
+   */
+  getCurrentMatch(leagueId: LeagueId): Promise<Match>
+
+  /** The gameweek containing that match. */
+  getCurrentGameWeek(leagueId: LeagueId): Promise<GameWeek>
+
+  /**
+   * **Regular leagues: the whole tournament pool.** An auction league picks
+   * from its squad instead, which is filtered by match because squad membership
+   * changes with transfers.
+   */
+  getSelectablePlayers(leagueId: LeagueId, matchId: MatchId): Promise<Player[]>
+
+  getMyTeamForMatch(
+    leagueId: LeagueId,
+    matchId: MatchId,
+  ): Promise<MatchLineup | undefined>
+
+  getMyTeamForGameWeek(
+    leagueId: LeagueId,
+    gameWeekId: GameWeekId,
+  ): Promise<GameWeekLineup | undefined>
+
+  /**
+   * **An illegal team is rejected here**, not merely disabled in the form.
+   *
+   * **A team applies forward until changed again**, so this writes every match
+   * from this one to the end of the tournament. The layer owns that; the
+   * interface only warns about it.
+   */
+  updateTeamForMatch(
+    leagueId: LeagueId,
+    matchId: MatchId,
+    lineup: LineupSubmission,
+  ): Promise<void>
+
+  updateTeamForGameWeek(
+    leagueId: LeagueId,
+    gameWeekId: GameWeekId,
+    lineup: LineupSubmission,
+  ): Promise<void>
+
   // -- system --------------------------------------------------------------
 
   setUpBasicSystem(): Promise<SystemSetupResult>
+
+  /**
+   * Two international T20 squads, so there is something to pick from.
+   *
+   * **Test data, not reference data.** It creates the teams it needs if they
+   * are missing, puts every player in the T20 Series, and skips any name
+   * already in the catalogue.
+   */
+  createSamplePlayers(): Promise<SamplePlayersResult>
 }
 
 // ---------------------------------------------------------------------------
