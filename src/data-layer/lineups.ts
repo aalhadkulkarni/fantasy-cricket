@@ -123,31 +123,31 @@ export function getChangesRemaining(
 /**
  * **Returns nothing when the deadline has not passed and the requester is not
  * that manager.** It does not return the team and trust the caller to hide it.
+ * League admins are not exempt.
  *
  * Identity comes from context. A client-supplied "who is asking" is exactly the
  * cheating vector this exists to close.
  */
-export function getTeamFor(
+export function getTeamForMatch(
   leagueId: LeagueId,
   managerId: UserId,
   matchId: MatchId,
 ): Promise<MatchLineup | undefined> {
-  return notImplemented('getTeamFor', { leagueId, managerId, matchId })
+  return getApi().getTeamForMatch(leagueId, managerId, matchId)
 }
 
 /**
- * The locked eleven, for highlighting a squad and for the leaderboard's team
- * modal.
+ * The same rule for a gameweek, which locks at its first match's deadline.
  *
- * **An impact sub whose match has not started is not visible here.** Visibility
- * is per match rather than per gameweek precisely because of that.
+ * **An impact sub whose match has not reached its deadline is left out.**
+ * Visibility is per match rather than per gameweek precisely because of that.
  */
-export function getLockedTeamFor(
+export function getTeamForGameWeek(
   leagueId: LeagueId,
   managerId: UserId,
-  matchId: MatchId,
-): Promise<MatchLineup | undefined> {
-  return notImplemented('getLockedTeamFor', { leagueId, managerId, matchId })
+  gameWeekId: GameWeekId,
+): Promise<GameWeekLineup | undefined> {
+  return getApi().getTeamForGameWeek(leagueId, managerId, gameWeekId)
 }
 
 // ---------------------------------------------------------------------------

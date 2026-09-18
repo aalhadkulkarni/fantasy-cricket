@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router'
 
 import { TournamentMatches } from '@/components/admin/tournament-matches'
 import { TournamentParticipants } from '@/components/admin/tournament-participants'
+import { TournamentComplete } from '@/components/admin/tournament-complete'
 import { TournamentPublish } from '@/components/admin/tournament-publish'
 import { TournamentRounds } from '@/components/admin/tournament-rounds'
 import { PageContainer } from '@/components/layout/page-container'
@@ -152,6 +153,11 @@ function Body({
             Draft
           </span>
         )}
+        {tournament.completedAt !== undefined && (
+          <span className="font-mono text-[10px] tracking-wide text-subtle-foreground uppercase">
+            Finished
+          </span>
+        )}
       </div>
 
       <p className="mt-2 text-sm text-muted-foreground">
@@ -194,6 +200,11 @@ function Body({
         tournament={tournament}
         onPublished={onSaved}
       />
+
+      {/* Only a published tournament can be finished; a draft is never seen. */}
+      {tournament.publishedAt !== undefined && (
+        <TournamentComplete tournament={tournament} onChanged={onSaved} />
+      )}
     </>
   )
 }

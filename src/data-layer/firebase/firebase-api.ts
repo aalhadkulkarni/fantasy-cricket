@@ -59,6 +59,9 @@ import type {
   MatchLineup,
   MatchPlayers,
   MatchSide,
+  LeagueDetails,
+  LeagueMemberSummary,
+  RoundDetails,
   PeriodLeaderboard,
   LeaderboardRow,
   ScoringWatermark,
@@ -574,6 +577,82 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       ),
       rounds: roundConfigs ?? {},
       offset: offset ?? 0,
+    }
+  }
+
+  /** A manager's stored team for a match, resolved. No visibility check. */
+  async function readMatchTeam(
+    leagueId: LeagueId,
+    userId: UserId,
+    matchId: MatchId,
+  ): Promise<MatchLineup | undefined> {
+    const stored = await service.read<StoredLineup>(
+      service.path('matchBasedLineups', leagueId, userId, matchId),
+    )
+    if (stored === undefined) return undefined
+
+    return { ...stored, lineup: await resolvePlayers(stored.lineup) }
+  }
+
+  /** A manager's stored team for a gameweek, resolved. No visibility check. */
+  async function readGameWeekTeam(
+    leagueId: LeagueId,
+    userId: UserId,
+    gameWeekId: GameWeekId,
+  ): Promise<GameWeekLineup | undefined> {
+    const stored = await service.read<StoredGameWeekLineup>(
+      service.path('gameWeekBasedLineups', leagueId, userId, gameWeekId),
+    )
+    if (stored === undefined) return undefined
+
+    const [startingLineup, postImpactSubLineup] = await Promise.all([
+      resolvePlayers(stored.startingLineup),
+      stored.postImpactSubLineup === undefined
+        ? undefined
+        : resolvePlayers(stored.postImpactSubLineup),
+    ])
+
+    return {
+      captainId: stored.captainId,
+      viceCaptainId: stored.viceCaptainId,
+      startingLineup,
+      ...(stored.impactSub === undefined
+        ? {}
+        : { impactSub: stored.impactSub }),
+      ...(postImpactSubLineup === undefined ? {} : { postImpactSubLineup }),
+    }
+  }
+
+  /**
+   * **The owner or an admin**, per `03-roles.md`. The owner is checked by the
+   * league's `leagueOwner` as well as the role, since that field is the
+   * authority on who owns it.
+   */
+  async function assertLeagueAdmin(leagueId: LeagueId): Promise<void> {
+    const session = requireSession()
+
+    const [owner, roles] = await Promise.all([
+      service.read<UserId>(service.path('leagues', leagueId, 'leagueOwner')),
+      service.read<LeagueMember['leagueRoles']>(
+        service.path(
+          'leagues',
+          leagueId,
+          'leagueMembers',
+          session.uid,
+          'leagueRoles',
+        ),
+      ),
+    ])
+
+    if (
+      owner !== session.uid &&
+      roles?.leagueOwner !== true &&
+      roles?.leagueAdmin !== true
+    ) {
+      throw new DataLayerError(
+        'unknown',
+        'Only the league owner or an admin can do that.',
+      )
     }
   }
 
@@ -2841,15 +2920,7 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       matchId: MatchId,
     ): Promise<MatchLineup | undefined> {
       const session = requireSession()
-      const stored = await service.read<StoredLineup>(
-        service.path('matchBasedLineups', leagueId, session.uid, matchId),
-      )
-      if (stored === undefined) return undefined
-
-      return {
-        ...stored,
-        lineup: await resolvePlayers(stored.lineup),
-      }
+      return readMatchTeam(leagueId, session.uid as UserId, matchId)
     },
 
     async getMyTeamForGameWeek(
@@ -2857,27 +2928,247 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       gameWeekId: GameWeekId,
     ): Promise<GameWeekLineup | undefined> {
       const session = requireSession()
-      const stored = await service.read<StoredGameWeekLineup>(
-        service.path('gameWeekBasedLineups', leagueId, session.uid, gameWeekId),
-      )
-      if (stored === undefined) return undefined
+      return readGameWeekTeam(leagueId, session.uid as UserId, gameWeekId)
+    },
 
-      const [startingLineup, postImpactSubLineup] = await Promise.all([
-        resolvePlayers(stored.startingLineup),
-        stored.postImpactSubLineup === undefined
-          ? undefined
-          : resolvePlayers(stored.postImpactSubLineup),
+    async getTeamForMatch(
+      leagueId: LeagueId,
+      managerId: UserId,
+      matchId: MatchId,
+    ): Promise<MatchLineup | undefined> {
+      const session = requireSession()
+
+      if (managerId !== session.uid) {
+        const { matches, offset } = await leagueFixtures(leagueId)
+        const match = matches.find((m) => m.matchId === matchId)
+        // Nothing, rather than an error: a caller cannot tell a hidden team
+        // from a missing one, which is the point.
+        if (!isLocked(match, offset)) return undefined
+      }
+
+      return readMatchTeam(leagueId, managerId, matchId)
+    },
+
+    async getTeamForGameWeek(
+      leagueId: LeagueId,
+      managerId: UserId,
+      gameWeekId: GameWeekId,
+    ): Promise<GameWeekLineup | undefined> {
+      const session = requireSession()
+      const team = await readGameWeekTeam(leagueId, managerId, gameWeekId)
+      if (team === undefined || managerId === session.uid) return team
+
+      const [{ matches, offset }, weeks] = await Promise.all([
+        leagueFixtures(leagueId),
+        api.getGameWeeks(leagueId),
       ])
 
-      return {
-        captainId: stored.captainId,
-        viceCaptainId: stored.viceCaptainId,
-        startingLineup,
-        ...(stored.impactSub === undefined
-          ? {}
-          : { impactSub: stored.impactSub }),
-        ...(postImpactSubLineup === undefined ? {} : { postImpactSubLineup }),
+      const week = weeks.find((w) => w.gameWeek.gameWeekId === gameWeekId)
+      const first = matches.find((m) => m.matchId === week?.matchIds[0])
+      if (!isLocked(first, offset)) return undefined
+
+      // **A sub is visible per match**, from its own match's deadline, so a
+      // pending one cannot be read off a gameweek that is already locked.
+      const subFrom = matches.find(
+        (m) => m.matchId === team.impactSub?.applicableFromMatch,
+      )
+      if (team.impactSub !== undefined && !isLocked(subFrom, offset)) {
+        return {
+          startingLineup: team.startingLineup,
+          captainId: team.captainId,
+          viceCaptainId: team.viceCaptainId,
+        }
       }
+
+      return team
+    },
+
+    async getLeagueDetails(leagueId: LeagueId): Promise<LeagueDetails> {
+      const at = (field: string) => service.path('leagues', leagueId, field)
+
+      const [
+        leagueName,
+        ownerId,
+        isAuctionEnabled,
+        isGameWeeksEnabled,
+        leagueEntry,
+        maxSlots,
+        isCustom,
+        scoringRulesText,
+        teamAllowance,
+        captainAllowance,
+        viceCaptainAllowance,
+        finishedAt,
+        members,
+        fixtures,
+      ] = await Promise.all([
+        service.read<string>(at('leagueName')),
+        service.read<UserId>(at('leagueOwner')),
+        service.read<boolean>(at('isAuctionEnabled')),
+        service.read<boolean>(at('isGameWeeksEnabled')),
+        service.read<LeagueDetails['leagueEntry']>(at('leagueEntry')),
+        service.read<number>(at('maxSlots')),
+        service.read<boolean>(at('isCustomScoringSystem')),
+        service.read<string>(at('scoringRulesText')),
+        service.read<number>(at('totalChangesAllowed')),
+        service.read<number>(at('totalCaptainChangesAllowed')),
+        service.read<number>(at('totalViceCaptainChangesAllowed')),
+        service.read<number>(at('finishedAt')),
+        service.read<Partial<Record<string, LeagueMember>>>(
+          paths.leagueMembers(leagueId),
+        ),
+        leagueFixtures(leagueId),
+      ])
+
+      if (leagueName === undefined) {
+        throw new DataLayerError('unknown', 'That league no longer exists.')
+      }
+
+      const [tournamentName, ownerName, tournamentRounds] = await Promise.all([
+        service.read<string>(
+          service.path('tournaments', fixtures.tournamentId, 'tournamentName'),
+        ),
+        ownerId === undefined
+          ? undefined
+          : service.read<string>(service.path('users', ownerId, 'userName')),
+        service.read<Record<string, Round>>(
+          paths.tournamentRounds(fixtures.tournamentId),
+        ),
+      ])
+
+      const numberOf = (matchId: MatchId | undefined) =>
+        fixtures.matches.find((m) => m.matchId === matchId)?.matchNumber ?? 0
+
+      // In fixture order, by each round's first match — never by id.
+      const rounds: RoundDetails[] = Object.entries(fixtures.rounds)
+        .sort(
+          ([a], [b]) =>
+            numberOf(tournamentRounds?.[a]?.firstMatchId) -
+            numberOf(tournamentRounds?.[b]?.firstMatchId),
+        )
+        .map(([roundId, config]) => ({
+          roundName: tournamentRounds?.[roundId]?.roundName ?? '',
+          gameWeeks: Object.keys(config.gameWeeks ?? {}).length,
+          ...omitUndefined({
+            beforeRoundCap: config.maxNumberOfChangesAllowedBeforeRoundStart,
+            betweenGameWeeksCap:
+              config.maxNumberOfChangesAllowedBetweenGameWeeks,
+          }),
+          isImpactSubAllowed: config.isImpactSubAllowed === true,
+        }))
+
+      const last = fixtures.matches[fixtures.matches.length - 1]
+
+      return {
+        leagueId,
+        leagueName,
+        tournamentName: tournamentName ?? '',
+        ownerName: ownerName ?? 'Unknown',
+        isAuctionEnabled: isAuctionEnabled === true,
+        isGameWeeksEnabled: isGameWeeksEnabled === true,
+        leagueEntry: leagueEntry ?? 'Open',
+        managers: Object.values(members ?? {}).filter(
+          (m) => m?.leagueRoles?.manager === true,
+        ).length,
+        maxSlots: maxSlots ?? 0,
+        deadlineOffset: fixtures.offset,
+        isCustomScoringSystem: isCustom === true,
+        ...omitUndefined({ scoringRulesText }),
+        changeAllowances: omitUndefined({
+          teamChanges: teamAllowance,
+          captainChanges: captainAllowance,
+          viceCaptainChanges: viceCaptainAllowance,
+        }),
+        rounds: isGameWeeksEnabled === true ? rounds : [],
+        ...omitUndefined({
+          finishedAt,
+          lastMatchStartsAt: last?.startTimestamp,
+        }),
+      }
+    },
+
+    async getMembers(leagueId: LeagueId): Promise<LeagueMemberSummary[]> {
+      const members = await service.read<Partial<Record<string, LeagueMember>>>(
+        paths.leagueMembers(leagueId),
+      )
+
+      const present = Object.entries(members ?? {}).filter(
+        (entry): entry is [string, LeagueMember] =>
+          entry[1] !== undefined &&
+          entry[1].leagueRoles?.bannedFromLeague !== true,
+      )
+
+      const names = await Promise.all(
+        present.map(([userId]) =>
+          service.read<string>(service.path('users', userId, 'userName')),
+        ),
+      )
+
+      const standing = (roles: LeagueMember['leagueRoles']) =>
+        roles?.leagueOwner === true ? 0 : roles?.leagueAdmin === true ? 1 : 2
+
+      return present
+        .map(([userId, member], index): LeagueMemberSummary => ({
+          userId: userId as UserId,
+          userName: names[index] ?? 'Unknown',
+          leagueRoles: member.leagueRoles ?? {},
+          ...omitUndefined({
+            fantasyTeamName: member.fantasyTeamName,
+            pointsAdjustment: member.pointsAdjustment,
+          }),
+        }))
+        .sort(
+          (a, b) =>
+            standing(a.leagueRoles) - standing(b.leagueRoles) ||
+            a.userName.localeCompare(b.userName),
+        )
+    },
+
+    async markLeagueFinished(leagueId: LeagueId): Promise<void> {
+      await assertLeagueAdmin(leagueId)
+
+      /*
+        **Gated on the last match having started.** The docs ask for every
+        match to have ended, but nothing records an end, so the last scheduled
+        start is the nearest thing the layer can check.
+      */
+      const { matches } = await leagueFixtures(leagueId)
+      const last = matches[matches.length - 1]
+      if (
+        last?.startTimestamp === undefined ||
+        last.startTimestamp > Date.now()
+      ) {
+        throw new DataLayerError(
+          'unknown',
+          "The league's last match has not started yet.",
+        )
+      }
+
+      await service.write(
+        service.path('leagues', leagueId, 'finishedAt'),
+        Date.now(),
+      )
+    },
+
+    async unmarkLeagueFinished(leagueId: LeagueId): Promise<void> {
+      await assertLeagueAdmin(leagueId)
+      await service.write(service.path('leagues', leagueId, 'finishedAt'), null)
+    },
+
+    async markTournamentComplete(tournamentId: TournamentId): Promise<void> {
+      await assertSystemAdmin()
+      await service.write(
+        service.path('tournaments', tournamentId, 'completedAt'),
+        Date.now(),
+      )
+    },
+
+    async unmarkTournamentComplete(tournamentId: TournamentId): Promise<void> {
+      await assertSystemAdmin()
+      await service.write(
+        service.path('tournaments', tournamentId, 'completedAt'),
+        null,
+      )
     },
 
     /**

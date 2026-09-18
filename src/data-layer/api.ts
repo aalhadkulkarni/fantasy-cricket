@@ -63,6 +63,8 @@ import type {
   MatchId,
   MatchPlayers,
   PeriodLeaderboard,
+  LeagueDetails,
+  LeagueMemberSummary,
   LeaderboardRow,
   ScoringWatermark,
   MatchLineup,
@@ -522,6 +524,53 @@ export interface Api {
 
   /** The match points are entered up to. Absent before any are. */
   getScoringWatermark(leagueId: LeagueId): Promise<ScoringWatermark>
+
+  /**
+   * **Another manager's team for a match, or nothing.** Returned to anyone
+   * other than that manager only once the match's deadline has passed, and
+   * admins are not exempt. Who is asking comes from the session, never from
+   * the caller.
+   */
+  getTeamForMatch(
+    leagueId: LeagueId,
+    managerId: UserId,
+    matchId: MatchId,
+  ): Promise<MatchLineup | undefined>
+
+  /**
+   * The same rule for a gameweek, which locks at its first match's deadline.
+   * **An impact sub is left out until the deadline of the match it applies
+   * from.**
+   */
+  getTeamForGameWeek(
+    leagueId: LeagueId,
+    managerId: UserId,
+    gameWeekId: GameWeekId,
+  ): Promise<GameWeekLineup | undefined>
+
+  /** Everything League Details shows, resolved. */
+  getLeagueDetails(leagueId: LeagueId): Promise<LeagueDetails>
+
+  /**
+   * Name, team name and roles, banned members excluded. Owner first, then
+   * admins, then by name.
+   */
+  getMembers(leagueId: LeagueId): Promise<LeagueMemberSummary[]>
+
+  /**
+   * Sets `finishedAt`. Owner and admins only, and refused until the league's
+   * last match has started. Never derived.
+   */
+  markLeagueFinished(leagueId: LeagueId): Promise<void>
+
+  /** Clears `finishedAt`, for a league marked finished too early. */
+  unmarkLeagueFinished(leagueId: LeagueId): Promise<void>
+
+  /** Sets `completedAt`, which moves a tournament to Past. System admins only. */
+  markTournamentComplete(tournamentId: TournamentId): Promise<void>
+
+  /** Clears `completedAt`, putting the tournament back in Active. */
+  unmarkTournamentComplete(tournamentId: TournamentId): Promise<void>
 
   /**
    * **Both teams' players for a match, from this tournament's squads**, for

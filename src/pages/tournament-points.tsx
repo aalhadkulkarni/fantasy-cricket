@@ -19,6 +19,7 @@ import {
   getStandardPointsForMatch,
   getTeams,
   getTournament,
+  markTournamentComplete,
   updateStandardPoints,
 } from '@/data-layer'
 import { tournamentPath } from '@/routes'
@@ -75,6 +76,9 @@ export function TournamentPoints() {
 
   const [status, setStatus] = useState<SaveStatus>('idle')
   const [message, setMessage] = useState<string | undefined>(undefined)
+  const [finishing, setFinishing] = useState<'idle' | 'saving' | 'failed'>(
+    'idle',
+  )
 
   // The match most recently asked for, so a slow answer for an earlier choice
   // cannot land on top of a later one.
@@ -200,6 +204,19 @@ export function TournamentPoints() {
     }
   }
 
+  async function finish() {
+    if (tournament === undefined) return
+    setFinishing('saving')
+    try {
+      await markTournamentComplete(tournament.tournamentId)
+      setFinishing('idle')
+      // The reread carries `completedAt`, which retires the prompt.
+      setReloadToken((n) => n + 1)
+    } catch {
+      setFinishing('failed')
+    }
+  }
+
   return (
     <main className="py-10 sm:py-14">
       <PageContainer>
@@ -290,6 +307,38 @@ export function TournamentPoints() {
                     }
                   />
                 )}
+
+                {/*
+                  **Prompted, never done automatically.** The last match's
+                  points being in is the natural moment to ask, but the admin
+                  may still have corrections or forgotten matches to add.
+                */}
+                {opened !== undefined &&
+                  status === 'saved' &&
+                  opened.match.matchId ===
+                    matches[matches.length - 1]?.matchId &&
+                  tournament.completedAt === undefined && (
+                    <div className="mt-5 flex flex-wrap items-center gap-3 border-t pt-5">
+                      <p className="text-sm">
+                        That was the last match. Mark the tournament finished?
+                      </p>
+                      <Button
+                        variant="outline"
+                        disabled={finishing === 'saving'}
+                        onClick={() => void finish()}
+                      >
+                        {finishing === 'saving'
+                          ? 'Saving…'
+                          : 'Mark tournament finished'}
+                      </Button>
+                      {finishing === 'failed' && (
+                        <span className="font-mono text-xs text-destructive">
+                          Could not mark it finished. Try again, or use the
+                          admin page.
+                        </span>
+                      )}
+                    </div>
+                  )}
               </section>
             )}
           </>

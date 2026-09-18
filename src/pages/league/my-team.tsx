@@ -7,9 +7,10 @@ import {
   type SavedTeam,
 } from '@/components/leagues/changes-summary'
 import { LineupSummary } from '@/components/leagues/lineup-summary'
-import { LineupView } from '@/components/leagues/lineup-view'
+import { LockedTeam } from '@/components/leagues/locked-team'
 import { PeriodNav, type Period } from '@/components/leagues/period-nav'
 import { PlayerPicker } from '@/components/leagues/player-picker'
+import { gameWeekPoints, toSaved } from '@/components/leagues/team-data'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -25,7 +26,6 @@ import {
   getMyTeamBeforeGameWeek,
   getMyTeamForGameWeek,
   getMyTeamForMatch,
-  getPlayerPointsForMatch,
   getSelectablePlayers,
   getTeams,
   updateTeamForGameWeek,
@@ -34,14 +34,10 @@ import {
 import { useLeague } from '@/hooks/use-league'
 import type {
   GameWeekId,
-  GameWeekLineup,
   LeagueGameWeek,
-  LeagueId,
   LineupRules,
-  LineupSubmission,
   Match,
   MatchId,
-  MatchLineup,
   Player,
   PlayerId,
   PlayerPoints,
@@ -465,9 +461,7 @@ export function MyTeam() {
           {subline(match, gameWeek, teams, deadline, true)}
         </p>
 
-        {snapshot === undefined ||
-        captainId === undefined ||
-        viceCaptainId === undefined ? (
+        {snapshot === undefined ? (
           <p className="mt-6 max-w-prose text-sm text-subtle-foreground">
             You did not submit a team for this one. You score nothing for it and
             resume normally — a missed deadline never removes you from a league,
@@ -476,33 +470,14 @@ export function MyTeam() {
         ) : (
           // The same two columns as the editing view, so locking a team changes
           // what can be done with it, not where anything is.
-          <div className="mt-6 gap-5 lg:flex">
-            <div className="min-w-0 flex-1">
-              <LineupView
-                lineup={snapshot.lineup}
-                captainId={captainId}
-                viceCaptainId={viceCaptainId}
-                points={points}
-                totalLabel="Total"
-              />
-            </div>
-
-            <div className="mt-5 lg:mt-0 lg:w-[19rem] lg:shrink-0">
-              <LineupSummary
-                selected={snapshot.lineup}
-                rules={rules}
-                captainId={snapshot.captainId}
-                viceCaptainId={snapshot.viceCaptainId}
-              />
-
-              <ChangesSummary
-                baseline={baseline}
-                allowances={allowances}
-                lineup={snapshot.lineup}
-                captainId={snapshot.captainId}
-                viceCaptainId={snapshot.viceCaptainId}
-              />
-            </div>
+          <div className="mt-6">
+            <LockedTeam
+              team={snapshot}
+              baseline={baseline}
+              points={points}
+              rules={rules}
+              allowances={allowances}
+            />
           </div>
         )}
       </section>
@@ -642,59 +617,6 @@ function Nav({
       onSelect={onSelect}
     />
   )
-}
-
-/**
- * A stored team as the change box reads it. **The remaining counters ride
- * along**, since they are what "of N" is measured from.
- *
- * A gameweek team carries none, because its cap is per transition rather than a
- * running total, so "of N" is the gameweek's cap every time.
- */
-function toSaved(
-  mine: MatchLineup | GameWeekLineup | LineupSubmission | undefined,
-): SavedTeam | undefined {
-  if (mine === undefined) return undefined
-
-  const lineup = 'startingLineup' in mine ? mine.startingLineup : mine.lineup
-
-  return {
-    lineup,
-    captainId: mine.captainId,
-    viceCaptainId: mine.viceCaptainId,
-    ...('changesRemaining' in mine
-      ? {
-          changesRemaining: mine.changesRemaining,
-          captainChangesRemaining: mine.captainChangesRemaining,
-          viceCaptainChangesRemaining: mine.viceCaptainChangesRemaining,
-        }
-      : {}),
-  }
-}
-
-/**
- * Points across a set of matches, summed per player.
- *
- * **A gameweek's figure is an aggregate**, which is option 2 in `my-team.md` —
- * one column of totals rather than one column per match, because the per-match
- * table cannot fit a phone without a scroll. A match-based league passes one
- * match and gets it back unchanged.
- */
-async function gameWeekPoints(
-  leagueId: LeagueId,
-  matchIds: readonly MatchId[],
-): Promise<PlayerPoints> {
-  const perMatch = await Promise.all(
-    matchIds.map((matchId) => getPlayerPointsForMatch(leagueId, matchId)),
-  )
-
-  const total: PlayerPoints = {}
-  for (const scores of perMatch) {
-    for (const [playerId, value] of Object.entries(scores)) {
-      total[playerId as PlayerId] = (total[playerId as PlayerId] ?? 0) + value
-    }
-  }
-  return total
 }
 
 /**
