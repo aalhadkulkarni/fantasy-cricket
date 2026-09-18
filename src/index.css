@@ -274,6 +274,34 @@
     );
   }
 
+  /* ============================================================
+     THE SAME WASH, SCALED TO ITS BOX.
+
+     `.floodlit` is a fixed 420px from the top, which suits a page
+     frame and leaves a tall card dark below the fade. This one
+     scales with whatever it is on, so a card of any height is lit
+     throughout rather than only at the top.
+
+     Use it on content surfaces. Use `.floodlit` on a page or a
+     band, where the light is meant to come from above the frame.
+     ============================================================ */
+  .lit {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .lit::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(
+      120% 90% at 50% 0%,
+      rgba(var(--bloom), 0.16),
+      transparent 72%
+    );
+  }
+
   .is-live {
     position: relative;
     overflow: hidden;

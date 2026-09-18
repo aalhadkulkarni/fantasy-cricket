@@ -66,6 +66,7 @@ import type {
   PlayerFilter,
   PlayerId,
   PlayerRoleRecord,
+  Round,
   Team,
   TeamConfig,
   TeamFilter,
@@ -426,6 +427,14 @@ export interface Api {
    * may sit on the page long enough for a deadline to pass beneath them.
    */
   getCurrentMatch(leagueId: LeagueId): Promise<Match>
+
+  /**
+   * The phase of the tournament that match falls in — group stage, playoffs.
+   *
+   * Answers for a match-based league too, since a round belongs to the
+   * tournament rather than to a league's gameweek structure.
+   */
+  getCurrentRound(leagueId: LeagueId): Promise<Round>
 
   /** The gameweek containing that match. */
   getCurrentGameWeek(leagueId: LeagueId): Promise<GameWeek>

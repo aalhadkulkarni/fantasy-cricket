@@ -135,6 +135,16 @@ export interface LeagueSummary {
   myRank?: number
 
   /**
+   * How long before a match starts that teams lock, in milliseconds. Zero means
+   * the first ball.
+   *
+   * **A deadline is a match's scheduled start minus this**, and it never shifts
+   * with a delay. Carried here so a screen holding a match can work out whether
+   * it is still editable without reading the league again.
+   */
+  deadlineOffset: number
+
+  /**
    * The two facts that decide which sections exist. **A league is one type for
    * its whole life**, so neither ever changes — an auction league is always
    * gameweek-based, and the gameweek flag decides which node holds the lineups.

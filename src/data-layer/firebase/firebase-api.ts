@@ -504,6 +504,7 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
    * ordering key — push keys sort by creation time, not fixture order.
    */
   async function leagueFixtures(leagueId: LeagueId): Promise<{
+    tournamentId: TournamentId
     matches: Match[]
     rounds: RoundConfig[]
     offset: number
@@ -533,6 +534,7 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
     )
 
     return {
+      tournamentId,
       matches: Object.values(stored ?? {}).sort(
         (a, b) => a.matchNumber - b.matchNumber,
       ),
@@ -1890,6 +1892,7 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         nextDeadline:
           startDate === undefined ? undefined : startDate - (offset ?? 0),
         // Rank is deliberately absent. See the contract.
+        deadlineOffset: offset ?? 0,
         isAuctionEnabled: isAuctionEnabled === true,
         isGameWeeksEnabled: isGameWeeksEnabled === true,
         myRoles: me?.leagueRoles ?? {},
@@ -1955,6 +1958,42 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         throw new DataLayerError('unknown', 'This tournament has no matches.')
       }
       return match
+    },
+
+    /**
+     * The phase of the tournament the current match falls in.
+     *
+     * **Resolved against the tournament, not the league's round configs.** A
+     * match-based league has no round configs at all and still belongs to a
+     * round, and the round's name lives on the tournament either way.
+     *
+     * **Found by `matchNumber`.** A round stores a first and last match id, and
+     * ids are push keys that sort by creation time rather than fixture order.
+     */
+    async getCurrentRound(leagueId: LeagueId): Promise<Round> {
+      const current = await api.getCurrentMatch(leagueId)
+      const { tournamentId, matches } = await leagueFixtures(leagueId)
+
+      const rounds = await service.read<Record<string, Round>>(
+        paths.tournamentRounds(tournamentId),
+      )
+
+      const numberOf = (matchId: MatchId) =>
+        matches.find((m) => m.matchId === matchId)?.matchNumber ?? 0
+
+      const round = Object.values(rounds ?? {}).find(
+        (r) =>
+          numberOf(r.firstMatchId) <= current.matchNumber &&
+          current.matchNumber <= numberOf(r.lastMatchId),
+      )
+
+      if (round === undefined) {
+        throw new DataLayerError(
+          'unknown',
+          'No round covers the current match.',
+        )
+      }
+      return round
     },
 
     async getCurrentGameWeek(leagueId: LeagueId): Promise<GameWeek> {

@@ -4,7 +4,7 @@ import type { LineupRules, Player, PlayerId, PlayerRole } from '@/types'
 const XI = 11
 
 /**
- * The panel beside the eleven, updating as selections change.
+ * The panel beside the XI, updating as selections change.
  *
  * **This is doing real work, not decorating.** With free slots it is the only
  * thing telling a manager whether their team is legal, so a breached limit is
@@ -31,9 +31,9 @@ export function LineupSummary({
     selected.find((p) => p.playerId === id)?.playerShortName
 
   return (
-    <aside className="rounded-xl border bg-secondary/30 p-5">
+    <aside className="lit rounded-xl border bg-secondary/30 p-5">
       <p className="font-mono text-[10px] tracking-[0.14em] text-subtle-foreground uppercase">
-        Your eleven
+        Your XI
       </p>
 
       <div className="mt-4 flex items-baseline justify-between gap-3">
