@@ -67,7 +67,16 @@ transfers left.
 
 ## Points entry
 
-Select a match, see every eligible player, enter points, submit.
+**Reached from tournament home, not from this panel.** An **Update points**
+button beside Fixtures, shown to system admins only, opens
+`/tournaments/:tournamentId/points`. The tournament is already chosen there, so
+the panel would only need a picker to choose it again.
+
+Select a match, see every eligible player, enter points, submit. The dropdown
+opens on the match after the tournament's `pointsUpdatedTillMatchId`, labelled
+"Match 12 · IND v AUS", and **Select match** loads it. Eligible players are both
+teams' squads in this tournament, so a match with a TBD team cannot be scored
+until the fixtures editor sets it.
 
 **If points already exist the form is prefilled**, and submitting overwrites.
 

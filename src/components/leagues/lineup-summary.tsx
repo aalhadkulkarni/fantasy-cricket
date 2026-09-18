@@ -22,7 +22,7 @@ export function LineupSummary({
   captainId,
   viceCaptainId,
 }: {
-  selected: Player[]
+  selected: readonly Player[]
   rules: LineupRules
   captainId: PlayerId | undefined
   viceCaptainId: PlayerId | undefined
@@ -105,7 +105,7 @@ function RoleCount({
 
 /** One sentence saying what is still wrong, or that nothing is. */
 function verdict(
-  selected: Player[],
+  selected: readonly Player[],
   rules: LineupRules,
   captainId: PlayerId | undefined,
   viceCaptainId: PlayerId | undefined,

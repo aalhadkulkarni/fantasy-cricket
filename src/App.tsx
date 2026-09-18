@@ -16,6 +16,7 @@ import { LeagueHome, LeagueLanding } from './pages/league-home'
 import { SystemAdmin } from './pages/system-admin'
 import { TournamentAdmin } from './pages/tournament-admin'
 import { TournamentHome } from './pages/tournament-home'
+import { TournamentPoints } from './pages/tournament-points'
 import { Tournaments } from './pages/tournaments'
 import { ROUTES } from './routes'
 
@@ -53,6 +54,14 @@ function App() {
                 <Route path={ROUTES.home} element={<MyLeagues />} />
                 <Route path={ROUTES.tournaments} element={<Tournaments />} />
                 <Route path={ROUTES.tournament} element={<TournamentHome />} />
+                <Route
+                  path={ROUTES.tournamentPoints}
+                  element={
+                    <RequireSystemAdmin>
+                      <TournamentPoints />
+                    </RequireSystemAdmin>
+                  }
+                />
                 <Route path={ROUTES.createLeague} element={<CreateLeague />} />
                 <Route path={ROUTES.actions} element={<ActionsCenter />} />
                 {/*

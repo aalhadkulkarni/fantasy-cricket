@@ -441,22 +441,35 @@ export function MyTeam() {
             and your next team simply applies from the following match.
           </p>
         ) : (
-          <div className="mt-6">
-            <LineupView
-              lineup={snapshot.lineup}
-              captainId={captainId}
-              viceCaptainId={viceCaptainId}
-              points={points}
-              totalLabel="Total"
-            />
+          // The same two columns as the editing view, so locking a team changes
+          // what can be done with it, not where anything is.
+          <div className="mt-6 gap-5 lg:flex">
+            <div className="min-w-0 flex-1">
+              <LineupView
+                lineup={snapshot.lineup}
+                captainId={captainId}
+                viceCaptainId={viceCaptainId}
+                points={points}
+                totalLabel="Total"
+              />
+            </div>
 
-            <ChangesSummary
-              baseline={baseline}
-              allowances={allowances}
-              lineup={snapshot.lineup}
-              captainId={snapshot.captainId}
-              viceCaptainId={snapshot.viceCaptainId}
-            />
+            <div className="mt-5 lg:mt-0 lg:w-[19rem] lg:shrink-0">
+              <LineupSummary
+                selected={snapshot.lineup}
+                rules={rules}
+                captainId={snapshot.captainId}
+                viceCaptainId={snapshot.viceCaptainId}
+              />
+
+              <ChangesSummary
+                baseline={baseline}
+                allowances={allowances}
+                lineup={snapshot.lineup}
+                captainId={snapshot.captainId}
+                viceCaptainId={snapshot.viceCaptainId}
+              />
+            </div>
           </div>
         )}
       </section>

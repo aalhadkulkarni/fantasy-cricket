@@ -50,8 +50,9 @@ export function LineupView({
     0,
   )
 
+  // Boxed like "Your XI" and Transfers beside it, so the three read as a set.
   return (
-    <div>
+    <div className="lit rounded-xl border bg-secondary/30 p-5">
       <div className="flex items-baseline justify-between gap-3 pb-2">
         <span className="font-mono text-[10px] tracking-[0.14em] text-subtle-foreground uppercase">
           Player
