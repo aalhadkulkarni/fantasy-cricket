@@ -135,7 +135,11 @@ export interface LeagueSummary {
   leagueJoinCode: string
   phase: LeaguePhase
 
-  /** The next moment anything locks. Absent once the league is finished. */
+  /**
+   * The next team deadline still ahead: the next match's in a match-based
+   * league, the next gameweek's first match's in a gameweek league. Absent
+   * when none is left, or when the next one has no start time yet.
+   */
   nextDeadline?: number
 
   /** Absent for a spectator, and for an admin who does not play. */
