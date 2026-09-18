@@ -271,7 +271,7 @@ export function MyTeam() {
         <h2 className="text-xl font-bold tracking-tight sm:text-2xl">
           Your XI
         </h2>
-        <p className="mt-1.5 font-mono text-xs text-subtle-foreground">
+        <p className="mt-2 font-mono text-sm font-medium text-muted-foreground">
           {subline(match, gameWeek, round, teams, deadline, true)}
         </p>
 
@@ -303,7 +303,7 @@ export function MyTeam() {
           <h2 className="text-xl font-bold tracking-tight sm:text-2xl">
             {existing === undefined ? 'Pick your XI' : 'Your XI'}
           </h2>
-          <p className="mt-1.5 font-mono text-xs text-subtle-foreground">
+          <p className="mt-2 font-mono text-sm font-medium text-muted-foreground">
             {subline(match, gameWeek, round, teams, deadline, false)}
           </p>
         </div>
@@ -388,11 +388,11 @@ export function MyTeam() {
 }
 
 /**
- * What is being picked for, the fixture, and when changes close — the three
- * parts the mockup carries.
+ * What is being picked for, the fixture, and the deadline — the three parts the
+ * mockup carries.
  *
- * **"Changes close", not "locks".** Locking is how the model talks about it,
- * and it means nothing to somebody picking a team.
+ * **"Deadline", not "locks".** Locking is how the model talks about it, and it
+ * means nothing to somebody picking a team. The band above says the same word.
  *
  * **The gameweek number, not its stored name.** A league created before the
  * naming was fixed carries its round's name on the gameweek, and reading the
@@ -429,7 +429,7 @@ function subline(
   parts.push(
     deadline === undefined
       ? 'no date yet'
-      : `${locked ? 'changes closed' : 'changes close'} ${new Date(
+      : `${locked ? 'Deadline passed' : 'Deadline'} ${new Date(
           deadline,
         ).toLocaleString(undefined, {
           weekday: 'short',
