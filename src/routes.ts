@@ -40,6 +40,22 @@ export const ROUTES = {
    * published tournament and its leagues.
    */
   adminTournament: '/admin/tournaments/:tournamentId',
+
+  /**
+   * League home, and its sections.
+   *
+   * **Sections are routes rather than in-page state**, and the deciding reason
+   * is the back gesture. Most usage is a phone browser where back is a swipe
+   * people use constantly; with routes it moves between sections, and with
+   * in-page state it would throw them out of the league entirely.
+   *
+   * The bare route redirects to whichever section suits the league's phase.
+   */
+  league: '/leagues/:leagueId',
+  leagueDetails: '/leagues/:leagueId/details',
+  leagueTeam: '/leagues/:leagueId/team',
+  leagueLeaderboard: '/leagues/:leagueId/leaderboard',
+  leagueMembers: '/leagues/:leagueId/members',
 } as const
 
 export type RoutePath = (typeof ROUTES)[keyof typeof ROUTES]
@@ -47,6 +63,12 @@ export type RoutePath = (typeof ROUTES)[keyof typeof ROUTES]
 /** Built rather than spelled out, for the reason in the header above. */
 export function tournamentPath(tournamentId: string): string {
   return `/tournaments/${tournamentId}`
+}
+
+export function leaguePath(leagueId: string, section?: string): string {
+  return section === undefined
+    ? `/leagues/${leagueId}`
+    : `/leagues/${leagueId}/${section}`
 }
 
 export function adminTournamentPath(tournamentId: string): string {

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Link } from 'react-router'
 
 /**
  * The chrome every league card shares.
@@ -18,14 +19,21 @@ export function LeagueCard({
   tags,
   meta,
   footer,
+  to,
 }: {
   name: string
   tags: ReactNode
   meta: ReactNode
   footer: ReactNode
+  /**
+   * Makes the whole body the link, per rule 5 of the design system. Absent
+   * where there is nothing to open — a pending request, or a row whose only
+   * action is a button of its own.
+   */
+  to?: string
 }) {
-  return (
-    <article className="floodlit flex flex-col gap-3.5 rounded-lg border bg-card p-5 text-card-foreground">
+  const body = (
+    <>
       <div>
         <h3 className="text-[17px] leading-tight font-bold tracking-[-0.015em]">
           {name}
@@ -40,7 +48,21 @@ export function LeagueCard({
       <div className="mt-auto flex flex-wrap items-center justify-between gap-2.5 border-t pt-3">
         {footer}
       </div>
-    </article>
+    </>
+  )
+
+  const shell =
+    'floodlit flex flex-col gap-3.5 rounded-lg border bg-card p-5 text-card-foreground'
+
+  if (to === undefined) return <article className={shell}>{body}</article>
+
+  return (
+    <Link
+      to={to}
+      className={`${shell} transition-[border-color,background-color,transform] hover:-translate-y-0.5 hover:border-muted-foreground hover:bg-accent`}
+    >
+      {body}
+    </Link>
   )
 }
 

@@ -67,7 +67,7 @@ export function createLeague(
 
 /** League home. Name, code, phase, next deadline, your rank. */
 export function getLeagueSummary(leagueId: LeagueId): Promise<LeagueSummary> {
-  return notImplemented('getLeagueSummary', { leagueId })
+  return getApi().getLeagueSummary(leagueId)
 }
 
 /**
@@ -137,6 +137,11 @@ export function getStandardAuctionConfig(): Promise<StandardAuctionConfig> {
 }
 
 /** Default per-role composition limits. Copied at creation, same as above. */
+/** This league's own composition limits, copied at creation and owned since. */
+export function getLineupRules(leagueId: LeagueId): Promise<LineupRules> {
+  return getApi().getLineupRules(leagueId)
+}
+
 export function getStandardLineupRules(): Promise<LineupRules> {
   return notImplemented('getStandardLineupRules', {})
 }

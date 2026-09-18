@@ -63,10 +63,14 @@ export interface MatchLineup {
    * Counters carried forward on every write. One change is one player out and
    * one player in, so swapping three uses three. Captain and vice-captain
    * changes count separately and are not team changes.
+   *
+   * **Absent means unlimited**, matching `LineupRule.max` and the per-round
+   * allowances. A league created with no allowance configured has none, and a
+   * required number could not say so.
    */
-  changesRemaining: number
-  captainChangesRemaining: number
-  viceCaptainChangesRemaining: number
+  changesRemaining?: number
+  captainChangesRemaining?: number
+  viceCaptainChangesRemaining?: number
 }
 
 /**

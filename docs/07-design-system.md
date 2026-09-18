@@ -119,37 +119,35 @@ league codes, slot counts, match numbers.
 
 These keep the concept coherent. The first is the one that matters most.
 
-**1. `--live` is for live states, and for two fixed exceptions.**
+**1. The blue is the product's colour. The live *marker* is what stays scarce.**
 
-A live state is an auction running, a deadline imminent, your turn to pick.
+**Revised, deliberately.** This rule used to reserve `--live` for live states
+with two named exceptions, and to refuse a third. In practice that produced
+user-facing pages indistinguishable from the system admin panel: correct
+against the rule and wrong on screen. The concept is called Floodlit; a
+floodlight that never comes on is just a dark room.
 
-**The two exceptions**, decided deliberately and closed:
+**The split that replaces it.** Two different things were being governed by one
+rule, and separating them is what makes both work.
 
-| Exception                                                            | Why                                                                                                                                           |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| **The brand mark** — the second word carries `--live-text`           | It is the one place blue reads as identity rather than as a claim about state, and it never moves or changes, so nobody learns to scan for it |
-| **The actions count chip** — `--live` fill, `--live-foreground` text | An outstanding action _is_ something waiting on you, which is closer to a live state than to decoration                                       |
+| | |
+| --- | --- |
+| **The colour** — `--live-text`, `--bloom` at low alpha | Free to use. The ambient wash on a card or a page, tags, active navigation, headings that need to carry the brand. This is identity and atmosphere. |
+| **The live marker** — the animated beam, the strong bloom, the tinted border, together | Still scarce. **One per screen, maximum.** This says something is happening *right now*: an auction running, a deadline closing in, your turn to bid. |
 
-**Everywhere else, no.** **Not** on primary buttons. **Not** on active tabs or
-underlines. **Not** on league-type tags — a league being an auction league is a
-_type_, not a state.
+**What still holds.** A primary action button uses `--primary`, a near-white
+fill — the standard pattern on dark interfaces, and it stays that way because
+the accent is now common enough that a blue button would stop reading as
+primary. The focus ring uses `--ring`.
 
-> The point of the rule is unchanged: if blue turns up decoratively, nothing
-> means "live" any more and the metaphor is dead. The exceptions are fixed and
-> few for exactly that reason. **Two is the limit** — a third request should be
-> refused rather than added to the table.
+> **Why the metaphor survives this.** What made a live card read as live was
+> never the hue on its own — it was movement and a bright edge against a calm
+> surface. Those are untouched. A page washed in blue with one card carrying a
+> beam still says exactly which card is live.
 
-**What this forces:** a primary action button uses `--primary`, a near-white
-fill. That is the standard pattern on dark interfaces and reads as clearly
-primary without borrowing the accent. Tags distinguish by _fill_ rather than by
-colour. The focus ring uses `--ring`, not `--live`.
-
-> **This rule was narrower and was widened on purpose.** It previously admitted
-> no exceptions at all, and an early mockup that put blue on the brand, the
-> count, the primary button and the type tags was rejected in review for
-> breaking it. The brand and the count have since been allowed back; the primary
-> button and the type tags have not. If you are working from that mockup, those
-> two remain wrong.
+> **The `floodlit` wash is atmosphere.** It carries no beam and no border tint,
+> so it spends nothing. Use it on card faces and on pages whose job is to feel
+> like the product rather than like a form.
 
 **2. `--settled` for steady positive states** — a gameweek in progress, points
 confirmed. Positive, but not urgent.

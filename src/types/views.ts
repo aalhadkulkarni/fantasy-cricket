@@ -133,6 +133,21 @@ export interface LeagueSummary {
 
   /** Absent for a spectator, and for an admin who does not play. */
   myRank?: number
+
+  /**
+   * The two facts that decide which sections exist. **A league is one type for
+   * its whole life**, so neither ever changes — an auction league is always
+   * gameweek-based, and the gameweek flag decides which node holds the lineups.
+   */
+  isAuctionEnabled: boolean
+  isGameWeeksEnabled: boolean
+
+  /** Which sections you can see. A spectator has no My Team. */
+  myRoles: Partial<Record<LeagueRole, true>>
+
+  /** Needed to resolve fixtures, gameweeks and the selectable pool. */
+  tournamentId: TournamentId
+  tournamentName: string
 }
 
 // ---------------------------------------------------------------------------
