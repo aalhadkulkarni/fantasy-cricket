@@ -107,8 +107,10 @@ export function Members() {
 }
 
 /**
- * Owner and admin, per `members.md`, plus Spectator for someone who only
- * watches — otherwise they would read as a manager with no team.
+ * **Every role they hold, not only the highest.** Roles are additive, so an
+ * owner who also plays is both, and showing just "Owner" would hide that they
+ * have a team. The one thing left out is "Admin" beside "Owner", since owning a
+ * league already means administering it.
  */
 function badges(member: LeagueMemberSummary): string[] {
   const roles = member.leagueRoles
@@ -117,8 +119,7 @@ function badges(member: LeagueMemberSummary): string[] {
     ...(roles.leagueAdmin === true && roles.leagueOwner !== true
       ? ['Admin']
       : []),
-    ...(roles.spectator === true && roles.manager !== true
-      ? ['Spectator']
-      : []),
+    ...(roles.manager === true ? ['Manager'] : []),
+    ...(roles.spectator === true ? ['Spectator'] : []),
   ]
 }
