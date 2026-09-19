@@ -1165,6 +1165,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
     },
 
     async createTeam(team: TeamConfig): Promise<TeamId> {
+      await assertSystemAdmin()
+
       const teamId = service.generateKey() as TeamId
 
       await service.write(paths.teams(teamId), {
@@ -1197,6 +1199,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       teamId: TeamId,
       changes: Partial<TeamConfig>,
     ): Promise<void> {
+      await assertSystemAdmin()
+
       const team = await service.read<Team>(paths.teams(teamId))
       if (team === undefined) {
         throw new DataLayerError('unknown', `firebase: no team ${teamId}`)
@@ -1287,6 +1291,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
     async createPlayers(
       players: readonly PlayerConfig[],
     ): Promise<CreatePlayersResult> {
+      await assertSystemAdmin()
+
       const existing = await service.read<Record<string, Player>>(
         paths.players(),
       )
@@ -1345,6 +1351,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       playerId: PlayerId,
       changes: Partial<PlayerConfig>,
     ): Promise<void> {
+      await assertSystemAdmin()
+
       const update: Record<string, unknown> = {}
       const at = (field: string) => service.path('players', playerId, field)
 
@@ -1376,6 +1384,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       teamId: TeamId,
       competitionId: CompetitionId,
     ): Promise<void> {
+      await assertSystemAdmin()
+
       const previous = await service.read<TeamId>(
         service.path('players', playerId, 'currentTeams', competitionId),
       )
@@ -1401,6 +1411,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       playerId: PlayerId,
       competitionId: CompetitionId,
     ): Promise<void> {
+      await assertSystemAdmin()
+
       const previous = await service.read<TeamId>(
         service.path('players', playerId, 'currentTeams', competitionId),
       )
@@ -1418,6 +1430,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       playerId: PlayerId,
       isRetired: boolean,
     ): Promise<void> {
+      await assertSystemAdmin()
+
       await service.write(
         service.path('players', playerId, 'isRetired'),
         isRetired,
@@ -1660,6 +1674,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
      * round would already have broken that.
      */
     async createTournament(config: TournamentConfig): Promise<TournamentId> {
+      await assertSystemAdmin()
+
       if (!Number.isInteger(config.matchCount) || config.matchCount < 1) {
         throw new DataLayerError(
           'unknown',
@@ -1711,6 +1727,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       tournamentId: TournamentId,
       tournamentName: string,
     ): Promise<void> {
+      await assertSystemAdmin()
+
       await service.write(
         service.path('tournaments', tournamentId, 'tournamentName'),
         tournamentName.trim(),
@@ -1730,6 +1748,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       tournamentId: TournamentId,
       participants: Partial<Record<PlayerId, TeamId>>,
     ): Promise<void> {
+      await assertSystemAdmin()
+
       const before =
         (await service.read<Partial<Record<PlayerId, TeamId>>>(
           service.path('tournaments', tournamentId, 'participatingPlayers'),
@@ -1799,6 +1819,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       tournamentId: TournamentId,
       configs: readonly MatchConfig[],
     ): Promise<void> {
+      await assertSystemAdmin()
+
       if (configs.length === 0) return
 
       const stored =
@@ -1852,6 +1874,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
      * be played.
      */
     async addMatches(tournamentId: TournamentId, count: number): Promise<void> {
+      await assertSystemAdmin()
+
       if (!Number.isInteger(count) || count < 1) {
         throw new DataLayerError('unknown', 'Add at least one match.')
       }
@@ -1938,6 +1962,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       tournamentId: TournamentId,
       count: number,
     ): Promise<void> {
+      await assertSystemAdmin()
+
       if (!Number.isInteger(count) || count < 1) {
         throw new DataLayerError('unknown', 'Remove at least one match.')
       }
@@ -2022,6 +2048,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       tournamentId: TournamentId,
       rounds: readonly TournamentRoundConfig[],
     ): Promise<void> {
+      await assertSystemAdmin()
+
       const [storedMatches, storedRounds] = await Promise.all([
         service.read<Record<string, Match>>(
           paths.tournamentMatches(tournamentId),
@@ -2125,6 +2153,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       tournamentId: TournamentId,
       officialLeagues?: OfficialLeagues,
     ): Promise<void> {
+      await assertSystemAdmin()
+
       const session = requireSession()
 
       const tournament = await service.read<Tournament>(
@@ -3470,6 +3500,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
      * because removing one cascades and would clear a roster.
      */
     async createSamplePlayers(): Promise<SamplePlayersResult> {
+      await assertSystemAdmin()
+
       const competitions = await api.getCompetitions()
       const competition = competitions.find(
         (c) => c.competitionName === SAMPLE_COMPETITION_NAME,
@@ -3541,6 +3573,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
     },
 
     async setUpBasicSystem(): Promise<SystemSetupResult> {
+      await assertSystemAdmin()
+
       const existing = await service.read<SystemSetup>(paths.systemSetup())
       if (existing !== undefined) {
         return {
