@@ -21,14 +21,11 @@ export function LineupSummary({
   rules,
   captainId,
   viceCaptainId,
-  title = 'Your XI',
 }: {
   selected: readonly Player[]
   rules: LineupRules
   captainId: PlayerId | undefined
   viceCaptainId: PlayerId | undefined
-  /** "Your XI" on your own team; someone else's reads differently. */
-  title?: string
 }) {
   const nameOf = (id: PlayerId | undefined) =>
     selected.find((p) => p.playerId === id)?.playerShortName
@@ -36,7 +33,7 @@ export function LineupSummary({
   return (
     <aside className="lit rounded-xl border bg-secondary/30 p-5">
       <p className="font-mono text-[10px] tracking-[0.14em] text-subtle-foreground uppercase">
-        {title}
+        Summary
       </p>
 
       <div className="mt-4 flex items-baseline justify-between gap-3">

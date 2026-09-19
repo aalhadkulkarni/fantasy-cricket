@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 
+import { JoinCode } from '@/components/leagues/join-code'
 import { Button } from '@/components/ui/button'
 import {
   getLeagueDetails,
@@ -52,7 +53,7 @@ export function LeagueDetails() {
   return (
     <section className="floodlit rounded-xl border bg-card p-5 text-card-foreground sm:p-7">
       <h2 className="text-xl font-bold tracking-tight sm:text-2xl">
-        League Details
+        {league.leagueName}
       </h2>
 
       {error !== undefined ? (
@@ -69,9 +70,14 @@ export function LeagueDetails() {
       ) : (
         <div className="mt-6 grid gap-4 lg:grid-cols-2">
           <Box title="League">
-            <Row label="Name" value={details.leagueName} />
             <Row label="Tournament" value={details.tournamentName} />
             <Row label="Owner" value={details.ownerName} />
+            {league.leagueJoinCode !== '' && (
+              <div className="flex items-baseline justify-between gap-3">
+                <span>Join code</span>
+                <JoinCode code={league.leagueJoinCode} />
+              </div>
+            )}
             <Row
               label="Type"
               value={details.isAuctionEnabled ? 'Auction' : 'Regular'}

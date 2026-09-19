@@ -174,7 +174,7 @@ export function ManagerTeamDialog({
               points={points}
               rules={rules}
               allowances={allowances}
-              summaryTitle="XI"
+              isGameWeek={league.isGameWeeksEnabled}
             />
           )}
         </div>

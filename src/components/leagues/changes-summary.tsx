@@ -44,6 +44,7 @@ export function ChangesSummary({
   lineup,
   captainId,
   viceCaptainId,
+  isGameWeek,
 }: {
   baseline: SavedTeam | undefined
   allowances: Allowances
@@ -51,6 +52,8 @@ export function ChangesSummary({
   /** Undefined while the draft has not chosen one, which counts as unchanged. */
   captainId: PlayerId | undefined
   viceCaptainId: PlayerId | undefined
+  /** Only changes the wording: "this match" or "this game week". */
+  isGameWeek: boolean
 }) {
   const nextIds = lineup.map((p) => p.playerId)
 
@@ -91,10 +94,12 @@ export function ChangesSummary({
   const viceCaptainBefore =
     baseline?.viceCaptainChangesRemaining ?? allowances.viceCaptainChanges
 
+  const period = isGameWeek ? 'game week' : 'match'
+
   return (
     <aside className="lit mt-4 rounded-xl border bg-secondary/30 p-5">
       <p className="font-mono text-[10px] tracking-[0.14em] text-subtle-foreground uppercase">
-        Transfers
+        Transfers ({out.length} used this {period})
       </p>
 
       <dl className="mt-4 grid gap-2.5 text-[15px]">
@@ -106,7 +111,11 @@ export function ChangesSummary({
           label="Players in"
           value={inbound.map((p) => p.playerShortName).join(', ')}
         />
-        <Spend label="Transfers used" spent={out.length} before={teamBefore} />
+        <Remaining
+          label="Transfers remaining"
+          spent={out.length}
+          before={teamBefore}
+        />
       </dl>
 
       <dl className="mt-4 grid gap-2.5 border-t pt-4 text-[15px]">
@@ -118,8 +127,8 @@ export function ChangesSummary({
         ) : (
           <Row label="Captain" value="unchanged" />
         )}
-        <Spend
-          label="Captain changes used"
+        <Remaining
+          label="Captain changes remaining"
           spent={captainChanged ? 1 : 0}
           before={captainBefore}
         />
@@ -137,8 +146,8 @@ export function ChangesSummary({
         ) : (
           <Row label="Vice captain" value="unchanged" />
         )}
-        <Spend
-          label="Vice captain changes used"
+        <Remaining
+          label="Vice captain changes remaining"
           spent={viceCaptainChanged ? 1 : 0}
           before={viceCaptainBefore}
         />
@@ -159,12 +168,14 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * **"3 of 7" is three spent out of seven that were available before this
- * period**, with what is left after it beside. It reads the same before and
- * after saving, because both are measured from the previous period rather than
- * from a running total that a second save would disturb.
+ * **What is left after this period's changes**: the allowance there was before
+ * it, minus what it uses. Both are measured from the previous period rather
+ * than a running total, so it reads the same before and after saving and a
+ * second save cannot disturb it.
+ *
+ * Red once it would overspend, which the layer refuses to save.
  */
-function Spend({
+function Remaining({
   label,
   spent,
   before,
@@ -181,9 +192,7 @@ function Spend({
       <dd
         className={`font-mono text-sm ${over ? 'text-destructive' : 'text-muted-foreground'}`}
       >
-        {before === undefined
-          ? `${spent} · unlimited`
-          : `${spent} of ${before}${over ? '' : ` · ${before - spent} left`}`}
+        {before === undefined ? 'Unlimited' : String(before - spent)}
       </dd>
     </div>
   )

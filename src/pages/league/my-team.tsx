@@ -9,6 +9,8 @@ import {
 import { LineupSummary } from '@/components/leagues/lineup-summary'
 import { LockedTeam } from '@/components/leagues/locked-team'
 import { PeriodNav, type Period } from '@/components/leagues/period-nav'
+import { changeClass } from '@/components/leagues/change'
+import { ChangeMark } from '@/components/leagues/change-mark'
 import { PlayerPicker } from '@/components/leagues/player-picker'
 import { gameWeekPoints, toSaved } from '@/components/leagues/team-data'
 import { Button } from '@/components/ui/button'
@@ -45,6 +47,14 @@ import type {
 } from '@/types'
 
 const XI = 11
+
+/** The eleven slots, filled in order from a team and empty beyond it. */
+function slotsFor(
+  lineup: readonly Player[] | undefined,
+): (PlayerId | undefined)[] {
+  const ids = (lineup ?? []).map((p) => p.playerId)
+  return [...ids, ...Array.from({ length: XI - ids.length }, () => undefined)]
+}
 
 /**
  * My Team — `/leagues/:leagueId/team`.
@@ -267,14 +277,7 @@ export function MyTeam() {
         setPoints(scored)
 
         // The form starts from whatever is already there, or empty.
-        setPicks(
-          eleven === undefined
-            ? Array.from({ length: XI }, () => undefined)
-            : [
-                ...eleven.map((p) => p.playerId),
-                ...Array.from({ length: XI - eleven.length }, () => undefined),
-              ],
-        )
+        setPicks(slotsFor(eleven))
         setCaptainId(mine?.captainId)
         setViceCaptainId(mine?.viceCaptainId)
         setSaved(false)
@@ -311,6 +314,61 @@ export function MyTeam() {
   const selected = chosen
     .map((id) => pool.find((p) => p.playerId === id))
     .filter((p): p is Player => p !== undefined)
+
+  /*
+    **What has changed against the previous period's team**, which is what the
+    transfers are measured from. Each is either still only a draft or already
+    saved, so a swap reads yellow until it is submitted and green after. Nothing
+    is marked with no previous team, since nothing can differ from it.
+  */
+  const changeOf = (
+    id: PlayerId | undefined,
+    inBaseline: boolean,
+    inSaved: boolean,
+  ): 'draft' | 'saved' | undefined =>
+    baseline === undefined || id === undefined || inBaseline
+      ? undefined
+      : inSaved
+        ? 'saved'
+        : 'draft'
+
+  const playerChange = (id: PlayerId | undefined) =>
+    changeOf(
+      id,
+      baseline?.lineup.some((p) => p.playerId === id) === true,
+      snapshot?.lineup.some((p) => p.playerId === id) === true,
+    )
+
+  const captainChange = changeOf(
+    captainId,
+    captainId === baseline?.captainId,
+    captainId === snapshot?.captainId,
+  )
+  const viceCaptainChange = changeOf(
+    viceCaptainId,
+    viceCaptainId === baseline?.viceCaptainId,
+    viceCaptainId === snapshot?.viceCaptainId,
+  )
+
+  /*
+    **Whether the draft differs from what was last saved for THIS period**, not
+    the previous one's. Compared as sets, so shuffling the slots is not a
+    change. With nothing saved, any input at all is.
+  */
+  const savedIds = snapshot?.lineup.map((p) => p.playerId) ?? []
+  const dirty =
+    chosen.length !== savedIds.length ||
+    chosen.some((id) => !savedIds.includes(id)) ||
+    captainId !== snapshot?.captainId ||
+    viceCaptainId !== snapshot?.viceCaptainId
+
+  function discard() {
+    setPicks(slotsFor(snapshot?.lineup))
+    setCaptainId(snapshot?.captainId)
+    setViceCaptainId(snapshot?.viceCaptainId)
+    setError(undefined)
+    setSaved(false)
+  }
 
   const complete = chosen.length === XI
   const captaincyOk =
@@ -477,6 +535,7 @@ export function MyTeam() {
               points={points}
               rules={rules}
               allowances={allowances}
+              isGameWeek={league.isGameWeeksEnabled}
             />
           </div>
         )}
@@ -503,13 +562,20 @@ export function MyTeam() {
           </p>
         </div>
 
-        <Button onClick={() => void submit()} disabled={!canSubmit}>
-          {saving
-            ? 'Submitting…'
-            : snapshot === undefined
-              ? 'Submit team'
-              : 'Save team'}
-        </Button>
+        <div className="flex flex-wrap gap-2.5">
+          {dirty && (
+            <Button variant="outline" onClick={discard} disabled={saving}>
+              Discard changes
+            </Button>
+          )}
+          <Button onClick={() => void submit()} disabled={!canSubmit}>
+            {saving
+              ? 'Submitting…'
+              : snapshot === undefined
+                ? 'Submit team'
+                : 'Save team'}
+          </Button>
+        </div>
       </div>
 
       <div className="mt-6 gap-5 lg:flex">
@@ -522,6 +588,7 @@ export function MyTeam() {
                 pool={pool}
                 value={pick}
                 taken={chosen}
+                change={playerChange(pick)}
                 onChange={(next) =>
                   setPicks(picks.map((p, i) => (i === index ? next : p)))
                 }
@@ -541,6 +608,7 @@ export function MyTeam() {
               selected={selected}
               value={captainId}
               exclude={viceCaptainId}
+              change={captainChange}
               onChange={setCaptainId}
             />
             <Captaincy
@@ -549,6 +617,7 @@ export function MyTeam() {
               selected={selected}
               value={viceCaptainId}
               exclude={captainId}
+              change={viceCaptainChange}
               onChange={setViceCaptainId}
             />
           </div>
@@ -572,6 +641,7 @@ export function MyTeam() {
             lineup={selected}
             captainId={captainId}
             viceCaptainId={viceCaptainId}
+            isGameWeek={league.isGameWeeksEnabled}
           />
 
           {saved && <p className="mt-3 text-sm text-settled">Team saved.</p>}
@@ -680,6 +750,7 @@ function Captaincy({
   selected,
   value,
   exclude,
+  change,
   onChange,
 }: {
   badge: string
@@ -687,6 +758,8 @@ function Captaincy({
   selected: Player[]
   value: PlayerId | undefined
   exclude: PlayerId | undefined
+  /** Changed since the previous period, and whether that is saved yet. */
+  change: 'draft' | 'saved' | undefined
   onChange: (id: PlayerId) => void
 }) {
   const player = selected.find((p) => p.playerId === value)
@@ -698,7 +771,7 @@ function Captaincy({
     >
       <SelectTrigger
         aria-label={label}
-        className="lit h-auto w-full justify-between gap-3 rounded-xl border bg-secondary/40 px-4 py-3.5 hover:bg-secondary/70 data-[size=default]:h-auto"
+        className={`lit h-auto w-full justify-between gap-3 rounded-xl border px-4 py-3.5 data-[size=default]:h-auto ${changeClass(change)}`}
       >
         <span className="flex min-w-0 items-center gap-3.5">
           <span className="shrink-0 rounded-[4px] border px-1.5 py-0.5 font-mono text-[9.5px] tracking-[0.08em] text-subtle-foreground uppercase">
@@ -712,6 +785,7 @@ function Captaincy({
             {player?.playerName ?? label}
           </span>
         </span>
+        <ChangeMark change={change} />
       </SelectTrigger>
 
       {/*

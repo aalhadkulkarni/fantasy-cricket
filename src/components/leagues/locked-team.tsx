@@ -22,7 +22,7 @@ export function LockedTeam({
   points,
   rules,
   allowances,
-  summaryTitle,
+  isGameWeek,
 }: {
   team: SavedTeam
   /** The period before's team, which the transfers are measured from. */
@@ -30,7 +30,7 @@ export function LockedTeam({
   points: PlayerPoints
   rules: LineupRules
   allowances: Allowances
-  summaryTitle?: string
+  isGameWeek: boolean
 }) {
   return (
     <div className="gap-5 lg:flex">
@@ -50,7 +50,6 @@ export function LockedTeam({
           rules={rules}
           captainId={team.captainId}
           viceCaptainId={team.viceCaptainId}
-          {...(summaryTitle === undefined ? {} : { title: summaryTitle })}
         />
 
         <ChangesSummary
@@ -59,6 +58,7 @@ export function LockedTeam({
           lineup={team.lineup}
           captainId={team.captainId}
           viceCaptainId={team.viceCaptainId}
+          isGameWeek={isGameWeek}
         />
       </div>
     </div>
