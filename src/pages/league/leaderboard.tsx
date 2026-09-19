@@ -17,7 +17,7 @@ import {
 import {
   getFixtures,
   getGameWeeks,
-  getLeaderboard,
+  getLeaderboardForLeague,
   getLeaderboardForGameWeek,
   getLeaderboardForMatch,
   getScoringWatermark,
@@ -111,7 +111,7 @@ export function Leaderboard() {
     void (async () => {
       try {
         if (filter === OVERALL) {
-          const overall = await getLeaderboard(league.leagueId)
+          const overall = await getLeaderboardForLeague(league.leagueId)
           if (cancelled) return
           setRows(overall)
           setIsScored(true)
