@@ -116,6 +116,7 @@
   --live-foreground: #00121f; /* text on a --live fill */
 
   --settled: #5ebe97; /* steady positive states */
+  --pending: #d9a441; /* a change made but not yet saved */
 
   /* Comma-separated channels, so every consumer must use rgba().
      rgb(var(--bloom) / a) mixes commas with slash alpha, which is
@@ -163,6 +164,7 @@
   --color-live-text: var(--live-text);
   --color-live-foreground: var(--live-foreground);
   --color-settled: var(--settled);
+  --color-pending: var(--pending);
 
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
