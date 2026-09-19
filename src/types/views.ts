@@ -142,7 +142,10 @@ export interface LeagueSummary {
    */
   nextDeadline?: number
 
-  /** Absent for a spectator, and for an admin who does not play. */
+  /**
+   * Your overall rank, from the stored leaderboard. Absent for anyone not
+   * playing, and before the league is active, when everyone is on zero.
+   */
   myRank?: number
 
   /**

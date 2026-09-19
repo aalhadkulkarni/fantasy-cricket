@@ -2536,20 +2536,44 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         upcomingDeadline(leagueId, isGameWeeksEnabled === true),
       ])
 
+      const phase = derivePhase({
+        finishedAt,
+        tournamentStartDate: startDate,
+        isAuctionEnabled: isAuctionEnabled === true,
+        auctionStartTime,
+        auctionHasStarted: runtime !== undefined,
+        now: Date.now(),
+      })
+
+      /*
+        **Your place in the overall standings, read from the stored
+        leaderboard**, so it costs a few small reads rather than a recompute —
+        and a miss here warms the cache for the Leaderboard page.
+
+        Only for a manager, and only once the league is under way: before then
+        everyone is on zero and would read as joint first. A failure leaves it
+        absent rather than failing the whole header.
+      */
+      let myRank: number | undefined
+      if (
+        me?.leagueRoles?.manager === true &&
+        (phase === 'active' || phase === 'finished')
+      ) {
+        try {
+          const rows = await api.getLeaderboardForLeague(leagueId)
+          myRank = rows.find((row) => row.managerId === userId)?.rank
+        } catch {
+          myRank = undefined
+        }
+      }
+
       return {
         leagueId,
         leagueName,
         leagueJoinCode: leagueJoinCode ?? '',
-        phase: derivePhase({
-          finishedAt,
-          tournamentStartDate: startDate,
-          isAuctionEnabled: isAuctionEnabled === true,
-          auctionStartTime,
-          auctionHasStarted: runtime !== undefined,
-          now: Date.now(),
-        }),
+        phase,
         ...(nextDeadline === undefined ? {} : { nextDeadline }),
-        // Rank is deliberately absent. See the contract.
+        ...(myRank === undefined ? {} : { myRank }),
         deadlineOffset: offset ?? 0,
         changeAllowances: {
           ...(teamAllowance === undefined
