@@ -133,9 +133,15 @@ the league.
 
 ### 1. The leaderboard is one subtree read, not N calls
 
-Points are **computed on the fly.** There is no materialised alternative,
+Points are **computed on the fly.** There is no materialised source of truth,
 because standard points cannot be pre-computed into every league for every
-manager.
+manager, and storing totals would mean a correction had to chase every manager it
+touched.
+
+**A leaderboard is however kept as a cache.** Each computed standing is stored
+under `leaderboards/{leagueId}` and served until something it came from changes.
+It is derived, rebuilt on demand and never edited, so a correction is still one
+number and every view is right on its next read. See "Leaderboard" below.
 
 **So: read the league's lineups node once — `matchBasedLineups/{leagueId}` or
 `gameWeekBasedLineups/{leagueId}` depending on the league type — read the points
@@ -571,15 +577,26 @@ allowances, and the full auction configuration.
 
 **Reads**
 
-- `getLeaderboard(leagueId)` — overall
+- `getLeaderboardForLeague(leagueId)` — overall
 - `getLeaderboardForGameWeek(leagueId, gameWeekId)`
 - `getLeaderboardForMatch(leagueId, matchId)`
 - `getScoringWatermark(leagueId)` — the match up to which points are entered
 - `getPointsForMatch(userId, leagueId, matchId)`,
   `getPointsForGameWeek(userId, leagueId, gameWeekId)` and
   `getPointsForLeague(userId, leagueId)` — one manager's score. The leaderboard
-  runs the same computation for every manager from one shared read. Nothing is
-  cached between calls, so a correction shows on the next read.
+  runs the same computation for every manager from one shared read. These are
+  not cached; only the leaderboards are.
+
+> **Each leaderboard is stored and served until it goes stale.** A hit reads
+> three small stamps and the stored rows, and nothing else. Otherwise it is
+> computed as before, stored with the stamp values it was built from, and
+> returned. **Valid means those stamps still equal the current ones** — an
+> equality check, never a comparison of browser clocks. Points stamps are written
+> with the points (`standardPointsUpdatedAt/{tournamentId}`, overall and per
+> match, so a gameweek uses the newest of its matches) and a membership stamp by
+> every write that changes who is in the league. Anything new that changes
+> membership, team names or transfer adjustments must bump it. A custom-scoring
+> league is not cached until its points entry exists to stamp them.
 - `getTeamForMatch(leagueId, managerId, matchId)` and
   `getTeamForGameWeek(leagueId, managerId, gameWeekId)` — subject to the
   visibility rule, for the leaderboard's team modal

@@ -944,6 +944,154 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
     }))
   }
 
+  // -------------------------------------------------------------------------
+  // The leaderboard cache
+  // -------------------------------------------------------------------------
+
+  /** When standard points last changed, overall and per match. */
+  interface PointsStamps {
+    overall?: number
+    matches?: Partial<Record<MatchId, number>>
+  }
+
+  /**
+   * **A derived copy, thrown away whenever what it came from changes.** Never
+   * the source of truth: a scoring correction is still one edited number, and
+   * this is rebuilt from it.
+   *
+   * `basedOn` holds the stamp values it was computed from. It is valid only
+   * while both still equal the current ones. **That is an equality check, not a
+   * comparison of times**, so a browser clock that runs slow cannot leave a
+   * correction looking older than the standings it should have replaced.
+   */
+  interface StoredLeaderboard {
+    /** Absent when nobody is playing, since Firebase does not keep an empty list. */
+    rows?: LeaderboardRow[]
+    /** A match's own number, or a gameweek's first. Absent for the overall. */
+    firstMatchNumber?: number
+    /** A gameweek's matches, which is what its points stamp is taken over. */
+    matchIds?: MatchId[]
+    basedOn: { points: number; members: number }
+    leaderboardComputedAt: number
+  }
+
+  interface Computed {
+    rows: LeaderboardRow[]
+    isScored: boolean
+    firstMatchNumber?: number
+    matchIds?: readonly MatchId[]
+  }
+
+  /**
+   * **Serves a stored leaderboard when it is still valid, and otherwise computes
+   * it, stores it and returns that.**
+   *
+   * A hit reads three small stamps and the stored rows, and nothing else: no
+   * lineups, no points, no names. The stamps are read **before** computing and
+   * are what gets stored, so a correction that lands mid-compute leaves the
+   * result already out of date rather than quietly current. Two people
+   * computing at once write the same thing, so no transaction is needed.
+   *
+   * **The locked-period gate lives in `compute`**, which a hit skips. A stored
+   * period can only exist if it was locked when computed.
+   *
+   * **A custom-scoring league is not cached yet.** Its points are entered per
+   * league, and that entry does not exist to stamp them.
+   */
+  async function serveLeaderboard(
+    leagueId: LeagueId,
+    slot: readonly string[],
+    stampOf: (
+      stamps: PointsStamps | undefined,
+      matchIds: readonly MatchId[] | undefined,
+    ) => number,
+    compute: (scoring: Scoring) => Promise<Computed>,
+  ): Promise<PeriodLeaderboard> {
+    const [isCustom, tournamentId] = await Promise.all([
+      service.read<boolean>(
+        service.path('leagues', leagueId, 'isCustomScoringSystem'),
+      ),
+      service.read<TournamentId>(
+        service.path('leagues', leagueId, 'tournamentId'),
+      ),
+    ])
+
+    if (isCustom === true || tournamentId === undefined) {
+      const live = await compute(await loadScoring(leagueId))
+      return { rows: live.rows, isScored: live.isScored }
+    }
+
+    const at = service.path('leaderboards', leagueId, ...slot)
+
+    // The marker's match number, only for a period: whether it has been scored
+    // depends on how far scoring has got, which moves without touching it.
+    const watermark =
+      slot[0] === 'main'
+        ? Promise.resolve(undefined)
+        : service
+            .read<MatchId>(
+              service.path(
+                'tournaments',
+                tournamentId,
+                'pointsUpdatedTillMatchId',
+              ),
+            )
+            .then((tillId) =>
+              tillId === undefined
+                ? undefined
+                : service.read<number>(
+                    service.path(
+                      'tournaments',
+                      tournamentId,
+                      'matches',
+                      tillId,
+                      'matchNumber',
+                    ),
+                  ),
+            )
+
+    const [stamps, membersStamp, cached, watermarkNumber] = await Promise.all([
+      service.read<PointsStamps>(paths.standardPointsUpdatedAt(tournamentId)),
+      service.read<number>(
+        service.path('leaderboards', leagueId, 'membersUpdatedAt'),
+      ),
+      service.read<StoredLeaderboard>(at),
+      watermark,
+    ])
+    const members = membersStamp ?? 0
+
+    if (
+      cached !== undefined &&
+      cached.basedOn.points === stampOf(stamps, cached.matchIds) &&
+      cached.basedOn.members === members
+    ) {
+      return {
+        rows: cached.rows ?? [],
+        isScored:
+          cached.firstMatchNumber === undefined ||
+          (watermarkNumber !== undefined &&
+            cached.firstMatchNumber <= watermarkNumber),
+      }
+    }
+
+    const computed = await compute(await loadScoring(leagueId))
+
+    const stored: StoredLeaderboard = {
+      rows: computed.rows,
+      ...(computed.firstMatchNumber === undefined
+        ? {}
+        : { firstMatchNumber: computed.firstMatchNumber }),
+      ...(computed.matchIds === undefined
+        ? {}
+        : { matchIds: [...computed.matchIds] }),
+      basedOn: { points: stampOf(stamps, computed.matchIds), members },
+      leaderboardComputedAt: Date.now(),
+    }
+    await service.write(at, stored)
+
+    return { rows: computed.rows, isScored: computed.isScored }
+  }
+
   /**
    * **Only a manager has a team.** Owning or administering a league is not
    * playing in it, and a spectator and a banned member are in it without
@@ -1645,6 +1793,10 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         */
         [paths.leagueMembers(leagueId, userId) + '/fantasyTeamName']: teamName,
         [paths.leagueMembers(leagueId, userId) + '/leagueRoles/manager']: true,
+
+        // Stored standings list who is in the league, so this retires them.
+        [service.path('leaderboards', leagueId, 'membersUpdatedAt')]:
+          Date.now(),
 
         /*
           The index cannot be rebuilt: lose this and the league disappears from
@@ -2718,7 +2870,18 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
               ),
             )
 
+      // The same moment for both stamps, in the same atomic write as the points.
+      const stampedAt = Date.now()
+
       const changes: Record<string, unknown> = {
+        [service.path('standardPointsUpdatedAt', tournamentId, 'overall')]:
+          stampedAt,
+        [service.path(
+          'standardPointsUpdatedAt',
+          tournamentId,
+          'matches',
+          matchId,
+        )]: stampedAt,
         [paths.standardPointsByMatch(tournamentId, matchId)]:
           Object.keys(byMatch).length === 0 ? null : byMatch,
       }
@@ -2781,60 +2944,102 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       return leagueScore(await loadScoring(leagueId, userId), userId)
     },
 
-    async getLeaderboard(leagueId: LeagueId): Promise<LeaderboardRow[]> {
-      const scoring = await loadScoring(leagueId)
-      return rank(scoring, (userId) => leagueScore(scoring, userId))
+    async getLeaderboardForLeague(
+      leagueId: LeagueId,
+    ): Promise<LeaderboardRow[]> {
+      const { rows } = await serveLeaderboard(
+        leagueId,
+        ['main'],
+        (stamps) => stamps?.overall ?? 0,
+        async (scoring) => ({
+          rows: await rank(scoring, (userId) => leagueScore(scoring, userId)),
+          isScored: true,
+        }),
+      )
+      return rows
     },
 
     async getLeaderboardForGameWeek(
       leagueId: LeagueId,
       gameWeekId: GameWeekId,
     ): Promise<PeriodLeaderboard> {
-      const scoring = await loadScoring(leagueId)
-      const week = scoring.weeks.find(
-        (w) => w.gameWeek.gameWeekId === gameWeekId,
+      return serveLeaderboard(
+        leagueId,
+        ['gameWeeks', gameWeekId],
+        // A gameweek is as new as the newest of its matches.
+        (stamps, matchIds) =>
+          Math.max(
+            0,
+            ...(matchIds ?? []).map((id) => stamps?.matches?.[id] ?? 0),
+          ),
+        async (scoring) => {
+          const week = scoring.weeks.find(
+            (w) => w.gameWeek.gameWeekId === gameWeekId,
+          )
+          if (week === undefined) {
+            throw new DataLayerError(
+              'unknown',
+              'No such gameweek in this league.',
+            )
+          }
+
+          // A gameweek locks, and starts scoring, with its first match.
+          const first = scoring.matches.find(
+            (m) => m.matchId === week.matchIds[0],
+          )
+          if (!isLocked(first, scoring.offset)) {
+            throw new DataLayerError(
+              'unknown',
+              'That gameweek has not reached its deadline yet.',
+            )
+          }
+
+          return {
+            rows: await rank(scoring, (userId) =>
+              weekScore(scoring, userId, week),
+            ),
+            isScored: isScored(scoring, first),
+            ...(first === undefined
+              ? {}
+              : { firstMatchNumber: first.matchNumber }),
+            matchIds: week.matchIds,
+          }
+        },
       )
-      if (week === undefined) {
-        throw new DataLayerError('unknown', 'No such gameweek in this league.')
-      }
-
-      // A gameweek locks, and starts scoring, with its first match.
-      const first = scoring.matches.find((m) => m.matchId === week.matchIds[0])
-      if (!isLocked(first, scoring.offset)) {
-        throw new DataLayerError(
-          'unknown',
-          'That gameweek has not reached its deadline yet.',
-        )
-      }
-
-      return {
-        rows: await rank(scoring, (userId) => weekScore(scoring, userId, week)),
-        isScored: isScored(scoring, first),
-      }
     },
 
     async getLeaderboardForMatch(
       leagueId: LeagueId,
       matchId: MatchId,
     ): Promise<PeriodLeaderboard> {
-      const scoring = await loadScoring(leagueId)
-      const match = scoring.matches.find((m) => m.matchId === matchId)
-      if (match === undefined) {
-        throw new DataLayerError('unknown', 'That match is not in this league.')
-      }
-      if (!isLocked(match, scoring.offset)) {
-        throw new DataLayerError(
-          'unknown',
-          'That match has not reached its deadline yet.',
-        )
-      }
+      return serveLeaderboard(
+        leagueId,
+        ['matches', matchId],
+        (stamps) => stamps?.matches?.[matchId] ?? 0,
+        async (scoring) => {
+          const match = scoring.matches.find((m) => m.matchId === matchId)
+          if (match === undefined) {
+            throw new DataLayerError(
+              'unknown',
+              'That match is not in this league.',
+            )
+          }
+          if (!isLocked(match, scoring.offset)) {
+            throw new DataLayerError(
+              'unknown',
+              'That match has not reached its deadline yet.',
+            )
+          }
 
-      return {
-        rows: await rank(scoring, (userId) =>
-          matchScore(scoring, userId, match),
-        ),
-        isScored: isScored(scoring, match),
-      }
+          return {
+            rows: await rank(scoring, (userId) =>
+              matchScore(scoring, userId, match),
+            ),
+            isScored: isScored(scoring, match),
+            firstMatchNumber: match.matchNumber,
+          }
+        },
+      )
     },
 
     /**

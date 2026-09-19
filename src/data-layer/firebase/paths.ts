@@ -7,7 +7,7 @@
  * means there is no way to address the database without the environment prefix
  * coming with it.
  *
- * One entry per top-level node in `docs/data-model.js`, twenty-nine of them,
+ * One entry per top-level node in `docs/data-model.js`, thirty-one of them,
  * with their deeper segments typed by the branded id that keys them. Passing
  * nothing gives the node itself, which is what a subtree read wants.
  *
@@ -249,6 +249,26 @@ export function createPaths(service: FirebaseService) {
 
     customPointsByPlayer: (leagueId?: LeagueId, playerId?: PlayerId) =>
       under('customPointsByPlayer', leagueId, playerId),
+
+    // -------------------------------------------------------------------------
+    // Derived copies — thrown away and rebuilt, never the source of truth
+    // -------------------------------------------------------------------------
+
+    /**
+     * When standard points last changed: `overall`, and one entry per match.
+     * Written in the same atomic update as the points, and only ever compared
+     * for equality against the value a leaderboard was built from.
+     */
+    standardPointsUpdatedAt: (tournamentId?: TournamentId) =>
+      under('standardPointsUpdatedAt', tournamentId),
+
+    /**
+     * A league's stored standings: `main`, `gameWeeks/{id}` and `matches/{id}`,
+     * plus `membersUpdatedAt`. **A cache of what the points and lineups already
+     * say.** It is not read with the league, because it is large and a join
+     * reads the league whole.
+     */
+    leaderboards: (leagueId?: LeagueId) => under('leaderboards', leagueId),
   } as const
 }
 
