@@ -9,7 +9,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { PageTab, PageTabsList } from '@/components/page-tabs'
+import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { getCompetitions, getFormats, getTournaments } from '@/data-layer'
 import type {
   Competition,
@@ -117,22 +118,45 @@ export function Tournaments() {
           </p>
         ) : (
           <Tabs defaultValue="upcoming" className="mt-8 gap-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <TabsList>
-                <TabsTrigger value="upcoming">Upcoming</TabsTrigger>
-                <TabsTrigger value="active">Active</TabsTrigger>
-                <TabsTrigger value="past">Past</TabsTrigger>
-              </TabsList>
+            {/*
+              The bar's line runs under the filter too, so it reads as one row
+              with the filter at its right end; on a phone the filter wraps
+              beneath the tabs.
+            */}
+            <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-3 border-b">
+              <PageTabsList className="border-b-0">
+                <PageTab value="upcoming">Upcoming</PageTab>
+                <PageTab value="active">Active</PageTab>
+                <PageTab value="past">Past</PageTab>
+              </PageTabsList>
 
               {formats.length > 0 && (
                 <Select value={format} onValueChange={setFormat}>
-                  <SelectTrigger className="w-40" aria-label="Filter by format">
+                  {/*
+                    Styled like the other pickers in the app rather than the
+                    stock 32px control, and opened as a popper so the list drops
+                    below the trigger instead of covering it.
+                  */}
+                  <SelectTrigger
+                    className="mb-2 w-44 rounded-xl bg-secondary/40 px-4 text-sm font-medium hover:bg-secondary/70 data-[size=default]:h-10 dark:bg-secondary/40 dark:hover:bg-secondary/70"
+                    aria-label="Filter by format"
+                  >
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ANY_FORMAT}>Any format</SelectItem>
+                  <SelectContent
+                    position="popper"
+                    align="end"
+                    className="min-w-44 p-1"
+                  >
+                    <SelectItem value={ANY_FORMAT} className="py-2">
+                      Any format
+                    </SelectItem>
                     {formats.map((record) => (
-                      <SelectItem key={record.formatId} value={record.formatId}>
+                      <SelectItem
+                        key={record.formatId}
+                        value={record.formatId}
+                        className="py-2"
+                      >
                         {record.formatName}
                       </SelectItem>
                     ))}

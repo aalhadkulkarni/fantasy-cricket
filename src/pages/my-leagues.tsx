@@ -5,7 +5,8 @@ import { JoinLeagueDialog } from '@/components/join-league-dialog'
 import { PageContainer } from '@/components/layout/page-container'
 import { MyLeagueCard } from '@/components/leagues/my-league-card'
 import { Button } from '@/components/ui/button'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { PageTab, PageTabsList } from '@/components/page-tabs'
+import { Tabs, TabsContent } from '@/components/ui/tabs'
 import {
   getActiveLeagues,
   getArchivedLeagues,
@@ -113,13 +114,15 @@ export function MyLeagues() {
           <Empty onJoin={() => setJoining(true)} />
         ) : (
           <Tabs defaultValue={landing} className="mt-8 gap-6">
-            <TabsList>
-              <TabsTrigger value="active">Active {active.length}</TabsTrigger>
-              <TabsTrigger value="pending">
-                Pending {pending.length}
-              </TabsTrigger>
-              <TabsTrigger value="archived">Archived</TabsTrigger>
-            </TabsList>
+            <PageTabsList>
+              <PageTab value="active" count={active.length}>
+                Active
+              </PageTab>
+              <PageTab value="pending" count={pending.length}>
+                Pending
+              </PageTab>
+              <PageTab value="archived">Archived</PageTab>
+            </PageTabsList>
 
             <TabsContent value="active">
               <Cards leagues={active} empty="Nothing running yet." />
