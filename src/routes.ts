@@ -34,6 +34,7 @@ export const ROUTES = {
   tournamentPoints: '/tournaments/:tournamentId/points',
   createLeague: '/leagues/new',
   actions: '/actions',
+  pointsSystem: '/points-system',
   admin: '/admin',
 
   /**
