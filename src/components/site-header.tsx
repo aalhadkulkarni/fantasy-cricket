@@ -56,7 +56,6 @@ interface NavItem {
 const NAV_ITEMS: readonly NavItem[] = [
   { label: 'My Leagues', to: ROUTES.home },
   { label: 'Tournaments', to: ROUTES.tournaments },
-  { label: 'Create a League', to: ROUTES.createLeague },
   { label: 'Points System', to: ROUTES.pointsSystem },
 ]
 

@@ -211,9 +211,10 @@ function Header({
           name both teams in every match — see `09-future-exploration.md` for
           what makes that stop being true.
         */}
-        <Button asChild>
-          <Link to={ROUTES.createLeague}>Create a league</Link>
-        </Button>
+        {/*
+          Creating a league is hidden until its form is built; it is not
+          needed for milestone 2. The route still exists, unlinked.
+        */}
         {/*
           System admins only, and only a convenience: the route redirects
           anyone else and the layer refuses their write.

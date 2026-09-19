@@ -177,7 +177,7 @@ function Cards({
  * here, and so does anyone seeing the project for the first time.
  *
  * The eventual target offers three paths — join by code, browse tournaments,
- * create a league. A guided tour was rejected: substantial to build, and most
+ * create a league. Creating is hidden until its form is built. A guided tour was rejected: substantial to build, and most
  * people click straight through one.
  */
 function Empty({ onJoin }: { onJoin: () => void }) {
@@ -185,17 +185,14 @@ function Empty({ onJoin }: { onJoin: () => void }) {
     <div className="floodlit mt-8 rounded-lg border bg-card p-8 text-card-foreground sm:p-10">
       <h2 className="text-base font-semibold">You have no leagues</h2>
       <p className="mt-2 max-w-prose text-sm text-muted-foreground">
-        A league is where you play. Join one with a code, find one on a
-        tournament, or start your own.
+        A league is where you play. Join one with a code, or find one on a
+        tournament.
       </p>
 
       <div className="mt-6 flex flex-wrap gap-2.5">
         <Button onClick={onJoin}>Join a league</Button>
         <Button variant="outline" asChild>
           <Link to={ROUTES.tournaments}>Browse tournaments</Link>
-        </Button>
-        <Button variant="outline" asChild>
-          <Link to={ROUTES.createLeague}>Create a league</Link>
         </Button>
       </div>
     </div>
