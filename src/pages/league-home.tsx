@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { ChevronDownIcon, ChevronUpIcon } from 'lucide-react'
 import { NavLink, Navigate, Outlet, useParams } from 'react-router'
 
+import { Button } from '@/components/ui/button'
+import { JoinCode } from '@/components/leagues/join-code'
 import { PageContainer } from '@/components/layout/page-container'
 import { getLeagueSummary } from '@/data-layer'
 import { useLeague } from '@/hooks/use-league'
@@ -128,78 +131,170 @@ const LANDING: Record<LeaguePhase, string> = {
  * The bloom falls from above the frame and the beam sits on the very top edge,
  * brightest in the middle. **This is the one glowing element on the page**, so
  * nothing below it competes.
+ *
+ * **Collapsed to a single compact row by default**, because the full header
+ * takes a lot of a phone screen that the team below needs. The choice is
+ * remembered in this browser; where storage is unavailable it simply opens
+ * collapsed each time.
  */
 function Band({ league }: { league: LeagueSummary }) {
+  const [collapsed, setCollapsed] = useState(readCollapsed)
+
+  function toggle() {
+    const next = !collapsed
+    setCollapsed(next)
+    writeCollapsed(next)
+  }
+
+  const deadline =
+    league.nextDeadline === undefined
+      ? undefined
+      : /*
+           **Day and month, not just a weekday.** A deadline a fortnight out
+           reads as "Thu 7PM", which is every Thursday.
+         */
+        new Date(league.nextDeadline).toLocaleString(undefined, {
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+          hour: 'numeric',
+          minute: '2-digit',
+        })
+
   return (
     <div className="relative overflow-hidden border-b bg-[radial-gradient(120%_140%_at_50%_-40%,rgba(var(--bloom),0.20),transparent_62%)]">
       <div className="absolute inset-x-[12%] top-0 h-0.5 bg-[linear-gradient(90deg,transparent,var(--live),transparent)]" />
 
       <PageContainer>
-        <div className="items-end justify-between gap-8 py-8 sm:flex sm:py-10">
-          <div className="min-w-0">
-            <h1 className="text-2xl font-bold tracking-tight sm:text-4xl">
-              {league.leagueName}
-            </h1>
+        {collapsed ? (
+          <div className="flex items-center justify-between gap-3 py-3">
+            <div className="min-w-0">
+              <h1 className="truncate text-lg font-bold tracking-tight">
+                {league.leagueName}
+              </h1>
+              <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[11px] text-subtle-foreground">
+                {league.leagueJoinCode !== '' && (
+                  <span className="tracking-[0.12em]">
+                    {league.leagueJoinCode}
+                  </span>
+                )}
+                <span>Next deadline {deadline ?? '—'}</span>
+                {/* Only where it fits; the phone keeps the three above. */}
+                <span className="hidden items-center gap-1.5 sm:flex">
+                  <PhaseDot phase={league.phase} />
+                  {PHASE_LABEL[league.phase]}
+                </span>
+              </p>
+            </div>
+            <Toggle collapsed onToggle={toggle} />
+          </div>
+        ) : (
+          <div className="relative">
+            <div className="absolute top-2 right-0">
+              <Toggle collapsed={false} onToggle={toggle} />
+            </div>
 
-            <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
-              <span className="font-mono text-xs text-subtle-foreground">
-                {league.tournamentName}
-              </span>
-              {league.leagueJoinCode !== '' && (
-                <>
-                  <span className="text-subtle-foreground">·</span>
-                  <JoinCode code={league.leagueJoinCode} />
-                </>
-              )}
+            <div className="items-end justify-between gap-8 py-8 sm:flex sm:py-10">
+              <div className="min-w-0 pr-10 sm:pr-0">
+                <h1 className="text-2xl font-bold tracking-tight sm:text-4xl">
+                  {league.leagueName}
+                </h1>
+
+                <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <span className="font-mono text-xs text-subtle-foreground">
+                    {league.tournamentName}
+                  </span>
+                  {league.leagueJoinCode !== '' && (
+                    <>
+                      <span className="text-subtle-foreground">·</span>
+                      <JoinCode code={league.leagueJoinCode} />
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-6 flex flex-wrap gap-x-10 gap-y-4 sm:mt-0 sm:shrink-0">
+                <Fact label="Phase">
+                  <span className="flex items-center gap-2">
+                    <PhaseDot phase={league.phase} />
+                    {PHASE_LABEL[league.phase]}
+                  </span>
+                </Fact>
+
+                <Fact label="Next deadline">{deadline ?? '—'}</Fact>
+
+                {/*
+                  Absent until the league is active. Working it out needs every
+                  manager's lineups plus the points node, and before a ball is
+                  bowled everyone is on zero.
+                */}
+                <Fact label="Your rank">
+                  {league.myRank === undefined ? (
+                    <span className="text-subtle-foreground">—</span>
+                  ) : (
+                    String(league.myRank)
+                  )}
+                </Fact>
+              </div>
             </div>
           </div>
-
-          <div className="mt-6 flex flex-wrap gap-x-10 gap-y-4 sm:mt-0 sm:shrink-0">
-            <Fact label="Phase">
-              <span className="flex items-center gap-2">
-                <span
-                  className={`inline-block size-[7px] rounded-full ${
-                    league.phase === 'active'
-                      ? 'bg-settled'
-                      : 'bg-subtle-foreground'
-                  }`}
-                />
-                {PHASE_LABEL[league.phase]}
-              </span>
-            </Fact>
-
-            <Fact label="Next deadline">
-              {league.nextDeadline === undefined
-                ? '—'
-                : /*
-                     **Day and month, not just a weekday.** A deadline a
-                     fortnight out reads as "Thu 7PM", which is every Thursday.
-                   */
-                  new Date(league.nextDeadline).toLocaleString(undefined, {
-                    weekday: 'short',
-                    day: 'numeric',
-                    month: 'short',
-                    hour: 'numeric',
-                    minute: '2-digit',
-                  })}
-            </Fact>
-
-            {/*
-              Absent until the league is active. Working it out needs every
-              manager's lineups plus the points node, and before a ball is
-              bowled everyone is on zero.
-            */}
-            <Fact label="Your rank">
-              {league.myRank === undefined ? (
-                <span className="text-subtle-foreground">—</span>
-              ) : (
-                String(league.myRank)
-              )}
-            </Fact>
-          </div>
-        </div>
+        )}
       </PageContainer>
     </div>
+  )
+}
+
+const COLLAPSED_KEY = 'league-header-collapsed'
+
+/** Collapsed unless somebody has expanded it. Storage can throw or be empty. */
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) !== 'false'
+  } catch {
+    return true
+  }
+}
+
+function writeCollapsed(collapsed: boolean) {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, String(collapsed))
+  } catch {
+    // Nothing to do: it just will not be remembered.
+  }
+}
+
+function Toggle({
+  collapsed,
+  onToggle,
+}: {
+  collapsed: boolean
+  onToggle: () => void
+}) {
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      aria-label={collapsed ? 'Expand league header' : 'Collapse league header'}
+      className="shrink-0 text-subtle-foreground"
+    >
+      {collapsed ? (
+        <ChevronDownIcon aria-hidden />
+      ) : (
+        <ChevronUpIcon aria-hidden />
+      )}
+    </Button>
+  )
+}
+
+function PhaseDot({ phase }: { phase: LeaguePhase }) {
+  return (
+    <span
+      className={`inline-block size-[7px] shrink-0 rounded-full ${
+        phase === 'active' ? 'bg-settled' : 'bg-subtle-foreground'
+      }`}
+    />
   )
 }
 
@@ -211,31 +306,6 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
       </p>
       <p className="mt-1.5 text-base font-bold whitespace-nowrap">{children}</p>
     </div>
-  )
-}
-
-/**
- * The quickest way to invite, which is what a new league needs most. Not the
- * only way in — a closed league can be found on its tournament page.
- */
-function JoinCode({ code }: { code: string }) {
-  const [copied, setCopied] = useState(false)
-
-  return (
-    <span className="flex items-center gap-2.5">
-      <span className="rounded-md border bg-secondary px-2.5 py-1 font-mono text-xs tracking-[0.12em]">
-        {code}
-      </span>
-      <button
-        type="button"
-        className="font-mono text-xs text-subtle-foreground hover:text-foreground"
-        onClick={() => {
-          void navigator.clipboard?.writeText(code).then(() => setCopied(true))
-        }}
-      >
-        {copied ? 'copied' : 'copy'}
-      </button>
-    </span>
   )
 }
 

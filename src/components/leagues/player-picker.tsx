@@ -4,6 +4,8 @@ import {
   SelectItem,
   SelectTrigger,
 } from '@/components/ui/select'
+import { changeClass, type Change } from '@/components/leagues/change'
+import { ChangeMark } from '@/components/leagues/change-mark'
 import { RoleTag } from '@/components/leagues/role-tag'
 import type { Player, PlayerId } from '@/types'
 
@@ -26,12 +28,15 @@ export function PlayerPicker({
   pool,
   value,
   taken,
+  change,
   onChange,
 }: {
   index: number
   pool: Player[]
   value: PlayerId | undefined
   taken: readonly PlayerId[]
+  /** Changed since the previous period, and whether that is saved yet. */
+  change: Change
   onChange: (playerId: PlayerId | undefined) => void
 }) {
   const player = pool.find((p) => p.playerId === value)
@@ -48,7 +53,7 @@ export function PlayerPicker({
     >
       <SelectTrigger
         aria-label={`Player ${index + 1}`}
-        className="lit h-auto w-full justify-between gap-3 rounded-xl border bg-secondary/40 px-4 py-3.5 hover:bg-secondary/70 data-[size=default]:h-auto"
+        className={`lit h-auto w-full justify-between gap-3 rounded-xl border px-4 py-3.5 data-[size=default]:h-auto ${changeClass(change)}`}
       >
         <span className="flex min-w-0 items-center gap-3.5">
           <span className="w-5 shrink-0 text-right font-mono text-xs text-subtle-foreground">
@@ -67,6 +72,7 @@ export function PlayerPicker({
             </>
           )}
         </span>
+        <ChangeMark change={change} />
       </SelectTrigger>
 
       {/*
