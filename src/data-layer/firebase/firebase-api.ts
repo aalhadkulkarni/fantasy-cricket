@@ -45,6 +45,7 @@ import type {
   JoinableLeague,
   League,
   LeagueCard,
+  LeagueGameWeek,
   LeagueId,
   LeagueIndexEntry,
   LeagueJoinCode,
@@ -56,10 +57,19 @@ import type {
   MatchConfig,
   MatchId,
   MatchLineup,
+  MatchPlayers,
+  MatchSide,
+  LeagueDetails,
+  LeagueMemberSummary,
+  RoundDetails,
+  PeriodLeaderboard,
+  LeaderboardRow,
+  ScoringWatermark,
   Player,
   PlayerConfig,
   PlayerFilter,
   PlayerId,
+  PlayerPoints,
   PlayerRoleRecord,
   Round,
   RoundConfig,
@@ -83,6 +93,7 @@ import { DataLayerError } from '../data-layer-error'
 import { derivePhase } from '../league-phase'
 import {
   AUCTION_PHASE_RECORDS,
+  changeAllowanceFor,
   FORMAT_RECORDS,
   PLAYER_CATEGORY_RECORDS,
   PLAYER_ROLE_RECORDS,
@@ -331,6 +342,10 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
     const leagueId = service.generateKey() as LeagueId
     const leagueJoinCode = await claimJoinCode(leagueId)
 
+    const allowance = changeAllowanceFor(
+      Object.keys(tournament.matches ?? {}).length,
+    )
+
     const leagueName = `${tournament.tournamentName} — Official ${
       gameWeeks ? 'Gameweek' : 'Match'
     } League`
@@ -360,9 +375,19 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
             isGameWeeksEnabled: true,
             roundConfigs: oneGameWeekPerRound(tournament),
           }
-        : // No change allowances at all. Absent is unlimited, which is what an
-          // open league everybody can walk into should be.
-          { ...base, isGameWeeksEnabled: false },
+        : {
+            ...base,
+            isGameWeeksEnabled: false,
+            /*
+              **One allowance for the whole league, sized by the tournament.**
+              The same figure serves all three, because they are counted
+              separately against their own allowances rather than sharing one
+              pool. See `changeAllowanceFor`.
+            */
+            totalChangesAllowed: allowance,
+            totalCaptainChangesAllowed: allowance,
+            totalViceCaptainChangesAllowed: allowance,
+          },
 
       // The tournament page's list of its leagues. Exactly the fields that row
       // renders, and no more, or it drifts into a second copy of the league.
@@ -467,6 +492,17 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
     )
   }
 
+  /**
+   * Firebase stores neither `undefined` nor `null` as a value, so a key carrying
+   * one simply would not exist. Dropping them here makes that explicit rather
+   * than leaving it to the client to do quietly.
+   */
+  function omitUndefined<T extends Record<string, unknown>>(value: T): T {
+    return Object.fromEntries(
+      Object.entries(value).filter(([, v]) => v !== undefined),
+    ) as T
+  }
+
   /** What is stored under a lineup: ids, not players. */
   interface StoredLineup {
     lineup: PlayerId[]
@@ -506,7 +542,8 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
   async function leagueFixtures(leagueId: LeagueId): Promise<{
     tournamentId: TournamentId
     matches: Match[]
-    rounds: RoundConfig[]
+    /** Keyed by the tournament's round id, which is how they are stored. */
+    rounds: Record<string, RoundConfig>
     offset: number
   }> {
     const [tournamentId, offset, roundConfigs] = await Promise.all([
@@ -538,9 +575,373 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       matches: Object.values(stored ?? {}).sort(
         (a, b) => a.matchNumber - b.matchNumber,
       ),
-      rounds: Object.values(roundConfigs ?? {}),
+      rounds: roundConfigs ?? {},
       offset: offset ?? 0,
     }
+  }
+
+  /** A manager's stored team for a match, resolved. No visibility check. */
+  async function readMatchTeam(
+    leagueId: LeagueId,
+    userId: UserId,
+    matchId: MatchId,
+  ): Promise<MatchLineup | undefined> {
+    const stored = await service.read<StoredLineup>(
+      service.path('matchBasedLineups', leagueId, userId, matchId),
+    )
+    if (stored === undefined) return undefined
+
+    return { ...stored, lineup: await resolvePlayers(stored.lineup) }
+  }
+
+  /** A manager's stored team for a gameweek, resolved. No visibility check. */
+  async function readGameWeekTeam(
+    leagueId: LeagueId,
+    userId: UserId,
+    gameWeekId: GameWeekId,
+  ): Promise<GameWeekLineup | undefined> {
+    const stored = await service.read<StoredGameWeekLineup>(
+      service.path('gameWeekBasedLineups', leagueId, userId, gameWeekId),
+    )
+    if (stored === undefined) return undefined
+
+    const [startingLineup, postImpactSubLineup] = await Promise.all([
+      resolvePlayers(stored.startingLineup),
+      stored.postImpactSubLineup === undefined
+        ? undefined
+        : resolvePlayers(stored.postImpactSubLineup),
+    ])
+
+    return {
+      captainId: stored.captainId,
+      viceCaptainId: stored.viceCaptainId,
+      startingLineup,
+      ...(stored.impactSub === undefined
+        ? {}
+        : { impactSub: stored.impactSub }),
+      ...(postImpactSubLineup === undefined ? {} : { postImpactSubLineup }),
+    }
+  }
+
+  /**
+   * **The owner or an admin**, per `03-roles.md`. The owner is checked by the
+   * league's `leagueOwner` as well as the role, since that field is the
+   * authority on who owns it.
+   */
+  async function assertLeagueAdmin(leagueId: LeagueId): Promise<void> {
+    const session = requireSession()
+
+    const [owner, roles] = await Promise.all([
+      service.read<UserId>(service.path('leagues', leagueId, 'leagueOwner')),
+      service.read<LeagueMember['leagueRoles']>(
+        service.path(
+          'leagues',
+          leagueId,
+          'leagueMembers',
+          session.uid,
+          'leagueRoles',
+        ),
+      ),
+    ])
+
+    if (
+      owner !== session.uid &&
+      roles?.leagueOwner !== true &&
+      roles?.leagueAdmin !== true
+    ) {
+      throw new DataLayerError(
+        'unknown',
+        'Only the league owner or an admin can do that.',
+      )
+    }
+  }
+
+  /**
+   * **The next moment a team locks**, which moves on as deadlines pass.
+   *
+   * A match-based league locks at every match, so it is the first match, by
+   * `matchNumber`, whose deadline is still ahead. A gameweek league locks only
+   * at each gameweek's first match, so matches inside a gameweek are not
+   * deadlines and are passed over.
+   *
+   * **Absent when nothing is left, or when the next one is undated.** An
+   * undated match is not skipped in favour of a later dated one: that would
+   * show a deadline that is not the next one. Deadlines come from the scheduled
+   * start and never shift with delays.
+   */
+  async function upcomingDeadline(
+    leagueId: LeagueId,
+    isGameWeeks: boolean,
+  ): Promise<number | undefined> {
+    const { matches, offset } = await leagueFixtures(leagueId)
+
+    const lockers = isGameWeeks
+      ? (await api.getGameWeeks(leagueId))
+          .map((week) => matches.find((m) => m.matchId === week.matchIds[0]))
+          .filter((m): m is Match => m !== undefined)
+      : matches
+
+    const now = Date.now()
+    const next = lockers.find(
+      (m) => m.startTimestamp === undefined || m.startTimestamp - offset > now,
+    )
+
+    return next?.startTimestamp === undefined
+      ? undefined
+      : next.startTimestamp - offset
+  }
+
+  // -------------------------------------------------------------------------
+  // Scoring
+  // -------------------------------------------------------------------------
+
+  /** Fixed, and the vice-captain is never promoted when the captain does not play. */
+  const CAPTAIN_MULTIPLIER = 2
+  const VICE_CAPTAIN_MULTIPLIER = 1.5
+
+  /**
+   * Everything a score is computed from, for one league.
+   *
+   * **Read once per call and never kept.** A loader returns this, the caller
+   * computes from it and returns numbers, and nothing else holds a reference,
+   * so it is garbage the moment the call resolves. There is deliberately no
+   * cache: a points correction must show on the next read, and a stale cache
+   * is exactly the kind of drift that storing totals was rejected for.
+   */
+  interface Scoring {
+    /** In `matchNumber` order. */
+    matches: Match[]
+    offset: number
+    isGameWeeks: boolean
+    /** Empty in a match-based league. */
+    weeks: LeagueGameWeek[]
+    /** Match-major, for the whole tournament or league, in one read. */
+    points: Partial<Record<MatchId, PlayerPoints>>
+    /** Per manager, keyed by match or by gameweek according to the league. */
+    lineups: Partial<
+      Record<UserId, Record<string, StoredLineup | StoredGameWeekLineup>>
+    >
+    members: Partial<Record<UserId, LeagueMember>>
+    watermark: ScoringWatermark
+  }
+
+  /**
+   * **Three subtree reads, not one per manager**: the league's lineups, the
+   * points node, and its members. `only` narrows the lineups and members to one
+   * manager, for the single-manager reads.
+   */
+  async function loadScoring(
+    leagueId: LeagueId,
+    only?: UserId,
+  ): Promise<Scoring> {
+    const [fixtures, isCustom, isGameWeeks] = await Promise.all([
+      leagueFixtures(leagueId),
+      service.read<boolean>(
+        service.path('leagues', leagueId, 'isCustomScoringSystem'),
+      ),
+      service.read<boolean>(
+        service.path('leagues', leagueId, 'isGameWeeksEnabled'),
+      ),
+    ])
+
+    const node =
+      isGameWeeks === true ? 'gameWeekBasedLineups' : 'matchBasedLineups'
+
+    const [points, lineups, members, weeks, tillId] = await Promise.all([
+      service.read<Scoring['points']>(
+        isCustom === true
+          ? paths.customPointsByMatch(leagueId)
+          : paths.standardPointsByMatch(fixtures.tournamentId),
+      ),
+      only === undefined
+        ? service.read<Scoring['lineups']>(service.path(node, leagueId))
+        : service
+            .read<Record<string, StoredLineup | StoredGameWeekLineup>>(
+              service.path(node, leagueId, only),
+            )
+            .then((mine) => (mine === undefined ? {} : { [only]: mine })),
+      only === undefined
+        ? service.read<Scoring['members']>(paths.leagueMembers(leagueId))
+        : service
+            .read<LeagueMember>(paths.leagueMembers(leagueId, only))
+            .then((member) => (member === undefined ? {} : { [only]: member })),
+      isGameWeeks === true ? api.getGameWeeks(leagueId) : Promise.resolve([]),
+      isCustom === true
+        ? Promise.resolve(undefined)
+        : service.read<MatchId>(
+            service.path(
+              'tournaments',
+              fixtures.tournamentId,
+              'pointsUpdatedTillMatchId',
+            ),
+          ),
+    ])
+
+    return {
+      matches: fixtures.matches,
+      offset: fixtures.offset,
+      isGameWeeks: isGameWeeks === true,
+      weeks,
+      points: points ?? {},
+      lineups: lineups ?? {},
+      members: members ?? {},
+      watermark: watermarkOf(
+        fixtures.matches,
+        isCustom === true,
+        tillId,
+        points,
+      ),
+    }
+  }
+
+  /**
+   * Standard scoring has a marker written with the points. Custom scoring has
+   * none yet, so it is the furthest match with anything entered.
+   */
+  function watermarkOf(
+    matches: readonly Match[],
+    isCustom: boolean,
+    tillId: MatchId | undefined,
+    points: Scoring['points'] | undefined,
+  ): ScoringWatermark {
+    if (!isCustom) return matches.find((m) => m.matchId === tillId)
+
+    return [...matches]
+      .reverse()
+      .find((m) => Object.keys(points?.[m.matchId] ?? {}).length > 0)
+  }
+
+  /**
+   * The eleven a manager fielded in one match. A gameweek league uses that
+   * gameweek's team, switching to the post-sub eleven from the impact sub's
+   * match onward.
+   */
+  function elevenFor(
+    scoring: Scoring,
+    userId: UserId,
+    match: Match,
+  ): StoredLineup | undefined {
+    const mine = scoring.lineups[userId]
+    if (mine === undefined) return undefined
+
+    if (!scoring.isGameWeeks) {
+      return mine[match.matchId] as StoredLineup | undefined
+    }
+
+    const week = scoring.weeks.find((w) => w.matchIds.includes(match.matchId))
+    const stored =
+      week === undefined
+        ? undefined
+        : (mine[week.gameWeek.gameWeekId] as StoredGameWeekLineup | undefined)
+    if (stored === undefined) return undefined
+
+    const from = scoring.matches.find(
+      (m) => m.matchId === stored.impactSub?.applicableFromMatch,
+    )
+    const subbed =
+      stored.postImpactSubLineup !== undefined &&
+      from !== undefined &&
+      match.matchNumber >= from.matchNumber
+
+    return {
+      lineup: subbed
+        ? (stored.postImpactSubLineup ?? stored.startingLineup)
+        : stored.startingLineup,
+      captainId: stored.captainId,
+      viceCaptainId: stored.viceCaptainId,
+    }
+  }
+
+  /** No team, or no points for the match, scores zero. */
+  function matchScore(scoring: Scoring, userId: UserId, match: Match): number {
+    const eleven = elevenFor(scoring, userId, match)
+    if (eleven === undefined) return 0
+
+    const points = scoring.points[match.matchId] ?? {}
+
+    return eleven.lineup.reduce((sum, playerId) => {
+      const multiplier =
+        playerId === eleven.captainId
+          ? CAPTAIN_MULTIPLIER
+          : playerId === eleven.viceCaptainId
+            ? VICE_CAPTAIN_MULTIPLIER
+            : 1
+      return sum + (points[playerId] ?? 0) * multiplier
+    }, 0)
+  }
+
+  function weekScore(
+    scoring: Scoring,
+    userId: UserId,
+    week: LeagueGameWeek,
+  ): number {
+    return scoring.matches
+      .filter((m) => week.matchIds.includes(m.matchId))
+      .reduce((sum, match) => sum + matchScore(scoring, userId, match), 0)
+  }
+
+  /** Every match, plus the transfer adjustment, which is absent outside auctions. */
+  function leagueScore(scoring: Scoring, userId: UserId): number {
+    return (
+      scoring.matches.reduce(
+        (sum, match) => sum + matchScore(scoring, userId, match),
+        0,
+      ) + (scoring.members[userId]?.pointsAdjustment ?? 0)
+    )
+  }
+
+  function isLocked(match: Match | undefined, offset: number): boolean {
+    return (
+      match?.startTimestamp !== undefined &&
+      match.startTimestamp - offset <= Date.now()
+    )
+  }
+
+  function isScored(scoring: Scoring, match: Match | undefined): boolean {
+    return (
+      match !== undefined &&
+      scoring.watermark !== undefined &&
+      match.matchNumber <= scoring.watermark.matchNumber
+    )
+  }
+
+  /**
+   * **Managers only**, so an owner who does not play, a spectator and a banned
+   * member are all absent. Highest first, then by name; a tie shares a rank and
+   * the next rank skips by the number tied — 1, 2, 2, 4.
+   */
+  async function rank(
+    scoring: Scoring,
+    scoreOf: (userId: UserId) => number,
+  ): Promise<LeaderboardRow[]> {
+    const managers = Object.entries(scoring.members).filter(
+      ([, member]) => member?.leagueRoles?.manager === true,
+    ) as [UserId, LeagueMember][]
+
+    const names = await Promise.all(
+      managers.map(([userId]) =>
+        service.read<string>(service.path('users', userId, 'userName')),
+      ),
+    )
+
+    const unranked = managers.map(([userId, member], index) => ({
+      managerId: userId,
+      managerName: names[index] ?? 'Unknown',
+      ...(member.fantasyTeamName === undefined
+        ? {}
+        : { fantasyTeamName: member.fantasyTeamName }),
+      points: scoreOf(userId),
+    }))
+
+    unranked.sort(
+      (a, b) =>
+        b.points - a.points || a.managerName.localeCompare(b.managerName),
+    )
+
+    return unranked.map((row) => ({
+      ...row,
+      rank: unranked.findIndex((other) => other.points === row.points) + 1,
+    }))
   }
 
   /**
@@ -569,6 +970,23 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         'unknown',
         'You are not playing in this league. Join it as a manager first.',
       )
+    }
+  }
+
+  /**
+   * **System admins only**, the same rule the interface uses to show the page:
+   * `systemAdmin` or `systemOwner`. Checked here because hiding a button is
+   * convenience and anyone can write to the database with the client SDK.
+   */
+  async function assertSystemAdmin(): Promise<void> {
+    const session = requireSession()
+
+    const roles = await service.read<User['systemUserRoles']>(
+      service.path('users', session.uid, 'systemUserRoles'),
+    )
+
+    if (roles?.systemAdmin !== true && roles?.systemOwner !== true) {
+      throw new DataLayerError('unknown', 'Only a system admin can do that.')
     }
   }
 
@@ -1834,6 +2252,9 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         isGameWeeksEnabled,
         finishedAt,
         me,
+        teamAllowance,
+        captainAllowance,
+        viceCaptainAllowance,
       ] = await Promise.all([
         service.read<string>(at('leagueName')),
         service.read<string>(at('leagueJoinCode')),
@@ -1842,35 +2263,45 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         service.read<boolean>(at('isGameWeeksEnabled')),
         service.read<number>(at('finishedAt')),
         service.read<LeagueMember>(paths.leagueMembers(leagueId, userId)),
+        service.read<number>(at('totalChangesAllowed')),
+        service.read<number>(at('totalCaptainChangesAllowed')),
+        service.read<number>(at('totalViceCaptainChangesAllowed')),
       ])
 
       if (leagueName === undefined || tournamentId === undefined) {
         throw new DataLayerError('unknown', 'That league no longer exists.')
       }
 
-      const [tournamentName, startDate, offset, auctionStartTime, runtime] =
-        await Promise.all([
-          service.read<string>(
-            service.path('tournaments', tournamentId, 'tournamentName'),
-          ),
-          service.read<number>(
-            service.path('tournaments', tournamentId, 'startDate'),
-          ),
-          service.read<number>(at('fantasyLeagueTeamChangesDeadlineOffset')),
-          isAuctionEnabled === true
-            ? service.read<number>(
-                service.path(
-                  'leagues',
-                  leagueId,
-                  'auctionDetails',
-                  'auctionStartTime',
-                ),
-              )
-            : undefined,
-          isAuctionEnabled === true
-            ? service.read<unknown>(service.path('liveAuctions', leagueId))
-            : undefined,
-        ])
+      const [
+        tournamentName,
+        startDate,
+        offset,
+        auctionStartTime,
+        runtime,
+        nextDeadline,
+      ] = await Promise.all([
+        service.read<string>(
+          service.path('tournaments', tournamentId, 'tournamentName'),
+        ),
+        service.read<number>(
+          service.path('tournaments', tournamentId, 'startDate'),
+        ),
+        service.read<number>(at('fantasyLeagueTeamChangesDeadlineOffset')),
+        isAuctionEnabled === true
+          ? service.read<number>(
+              service.path(
+                'leagues',
+                leagueId,
+                'auctionDetails',
+                'auctionStartTime',
+              ),
+            )
+          : undefined,
+        isAuctionEnabled === true
+          ? service.read<unknown>(service.path('liveAuctions', leagueId))
+          : undefined,
+        upcomingDeadline(leagueId, isGameWeeksEnabled === true),
+      ])
 
       return {
         leagueId,
@@ -1884,15 +2315,20 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
           auctionHasStarted: runtime !== undefined,
           now: Date.now(),
         }),
-        /*
-          The next moment anything locks: the first match's start minus the
-          offset teams lock by. **Deadlines always come from the scheduled start
-          and never shift with delays.**
-        */
-        nextDeadline:
-          startDate === undefined ? undefined : startDate - (offset ?? 0),
+        ...(nextDeadline === undefined ? {} : { nextDeadline }),
         // Rank is deliberately absent. See the contract.
         deadlineOffset: offset ?? 0,
+        changeAllowances: {
+          ...(teamAllowance === undefined
+            ? {}
+            : { teamChanges: teamAllowance }),
+          ...(captainAllowance === undefined
+            ? {}
+            : { captainChanges: captainAllowance }),
+          ...(viceCaptainAllowance === undefined
+            ? {}
+            : { viceCaptainChanges: viceCaptainAllowance }),
+        },
         isAuctionEnabled: isAuctionEnabled === true,
         isGameWeeksEnabled: isGameWeeksEnabled === true,
         myRoles: me?.leagueRoles ?? {},
@@ -1970,6 +2406,432 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
      * **Found by `matchNumber`.** A round stores a first and last match id, and
      * ids are push keys that sort by creation time rather than fixture order.
      */
+
+    /**
+     * **Ordered by `matchNumber`, and resolved the same way.** A gameweek
+     * stores a first and last match id, and ids are push keys sorting by
+     * creation time rather than fixture order, so membership is worked out by
+     * number here rather than left to a caller to get wrong.
+     */
+    async getGameWeeks(leagueId: LeagueId): Promise<LeagueGameWeek[]> {
+      const { tournamentId, matches, rounds } = await leagueFixtures(leagueId)
+
+      const tournamentRounds = await service.read<Record<string, Round>>(
+        paths.tournamentRounds(tournamentId),
+      )
+
+      const numberOf = (matchId: MatchId) =>
+        matches.find((m) => m.matchId === matchId)?.matchNumber ?? 0
+
+      const entries: { roundId: string; week: LeagueGameWeek }[] = []
+
+      for (const [roundId, config] of Object.entries(rounds)) {
+        const roundName = tournamentRounds?.[roundId]?.roundName ?? ''
+
+        for (const gameWeek of Object.values(config.gameWeeks ?? {})) {
+          const first = numberOf(gameWeek.startMatchId)
+          const last = numberOf(gameWeek.endMatchId)
+
+          const spanned = matches.filter(
+            (m) => first <= m.matchNumber && m.matchNumber <= last,
+          )
+
+          entries.push({
+            roundId,
+            week: {
+              gameWeek,
+              roundName,
+              matchIds: spanned.map((m) => m.matchId),
+              startsAt: spanned[0]?.startTimestamp,
+            },
+          })
+        }
+      }
+
+      entries.sort(
+        (a, b) =>
+          a.week.gameWeek.gameWeekNumber - b.week.gameWeek.gameWeekNumber,
+      )
+
+      /*
+        **The cap on changes going into each gameweek, from the one before.**
+
+        The first gameweek has nothing before it, so it has no cap. After that,
+        a gameweek that opens a new round is limited by that round's "before the
+        round starts" allowance, and one inside the same round by its "between
+        gameweeks" allowance. Absent in either means unlimited.
+      */
+      return entries.map(({ roundId, week }, index) => {
+        if (index === 0) return week
+
+        const config = rounds[roundId]
+        const cap =
+          entries[index - 1]?.roundId === roundId
+            ? config?.maxNumberOfChangesAllowedBetweenGameWeeks
+            : config?.maxNumberOfChangesAllowedBeforeRoundStart
+
+        return cap === undefined ? week : { ...week, changeCap: cap }
+      })
+    },
+
+    /**
+     * **The last saved team before this gameweek, not necessarily the previous
+     * one.** A team applies forward until it is changed, so a manager who
+     * skipped a gameweek is still fielding what they had, and that is what the
+     * next change is measured from.
+     *
+     * **After an impact sub, the eleven that finished that gameweek.** The sub
+     * changes who is in the team from its chosen match onward, and the next
+     * gameweek starts from there, not from the starting eleven.
+     */
+    async getMyTeamBeforeGameWeek(
+      leagueId: LeagueId,
+      gameWeekId: GameWeekId,
+    ): Promise<LineupSubmission | undefined> {
+      const session = requireSession()
+      const weeks = await api.getGameWeeks(leagueId)
+
+      const index = weeks.findIndex((w) => w.gameWeek.gameWeekId === gameWeekId)
+      if (index <= 0) return undefined
+
+      const saved = await service.read<Record<string, StoredGameWeekLineup>>(
+        service.path('gameWeekBasedLineups', leagueId, session.uid),
+      )
+
+      for (let i = index - 1; i >= 0; i -= 1) {
+        const earlier = saved?.[weeks[i]?.gameWeek.gameWeekId ?? '']
+        if (earlier === undefined) continue
+
+        const ids = earlier.postImpactSubLineup ?? earlier.startingLineup
+        return {
+          lineup: await resolvePlayers(ids),
+          captainId: earlier.captainId,
+          viceCaptainId: earlier.viceCaptainId,
+        }
+      }
+
+      return undefined
+    },
+
+    async getFixtures(tournamentId: TournamentId): Promise<Match[]> {
+      const stored = await service.read<Record<string, Match>>(
+        paths.tournamentMatches(tournamentId),
+      )
+
+      return Object.values(stored ?? {}).sort(
+        (a, b) => a.matchNumber - b.matchNumber,
+      )
+    },
+
+    /**
+     * **The flag decides the store, and there is no second look.** A
+     * custom-scoring league reads its own node only; every other league reads
+     * the tournament's. A match nobody has scored comes back empty, which the
+     * caller reads as zero — the model treats zero and absent as the same
+     * thing, and does not record why a player scored nothing.
+     */
+    async getPlayerPointsForMatch(
+      leagueId: LeagueId,
+      matchId: MatchId,
+    ): Promise<PlayerPoints> {
+      const [isCustom, tournamentId] = await Promise.all([
+        service.read<boolean>(
+          service.path('leagues', leagueId, 'isCustomScoringSystem'),
+        ),
+        service.read<TournamentId>(
+          service.path('leagues', leagueId, 'tournamentId'),
+        ),
+      ])
+
+      if (isCustom === true) {
+        return (
+          (await service.read<PlayerPoints>(
+            paths.customPointsByMatch(leagueId, matchId),
+          )) ?? {}
+        )
+      }
+
+      if (tournamentId === undefined) {
+        throw new DataLayerError('unknown', 'That league no longer exists.')
+      }
+
+      return (
+        (await service.read<PlayerPoints>(
+          paths.standardPointsByMatch(tournamentId, matchId),
+        )) ?? {}
+      )
+    },
+
+    /**
+     * **Each side is that team's squad in this tournament**, from
+     * `participatingTeamPlayers`, not the team's current squad, which can have
+     * moved on since. Names come from the whole catalogue, for the same reason
+     * as `getSelectablePlayers`.
+     */
+    async getPlayersForMatch(
+      tournamentId: TournamentId,
+      matchId: MatchId,
+    ): Promise<MatchPlayers> {
+      const [match, squads] = await Promise.all([
+        service.read<Match>(paths.tournamentMatches(tournamentId, matchId)),
+        service.read<Tournament['participatingTeamPlayers']>(
+          service.path('tournaments', tournamentId, 'participatingTeamPlayers'),
+        ),
+      ])
+
+      if (match === undefined) {
+        throw new DataLayerError(
+          'unknown',
+          'That match is not in this tournament.',
+        )
+      }
+
+      const { team1Id, team2Id } = match
+      if (team1Id === undefined || team2Id === undefined) {
+        throw new DataLayerError(
+          'unknown',
+          'Set both teams for this match in the fixtures editor first.',
+        )
+      }
+
+      const [team1, team2, everyone] = await Promise.all([
+        service.read<Team>(paths.teams(team1Id)),
+        service.read<Team>(paths.teams(team2Id)),
+        service.read<Record<string, Player>>(paths.players()),
+      ])
+
+      const side = (team: Team | undefined, teamId: TeamId): MatchSide => {
+        if (team === undefined) {
+          throw new DataLayerError('unknown', `No team with id ${teamId}.`)
+        }
+        const ids = new Set(Object.keys(squads?.[teamId] ?? {}))
+        return {
+          team,
+          players: Object.values(everyone ?? {})
+            .filter((player) => ids.has(player.playerId))
+            .sort((a, b) => a.playerName.localeCompare(b.playerName)),
+        }
+      }
+
+      return { match, sides: [side(team1, team1Id), side(team2, team2Id)] }
+    },
+
+    async getStandardPointsForMatch(
+      tournamentId: TournamentId,
+      matchId: MatchId,
+    ): Promise<PlayerPoints> {
+      return (
+        (await service.read<PlayerPoints>(
+          paths.standardPointsByMatch(tournamentId, matchId),
+        )) ?? {}
+      )
+    },
+
+    /**
+     * **One atomic update carries all three writes**: the match-major node as
+     * a whole, the player-major leaf for every player involved, and the
+     * scored-till marker. Any one landing without the others would leave the
+     * copies disagreeing with nobody told.
+     *
+     * **Zero is stored as absent**, which the model treats as the same thing.
+     *
+     * **The player-major side clears old entries too.** A player scored before
+     * and since moved out of either team would otherwise keep a points leaf the
+     * match-major copy no longer has.
+     */
+    async updateStandardPoints(
+      tournamentId: TournamentId,
+      matchId: MatchId,
+      playerPoints: PlayerPoints,
+    ): Promise<void> {
+      await assertSystemAdmin()
+
+      const { match, sides } = await api.getPlayersForMatch(
+        tournamentId,
+        matchId,
+      )
+      const eligible = new Set(
+        sides.flatMap((s) => s.players.map((p) => p.playerId)),
+      )
+
+      const byMatch: PlayerPoints = {}
+      for (const [playerId, value] of Object.entries(playerPoints)) {
+        if (!eligible.has(playerId as PlayerId)) {
+          throw new DataLayerError(
+            'unknown',
+            'These points include a player who is in neither team for this match.',
+          )
+        }
+        if (!Number.isFinite(value)) {
+          throw new DataLayerError('unknown', 'Points must be numbers.')
+        }
+        if (value !== 0) byMatch[playerId as PlayerId] = value
+      }
+
+      const [previous, tillId] = await Promise.all([
+        api.getStandardPointsForMatch(tournamentId, matchId),
+        service.read<MatchId>(
+          service.path('tournaments', tournamentId, 'pointsUpdatedTillMatchId'),
+        ),
+      ])
+
+      const tillNumber =
+        tillId === undefined
+          ? undefined
+          : await service.read<number>(
+              service.path(
+                'tournaments',
+                tournamentId,
+                'matches',
+                tillId,
+                'matchNumber',
+              ),
+            )
+
+      const changes: Record<string, unknown> = {
+        [paths.standardPointsByMatch(tournamentId, matchId)]:
+          Object.keys(byMatch).length === 0 ? null : byMatch,
+      }
+
+      const involved = new Set([...eligible, ...Object.keys(previous)])
+      for (const playerId of involved) {
+        changes[
+          service.path(
+            'standardPointsByPlayer',
+            tournamentId,
+            playerId,
+            matchId,
+          )
+        ] = byMatch[playerId as PlayerId] ?? null
+      }
+
+      // Forward only, so a correction to an earlier match leaves it alone. A
+      // marker pointing at a match that no longer exists is replaced.
+      if (tillNumber === undefined || match.matchNumber > tillNumber) {
+        changes[
+          service.path('tournaments', tournamentId, 'pointsUpdatedTillMatchId')
+        ] = matchId
+      }
+
+      await service.update(changes)
+    },
+
+    async getPointsForMatch(
+      userId: UserId,
+      leagueId: LeagueId,
+      matchId: MatchId,
+    ): Promise<number> {
+      const scoring = await loadScoring(leagueId, userId)
+      const match = scoring.matches.find((m) => m.matchId === matchId)
+      if (match === undefined) {
+        throw new DataLayerError('unknown', 'That match is not in this league.')
+      }
+      return matchScore(scoring, userId, match)
+    },
+
+    async getPointsForGameWeek(
+      userId: UserId,
+      leagueId: LeagueId,
+      gameWeekId: GameWeekId,
+    ): Promise<number> {
+      const scoring = await loadScoring(leagueId, userId)
+      const week = scoring.weeks.find(
+        (w) => w.gameWeek.gameWeekId === gameWeekId,
+      )
+      if (week === undefined) {
+        throw new DataLayerError('unknown', 'No such gameweek in this league.')
+      }
+      return weekScore(scoring, userId, week)
+    },
+
+    async getPointsForLeague(
+      userId: UserId,
+      leagueId: LeagueId,
+    ): Promise<number> {
+      return leagueScore(await loadScoring(leagueId, userId), userId)
+    },
+
+    async getLeaderboard(leagueId: LeagueId): Promise<LeaderboardRow[]> {
+      const scoring = await loadScoring(leagueId)
+      return rank(scoring, (userId) => leagueScore(scoring, userId))
+    },
+
+    async getLeaderboardForGameWeek(
+      leagueId: LeagueId,
+      gameWeekId: GameWeekId,
+    ): Promise<PeriodLeaderboard> {
+      const scoring = await loadScoring(leagueId)
+      const week = scoring.weeks.find(
+        (w) => w.gameWeek.gameWeekId === gameWeekId,
+      )
+      if (week === undefined) {
+        throw new DataLayerError('unknown', 'No such gameweek in this league.')
+      }
+
+      // A gameweek locks, and starts scoring, with its first match.
+      const first = scoring.matches.find((m) => m.matchId === week.matchIds[0])
+      if (!isLocked(first, scoring.offset)) {
+        throw new DataLayerError(
+          'unknown',
+          'That gameweek has not reached its deadline yet.',
+        )
+      }
+
+      return {
+        rows: await rank(scoring, (userId) => weekScore(scoring, userId, week)),
+        isScored: isScored(scoring, first),
+      }
+    },
+
+    async getLeaderboardForMatch(
+      leagueId: LeagueId,
+      matchId: MatchId,
+    ): Promise<PeriodLeaderboard> {
+      const scoring = await loadScoring(leagueId)
+      const match = scoring.matches.find((m) => m.matchId === matchId)
+      if (match === undefined) {
+        throw new DataLayerError('unknown', 'That match is not in this league.')
+      }
+      if (!isLocked(match, scoring.offset)) {
+        throw new DataLayerError(
+          'unknown',
+          'That match has not reached its deadline yet.',
+        )
+      }
+
+      return {
+        rows: await rank(scoring, (userId) =>
+          matchScore(scoring, userId, match),
+        ),
+        isScored: isScored(scoring, match),
+      }
+    },
+
+    /**
+     * Lighter than a leaderboard: standard scoring needs only the marker.
+     * Custom scoring has no marker yet, so it reads its points to find one.
+     */
+    async getScoringWatermark(leagueId: LeagueId): Promise<ScoringWatermark> {
+      const [{ tournamentId, matches }, isCustom] = await Promise.all([
+        leagueFixtures(leagueId),
+        service.read<boolean>(
+          service.path('leagues', leagueId, 'isCustomScoringSystem'),
+        ),
+      ])
+
+      if (isCustom === true) {
+        const points = await service.read<Scoring['points']>(
+          paths.customPointsByMatch(leagueId),
+        )
+        return watermarkOf(matches, true, undefined, points)
+      }
+
+      const tillId = await service.read<MatchId>(
+        service.path('tournaments', tournamentId, 'pointsUpdatedTillMatchId'),
+      )
+      return watermarkOf(matches, false, tillId, undefined)
+    },
+
     async getCurrentRound(leagueId: LeagueId): Promise<Round> {
       const current = await api.getCurrentMatch(leagueId)
       const { tournamentId, matches } = await leagueFixtures(leagueId)
@@ -2003,7 +2865,7 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       const numberOf = (matchId: MatchId) =>
         matches.find((m) => m.matchId === matchId)?.matchNumber ?? 0
 
-      for (const round of rounds) {
+      for (const round of Object.values(rounds)) {
         for (const gameWeek of Object.values(round.gameWeeks ?? {})) {
           if (
             numberOf(gameWeek.startMatchId) <= current.matchNumber &&
@@ -2058,15 +2920,7 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       matchId: MatchId,
     ): Promise<MatchLineup | undefined> {
       const session = requireSession()
-      const stored = await service.read<StoredLineup>(
-        service.path('matchBasedLineups', leagueId, session.uid, matchId),
-      )
-      if (stored === undefined) return undefined
-
-      return {
-        ...stored,
-        lineup: await resolvePlayers(stored.lineup),
-      }
+      return readMatchTeam(leagueId, session.uid as UserId, matchId)
     },
 
     async getMyTeamForGameWeek(
@@ -2074,27 +2928,247 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
       gameWeekId: GameWeekId,
     ): Promise<GameWeekLineup | undefined> {
       const session = requireSession()
-      const stored = await service.read<StoredGameWeekLineup>(
-        service.path('gameWeekBasedLineups', leagueId, session.uid, gameWeekId),
-      )
-      if (stored === undefined) return undefined
+      return readGameWeekTeam(leagueId, session.uid as UserId, gameWeekId)
+    },
 
-      const [startingLineup, postImpactSubLineup] = await Promise.all([
-        resolvePlayers(stored.startingLineup),
-        stored.postImpactSubLineup === undefined
-          ? undefined
-          : resolvePlayers(stored.postImpactSubLineup),
+    async getTeamForMatch(
+      leagueId: LeagueId,
+      managerId: UserId,
+      matchId: MatchId,
+    ): Promise<MatchLineup | undefined> {
+      const session = requireSession()
+
+      if (managerId !== session.uid) {
+        const { matches, offset } = await leagueFixtures(leagueId)
+        const match = matches.find((m) => m.matchId === matchId)
+        // Nothing, rather than an error: a caller cannot tell a hidden team
+        // from a missing one, which is the point.
+        if (!isLocked(match, offset)) return undefined
+      }
+
+      return readMatchTeam(leagueId, managerId, matchId)
+    },
+
+    async getTeamForGameWeek(
+      leagueId: LeagueId,
+      managerId: UserId,
+      gameWeekId: GameWeekId,
+    ): Promise<GameWeekLineup | undefined> {
+      const session = requireSession()
+      const team = await readGameWeekTeam(leagueId, managerId, gameWeekId)
+      if (team === undefined || managerId === session.uid) return team
+
+      const [{ matches, offset }, weeks] = await Promise.all([
+        leagueFixtures(leagueId),
+        api.getGameWeeks(leagueId),
       ])
 
-      return {
-        captainId: stored.captainId,
-        viceCaptainId: stored.viceCaptainId,
-        startingLineup,
-        ...(stored.impactSub === undefined
-          ? {}
-          : { impactSub: stored.impactSub }),
-        ...(postImpactSubLineup === undefined ? {} : { postImpactSubLineup }),
+      const week = weeks.find((w) => w.gameWeek.gameWeekId === gameWeekId)
+      const first = matches.find((m) => m.matchId === week?.matchIds[0])
+      if (!isLocked(first, offset)) return undefined
+
+      // **A sub is visible per match**, from its own match's deadline, so a
+      // pending one cannot be read off a gameweek that is already locked.
+      const subFrom = matches.find(
+        (m) => m.matchId === team.impactSub?.applicableFromMatch,
+      )
+      if (team.impactSub !== undefined && !isLocked(subFrom, offset)) {
+        return {
+          startingLineup: team.startingLineup,
+          captainId: team.captainId,
+          viceCaptainId: team.viceCaptainId,
+        }
       }
+
+      return team
+    },
+
+    async getLeagueDetails(leagueId: LeagueId): Promise<LeagueDetails> {
+      const at = (field: string) => service.path('leagues', leagueId, field)
+
+      const [
+        leagueName,
+        ownerId,
+        isAuctionEnabled,
+        isGameWeeksEnabled,
+        leagueEntry,
+        maxSlots,
+        isCustom,
+        scoringRulesText,
+        teamAllowance,
+        captainAllowance,
+        viceCaptainAllowance,
+        finishedAt,
+        members,
+        fixtures,
+      ] = await Promise.all([
+        service.read<string>(at('leagueName')),
+        service.read<UserId>(at('leagueOwner')),
+        service.read<boolean>(at('isAuctionEnabled')),
+        service.read<boolean>(at('isGameWeeksEnabled')),
+        service.read<LeagueDetails['leagueEntry']>(at('leagueEntry')),
+        service.read<number>(at('maxSlots')),
+        service.read<boolean>(at('isCustomScoringSystem')),
+        service.read<string>(at('scoringRulesText')),
+        service.read<number>(at('totalChangesAllowed')),
+        service.read<number>(at('totalCaptainChangesAllowed')),
+        service.read<number>(at('totalViceCaptainChangesAllowed')),
+        service.read<number>(at('finishedAt')),
+        service.read<Partial<Record<string, LeagueMember>>>(
+          paths.leagueMembers(leagueId),
+        ),
+        leagueFixtures(leagueId),
+      ])
+
+      if (leagueName === undefined) {
+        throw new DataLayerError('unknown', 'That league no longer exists.')
+      }
+
+      const [tournamentName, ownerName, tournamentRounds] = await Promise.all([
+        service.read<string>(
+          service.path('tournaments', fixtures.tournamentId, 'tournamentName'),
+        ),
+        ownerId === undefined
+          ? undefined
+          : service.read<string>(service.path('users', ownerId, 'userName')),
+        service.read<Record<string, Round>>(
+          paths.tournamentRounds(fixtures.tournamentId),
+        ),
+      ])
+
+      const numberOf = (matchId: MatchId | undefined) =>
+        fixtures.matches.find((m) => m.matchId === matchId)?.matchNumber ?? 0
+
+      // In fixture order, by each round's first match — never by id.
+      const rounds: RoundDetails[] = Object.entries(fixtures.rounds)
+        .sort(
+          ([a], [b]) =>
+            numberOf(tournamentRounds?.[a]?.firstMatchId) -
+            numberOf(tournamentRounds?.[b]?.firstMatchId),
+        )
+        .map(([roundId, config]) => ({
+          roundName: tournamentRounds?.[roundId]?.roundName ?? '',
+          gameWeeks: Object.keys(config.gameWeeks ?? {}).length,
+          ...omitUndefined({
+            beforeRoundCap: config.maxNumberOfChangesAllowedBeforeRoundStart,
+            betweenGameWeeksCap:
+              config.maxNumberOfChangesAllowedBetweenGameWeeks,
+          }),
+          isImpactSubAllowed: config.isImpactSubAllowed === true,
+        }))
+
+      const last = fixtures.matches[fixtures.matches.length - 1]
+
+      return {
+        leagueId,
+        leagueName,
+        tournamentName: tournamentName ?? '',
+        ownerName: ownerName ?? 'Unknown',
+        isAuctionEnabled: isAuctionEnabled === true,
+        isGameWeeksEnabled: isGameWeeksEnabled === true,
+        leagueEntry: leagueEntry ?? 'Open',
+        managers: Object.values(members ?? {}).filter(
+          (m) => m?.leagueRoles?.manager === true,
+        ).length,
+        maxSlots: maxSlots ?? 0,
+        deadlineOffset: fixtures.offset,
+        isCustomScoringSystem: isCustom === true,
+        ...omitUndefined({ scoringRulesText }),
+        changeAllowances: omitUndefined({
+          teamChanges: teamAllowance,
+          captainChanges: captainAllowance,
+          viceCaptainChanges: viceCaptainAllowance,
+        }),
+        rounds: isGameWeeksEnabled === true ? rounds : [],
+        ...omitUndefined({
+          finishedAt,
+          lastMatchStartsAt: last?.startTimestamp,
+        }),
+      }
+    },
+
+    async getMembers(leagueId: LeagueId): Promise<LeagueMemberSummary[]> {
+      const members = await service.read<Partial<Record<string, LeagueMember>>>(
+        paths.leagueMembers(leagueId),
+      )
+
+      const present = Object.entries(members ?? {}).filter(
+        (entry): entry is [string, LeagueMember] =>
+          entry[1] !== undefined &&
+          entry[1].leagueRoles?.bannedFromLeague !== true,
+      )
+
+      const names = await Promise.all(
+        present.map(([userId]) =>
+          service.read<string>(service.path('users', userId, 'userName')),
+        ),
+      )
+
+      const standing = (roles: LeagueMember['leagueRoles']) =>
+        roles?.leagueOwner === true ? 0 : roles?.leagueAdmin === true ? 1 : 2
+
+      return present
+        .map(([userId, member], index): LeagueMemberSummary => ({
+          userId: userId as UserId,
+          userName: names[index] ?? 'Unknown',
+          leagueRoles: member.leagueRoles ?? {},
+          ...omitUndefined({
+            fantasyTeamName: member.fantasyTeamName,
+            pointsAdjustment: member.pointsAdjustment,
+          }),
+        }))
+        .sort(
+          (a, b) =>
+            standing(a.leagueRoles) - standing(b.leagueRoles) ||
+            a.userName.localeCompare(b.userName),
+        )
+    },
+
+    async markLeagueFinished(leagueId: LeagueId): Promise<void> {
+      await assertLeagueAdmin(leagueId)
+
+      /*
+        **Gated on the last match having started.** The docs ask for every
+        match to have ended, but nothing records an end, so the last scheduled
+        start is the nearest thing the layer can check.
+      */
+      const { matches } = await leagueFixtures(leagueId)
+      const last = matches[matches.length - 1]
+      if (
+        last?.startTimestamp === undefined ||
+        last.startTimestamp > Date.now()
+      ) {
+        throw new DataLayerError(
+          'unknown',
+          "The league's last match has not started yet.",
+        )
+      }
+
+      await service.write(
+        service.path('leagues', leagueId, 'finishedAt'),
+        Date.now(),
+      )
+    },
+
+    async unmarkLeagueFinished(leagueId: LeagueId): Promise<void> {
+      await assertLeagueAdmin(leagueId)
+      await service.write(service.path('leagues', leagueId, 'finishedAt'), null)
+    },
+
+    async markTournamentComplete(tournamentId: TournamentId): Promise<void> {
+      await assertSystemAdmin()
+      await service.write(
+        service.path('tournaments', tournamentId, 'completedAt'),
+        Date.now(),
+      )
+    },
+
+    async unmarkTournamentComplete(tournamentId: TournamentId): Promise<void> {
+      await assertSystemAdmin()
+      await service.write(
+        service.path('tournaments', tournamentId, 'completedAt'),
+        null,
+      )
     },
 
     /**
@@ -2131,11 +3205,127 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
 
       await assertLegal(leagueId, lineup)
 
-      const stored = {
-        lineup: lineup.lineup.map((player) => player.playerId),
+      /*
+        **What this submission costs, and what is left after it.**
+
+        One change is one player out and one player in, so swapping three spends
+        three. Captain and vice-captain changes are counted separately against
+        their own allowances and are neither team changes nor each other.
+
+        **The baseline is the PREVIOUS match, never this one.** A match is not
+        locked until its deadline, so until then you can rearrange as often as
+        you like, and what is being measured is how this match differs from the
+        one before it. Comparing against this match's own stored team would
+        charge a second change for swapping Virat for Rohit after already
+        swapping Hardik for Virat, when the answer is still one: Hardik out,
+        Rohit in.
+
+        Found by `matchNumber`, not by id — ids are push keys and sort by
+        creation time rather than fixture order.
+
+        **Match one has no previous match**, and neither does a manager's first
+        ever submission wherever it happens. Nothing is spent in either case,
+        which is why "the first team is free" needs no rule of its own.
+      */
+      const before = matches
+        .filter((match) => match.matchNumber < from.matchNumber)
+        .sort((a, b) => b.matchNumber - a.matchNumber)[0]
+
+      const previous =
+        before === undefined
+          ? undefined
+          : await service.read<StoredLineup>(
+              service.path(
+                'matchBasedLineups',
+                leagueId,
+                session.uid,
+                before.matchId,
+              ),
+            )
+
+      /*
+        Three leaves, never the league itself. A league read is subtree-shaped
+        and would drag an auction config — a base price for every player in the
+        tournament — plus the gameweek structure, to fetch three numbers.
+      */
+      const at = (field: string) => service.path('leagues', leagueId, field)
+
+      const [teamAllowance, captainAllowance, viceCaptainAllowance] =
+        await Promise.all([
+          service.read<number>(at('totalChangesAllowed')),
+          service.read<number>(at('totalCaptainChangesAllowed')),
+          service.read<number>(at('totalViceCaptainChangesAllowed')),
+        ])
+
+      const next = lineup.lineup.map((player) => player.playerId)
+
+      const spentOnTeam =
+        previous === undefined
+          ? 0
+          : previous.lineup.filter((id) => !next.includes(id)).length
+
+      const spentOnCaptain =
+        previous !== undefined && previous.captainId !== lineup.captainId
+          ? 1
+          : 0
+
+      const spentOnViceCaptain =
+        previous !== undefined &&
+        previous.viceCaptainId !== lineup.viceCaptainId
+          ? 1
+          : 0
+
+      /*
+        Absent stays absent, which is how the model says unlimited, and an
+        unlimited allowance can never be overspent.
+
+        **An overspend is refused, not clamped.** Clamping at zero let a manager
+        with one change left make five and read 0, which made the allowance a
+        display rather than a rule. Nothing is written when this throws.
+      */
+      const remaining = (
+        beforeThis: number | undefined,
+        configured: number | undefined,
+        spent: number,
+        what: string,
+      ): number | undefined => {
+        const start = beforeThis ?? configured
+        if (start === undefined) return undefined
+
+        if (spent > start) {
+          const noun = (n: number) => (n === 1 ? what : `${what}s`)
+          throw new DataLayerError(
+            'unknown',
+            `You have ${start} ${noun(start)} left and this uses ${spent}.`,
+          )
+        }
+        return start - spent
+      }
+
+      const stored: StoredLineup = {
+        lineup: next,
         captainId: lineup.captainId,
         viceCaptainId: lineup.viceCaptainId,
-        // No change counters. Absent is unlimited, and nothing configures them.
+        ...omitUndefined({
+          changesRemaining: remaining(
+            previous?.changesRemaining,
+            teamAllowance,
+            spentOnTeam,
+            'transfer',
+          ),
+          captainChangesRemaining: remaining(
+            previous?.captainChangesRemaining,
+            captainAllowance,
+            spentOnCaptain,
+            'captain change',
+          ),
+          viceCaptainChangesRemaining: remaining(
+            previous?.viceCaptainChangesRemaining,
+            viceCaptainAllowance,
+            spentOnViceCaptain,
+            'vice captain change',
+          ),
+        }),
       }
 
       const update: Record<string, unknown> = {}
@@ -2165,7 +3355,7 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
 
       const { matches, rounds, offset } = await leagueFixtures(leagueId)
 
-      const gameWeek = rounds
+      const gameWeek = Object.values(rounds)
         .flatMap((round) => Object.values(round.gameWeeks ?? {}))
         .find((gw) => gw.gameWeekId === gameWeekId)
 
@@ -2189,14 +3379,65 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
 
       await assertLegal(leagueId, lineup)
 
-      await service.write(
-        service.path('gameWeekBasedLineups', leagueId, session.uid, gameWeekId),
-        {
-          startingLineup: lineup.lineup.map((player) => player.playerId),
-          captainId: lineup.captainId,
-          viceCaptainId: lineup.viceCaptainId,
-        },
-      )
+      /*
+        **A cap on each transition, measured from the team standing before this
+        gameweek.** A save here writes this gameweek and later ones, never an
+        earlier one, so re-saving before the deadline is always measured from the
+        same baseline and can never spend twice. Captain and vice-captain changes
+        have no allowance here.
+      */
+      const [weeks, before] = await Promise.all([
+        api.getGameWeeks(leagueId),
+        api.getMyTeamBeforeGameWeek(leagueId, gameWeekId),
+      ])
+
+      const cap = weeks.find(
+        (w) => w.gameWeek.gameWeekId === gameWeekId,
+      )?.changeCap
+
+      if (cap !== undefined && before !== undefined) {
+        const next = lineup.lineup.map((player) => player.playerId)
+        const spent = before.lineup.filter(
+          (player) => !next.includes(player.playerId),
+        ).length
+
+        if (spent > cap) {
+          throw new DataLayerError(
+            'unknown',
+            `You can change ${cap} ${cap === 1 ? 'player' : 'players'} going into this gameweek, and this changes ${spent}.`,
+          )
+        }
+      }
+
+      /*
+        **Copied forward, like a match-based team.** A team applies until it is
+        changed, so saving here writes the same eleven to this gameweek and every
+        later one, in one atomic update. Each node is replaced whole, which
+        clears a later gameweek's impact sub: its team has changed, and every
+        later gameweek is still before its deadline because this one is.
+      */
+      const from = weeks.findIndex((w) => w.gameWeek.gameWeekId === gameWeekId)
+      const team: StoredGameWeekLineup = {
+        startingLineup: lineup.lineup.map((player) => player.playerId),
+        captainId: lineup.captainId,
+        viceCaptainId: lineup.viceCaptainId,
+      }
+
+      // A gameweek missing from the resolved schedule is written alone rather
+      // than guessing where "later" starts.
+      const targets =
+        from === -1
+          ? [gameWeekId]
+          : weeks.slice(from).map((w) => w.gameWeek.gameWeekId)
+
+      const changes: Record<string, unknown> = {}
+      for (const id of targets) {
+        changes[
+          service.path('gameWeekBasedLineups', leagueId, session.uid, id)
+        ] = team
+      }
+
+      await service.update(changes)
     },
 
     // -----------------------------------------------------------------------

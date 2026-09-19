@@ -53,6 +53,7 @@ import type {
   GameWeekLineup,
   JoinableLeague,
   LeagueCard,
+  LeagueGameWeek,
   LeagueId,
   LeagueSummary,
   LineupRules,
@@ -60,11 +61,18 @@ import type {
   Match,
   MatchConfig,
   MatchId,
+  MatchPlayers,
+  PeriodLeaderboard,
+  LeagueDetails,
+  LeagueMemberSummary,
+  LeaderboardRow,
+  ScoringWatermark,
   MatchLineup,
   Player,
   PlayerConfig,
   PlayerFilter,
   PlayerId,
+  PlayerPoints,
   PlayerRoleRecord,
   Round,
   Team,
@@ -440,6 +448,164 @@ export interface Api {
   getCurrentGameWeek(leagueId: LeagueId): Promise<GameWeek>
 
   /**
+   * Every gameweek in the league, in order, for moving between them.
+   *
+   * No specified call returns these — a league's gameweeks live under its round
+   * configs, keyed by the tournament's round ids, and resolving which matches
+   * each spans is the layer's job.
+   */
+  getGameWeeks(leagueId: LeagueId): Promise<LeagueGameWeek[]>
+
+  /** Every match in the tournament, in `matchNumber` order. */
+  getFixtures(tournamentId: TournamentId): Promise<Match[]>
+
+  /**
+   * What each player scored in one match.
+   *
+   * **Resolution follows the league's scoring flag, never a search order.** A
+   * custom-scoring league reads only its own store, so a match its admin has
+   * not entered has no points rather than borrowed ones. Falling back per match
+   * would let one league score some matches by its own rules and others by the
+   * standard ones, which is worse than showing nothing because nobody would see
+   * it happen.
+   *
+   * **Zero and absent are equivalent.** The reason a player scored nothing is
+   * not recorded.
+   */
+  getPlayerPointsForMatch(
+    leagueId: LeagueId,
+    matchId: MatchId,
+  ): Promise<PlayerPoints>
+
+  /**
+   * **One manager's score for one match**: their eleven for it, each player's
+   * points, the captain doubled and the vice-captain at one and a half. Zero
+   * with no team or no points.
+   */
+  getPointsForMatch(
+    userId: UserId,
+    leagueId: LeagueId,
+    matchId: MatchId,
+  ): Promise<number>
+
+  /** The sum of `getPointsForMatch` over the gameweek's matches. */
+  getPointsForGameWeek(
+    userId: UserId,
+    leagueId: LeagueId,
+    gameWeekId: GameWeekId,
+  ): Promise<number>
+
+  /**
+   * A manager's league total: every match, plus their `pointsAdjustment` from
+   * transfers, which is zero outside an auction league.
+   */
+  getPointsForLeague(userId: UserId, leagueId: LeagueId): Promise<number>
+
+  /**
+   * **Overall standings, managers only.** Lineups and points are each read
+   * once for the whole league and every total is computed from them, never one
+   * read per manager. Nothing is kept once the rows are returned.
+   *
+   * Ties share a rank and the next rank skips by the number tied.
+   */
+  getLeaderboard(leagueId: LeagueId): Promise<LeaderboardRow[]>
+
+  /** **Refused before the gameweek's first match deadline.** */
+  getLeaderboardForGameWeek(
+    leagueId: LeagueId,
+    gameWeekId: GameWeekId,
+  ): Promise<PeriodLeaderboard>
+
+  /** **Refused before the match's deadline.** */
+  getLeaderboardForMatch(
+    leagueId: LeagueId,
+    matchId: MatchId,
+  ): Promise<PeriodLeaderboard>
+
+  /** The match points are entered up to. Absent before any are. */
+  getScoringWatermark(leagueId: LeagueId): Promise<ScoringWatermark>
+
+  /**
+   * **Another manager's team for a match, or nothing.** Returned to anyone
+   * other than that manager only once the match's deadline has passed, and
+   * admins are not exempt. Who is asking comes from the session, never from
+   * the caller.
+   */
+  getTeamForMatch(
+    leagueId: LeagueId,
+    managerId: UserId,
+    matchId: MatchId,
+  ): Promise<MatchLineup | undefined>
+
+  /**
+   * The same rule for a gameweek, which locks at its first match's deadline.
+   * **An impact sub is left out until the deadline of the match it applies
+   * from.**
+   */
+  getTeamForGameWeek(
+    leagueId: LeagueId,
+    managerId: UserId,
+    gameWeekId: GameWeekId,
+  ): Promise<GameWeekLineup | undefined>
+
+  /** Everything League Details shows, resolved. */
+  getLeagueDetails(leagueId: LeagueId): Promise<LeagueDetails>
+
+  /**
+   * Name, team name and roles, banned members excluded. Owner first, then
+   * admins, then by name.
+   */
+  getMembers(leagueId: LeagueId): Promise<LeagueMemberSummary[]>
+
+  /**
+   * Sets `finishedAt`. Owner and admins only, and refused until the league's
+   * last match has started. Never derived.
+   */
+  markLeagueFinished(leagueId: LeagueId): Promise<void>
+
+  /** Clears `finishedAt`, for a league marked finished too early. */
+  unmarkLeagueFinished(leagueId: LeagueId): Promise<void>
+
+  /** Sets `completedAt`, which moves a tournament to Past. System admins only. */
+  markTournamentComplete(tournamentId: TournamentId): Promise<void>
+
+  /** Clears `completedAt`, putting the tournament back in Active. */
+  unmarkTournamentComplete(tournamentId: TournamentId): Promise<void>
+
+  /**
+   * **Both teams' players for a match, from this tournament's squads**, for
+   * scoring it. Refused while either team is not yet known, because there is
+   * nobody to score.
+   */
+  getPlayersForMatch(
+    tournamentId: TournamentId,
+    matchId: MatchId,
+  ): Promise<MatchPlayers>
+
+  /** Standard points already entered for a match, to prefill the entry form. */
+  getStandardPointsForMatch(
+    tournamentId: TournamentId,
+    matchId: MatchId,
+  ): Promise<PlayerPoints>
+
+  /**
+   * **A full replace of one match's standard points.** Blank and zero are the
+   * same and stored as absent, so a player missing from `playerPoints` is
+   * zeroed. That is why the form must be prefilled before it is shown.
+   *
+   * **Both index orders, and the tournament's scored-till marker, in one atomic
+   * update.** The marker only moves forward, so correcting an earlier match
+   * does not pull it back.
+   *
+   * System admins only, checked here rather than by hiding the page.
+   */
+  updateStandardPoints(
+    tournamentId: TournamentId,
+    matchId: MatchId,
+    playerPoints: PlayerPoints,
+  ): Promise<void>
+
+  /**
    * **Regular leagues: the whole tournament pool.** An auction league picks
    * from its squad instead, which is filtered by match because squad membership
    * changes with transfers.
@@ -457,6 +623,23 @@ export interface Api {
   ): Promise<GameWeekLineup | undefined>
 
   /**
+   * The eleven that stands going into a gameweek — the one a change is measured
+   * against.
+   *
+   * **The last gameweek with a saved team, not necessarily the one before.** A
+   * team applies forward until changed, so someone who skipped a gameweek is
+   * still fielding what they had. And **after an impact sub, the eleven at the
+   * end of that gameweek**, since that is who is actually in the team next.
+   *
+   * Absent for the first gameweek and for a manager's first ever team, where
+   * there is nothing to differ from.
+   */
+  getMyTeamBeforeGameWeek(
+    leagueId: LeagueId,
+    gameWeekId: GameWeekId,
+  ): Promise<LineupSubmission | undefined>
+
+  /**
    * **An illegal team is rejected here**, not merely disabled in the form.
    *
    * **A team applies forward until changed again**, so this writes every match
@@ -469,6 +652,7 @@ export interface Api {
     lineup: LineupSubmission,
   ): Promise<void>
 
+  /** **Propagates forward** to every later gameweek, like a match team. */
   updateTeamForGameWeek(
     leagueId: LeagueId,
     gameWeekId: GameWeekId,

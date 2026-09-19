@@ -28,21 +28,22 @@ import type {
   LeaderboardRow,
   LeagueId,
   MatchId,
+  PeriodLeaderboard,
   ScoringWatermark,
 } from '@/types'
-import { notImplemented } from './not-implemented'
+import { getApi } from './api'
 
 /** Overall, which is what the page opens on. */
 export function getLeaderboard(leagueId: LeagueId): Promise<LeaderboardRow[]> {
-  return notImplemented('getLeaderboard', { leagueId })
+  return getApi().getLeaderboard(leagueId)
 }
 
 /** **Only locked gameweeks may be asked for.** A gameweek locks at its first match's deadline. */
 export function getLeaderboardForGameWeek(
   leagueId: LeagueId,
   gameWeekId: GameWeekId,
-): Promise<LeaderboardRow[]> {
-  return notImplemented('getLeaderboardForGameWeek', { leagueId, gameWeekId })
+): Promise<PeriodLeaderboard> {
+  return getApi().getLeaderboardForGameWeek(leagueId, gameWeekId)
 }
 
 /**
@@ -56,8 +57,8 @@ export function getLeaderboardForGameWeek(
 export function getLeaderboardForMatch(
   leagueId: LeagueId,
   matchId: MatchId,
-): Promise<LeaderboardRow[]> {
-  return notImplemented('getLeaderboardForMatch', { leagueId, matchId })
+): Promise<PeriodLeaderboard> {
+  return getApi().getLeaderboardForMatch(leagueId, matchId)
 }
 
 /**
@@ -71,5 +72,5 @@ export function getLeaderboardForMatch(
 export function getScoringWatermark(
   leagueId: LeagueId,
 ): Promise<ScoringWatermark> {
-  return notImplemented('getScoringWatermark', { leagueId })
+  return getApi().getScoringWatermark(leagueId)
 }

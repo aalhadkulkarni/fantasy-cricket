@@ -12,15 +12,16 @@ state.
 
 ### Top level
 
-| Route                        | Page                         |
-| ---------------------------- | ---------------------------- |
-| `/`                          | My Leagues — this is home    |
-| `/login`                     | Sign-in and account creation |
-| `/actions`                   | Actions Center               |
-| `/tournaments`               | Tournament list              |
-| `/tournaments/:tournamentId` | Tournament detail            |
-| `/leagues/new`               | Create a league              |
-| `/admin`                     | System admin panel           |
+| Route                               | Page                                      |
+| ----------------------------------- | ----------------------------------------- |
+| `/`                                 | My Leagues — this is home                 |
+| `/login`                            | Sign-in and account creation              |
+| `/actions`                          | Actions Center                            |
+| `/tournaments`                      | Tournament list                           |
+| `/tournaments/:tournamentId`        | Tournament detail                         |
+| `/tournaments/:tournamentId/points` | Standard points entry, system admins only |
+| `/leagues/new`                      | Create a league                           |
+| `/admin`                            | System admin panel                        |
 
 ### Inside a league
 
@@ -171,16 +172,17 @@ SDK. Route guards are convenience; the data layer is the guard.
 
 ### What happens when access is refused
 
-| Situation                                  | Behaviour                                                                                       |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------- |
-| Not signed in, any protected route         | Redirect to `/login`, **remembering where they were going** so they land there after signing in |
-| Signed in, no user record                  | The display-name modal, whatever route was requested                                            |
-| Not a member of the league                 | Redirect to that league's page on the tournament, where they can request to join                |
-| **Banned** from the league                 | Say so plainly. Do not pretend the league does not exist, and do not offer a join action.       |
-| Spectator on `/team`                       | Redirect to `/leaderboard`. **Not `/squads`** — squads are public, so a spectator sees the page with every manager on it and no squad of their own. |
-| Manager on `/leagues/:id/admin`            | Redirect to `/leagues/:id`                                                                      |
-| Non-system-admin on `/admin`               | Redirect to `/`                                                                                 |
-| League, tournament or match does not exist | A not-found state, not a blank page                                                             |
+| Situation                                     | Behaviour                                                                                                                                           |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Not signed in, any protected route            | Redirect to `/login`, **remembering where they were going** so they land there after signing in                                                     |
+| Signed in, no user record                     | The display-name modal, whatever route was requested                                                                                                |
+| Not a member of the league                    | Redirect to that league's page on the tournament, where they can request to join                                                                    |
+| **Banned** from the league                    | Say so plainly. Do not pretend the league does not exist, and do not offer a join action.                                                           |
+| Spectator on `/team`                          | Redirect to `/leaderboard`. **Not `/squads`** — squads are public, so a spectator sees the page with every manager on it and no squad of their own. |
+| Manager on `/leagues/:id/admin`               | Redirect to `/leagues/:id`                                                                                                                          |
+| Non-system-admin on `/admin`                  | Redirect to `/`                                                                                                                                     |
+| Non-system-admin on `/tournaments/:id/points` | Redirect to `/`                                                                                                                                     |
+| League, tournament or match does not exist    | A not-found state, not a blank page                                                                                                                 |
 
 ### Sections that only exist sometimes
 
@@ -190,7 +192,7 @@ should redirect to the league's default section rather than showing an error:
 | Section                          | Exists when                                                                                                                           |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | Auction Center, Transfers Center | Auction leagues only                                                                                                                  |
-| Squads                           | Auction leagues, **after the auction has run**. One page, not two — see `docs/08-pages/squads.md`                                      |
+| Squads                           | Auction leagues, **after the auction has run**. One page, not two — see `docs/08-pages/squads.md`                                     |
 | My Team                          | Everyone except spectators — and in an auction league, **not before the auction has completed**, since there is no squad to pick from |
 | Admin Center                     | Owner and admins only                                                                                                                 |
 

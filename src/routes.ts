@@ -25,6 +25,13 @@ export const ROUTES = {
    * system admin builds one and can see it before it is published.
    */
   tournament: '/tournaments/:tournamentId',
+
+  /**
+   * Standard points entry for one tournament, system admins only. Reached from
+   * tournament home rather than the admin panel, so the tournament is already
+   * chosen and no picker is needed to choose it again.
+   */
+  tournamentPoints: '/tournaments/:tournamentId/points',
   createLeague: '/leagues/new',
   actions: '/actions',
   admin: '/admin',
@@ -63,6 +70,10 @@ export type RoutePath = (typeof ROUTES)[keyof typeof ROUTES]
 /** Built rather than spelled out, for the reason in the header above. */
 export function tournamentPath(tournamentId: string): string {
   return `/tournaments/${tournamentId}`
+}
+
+export function tournamentPointsPath(tournamentId: string): string {
+  return `/tournaments/${tournamentId}/points`
 }
 
 export function leaguePath(leagueId: string, section?: string): string {

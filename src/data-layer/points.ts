@@ -16,13 +16,17 @@
  */
 
 import type {
+  GameWeekId,
   LeagueId,
   Match,
   MatchId,
+  MatchPlayers,
   Player,
   PlayerPoints,
   TournamentId,
+  UserId,
 } from '@/types'
+import { getApi } from './api'
 import { notImplemented } from './not-implemented'
 
 /**
@@ -30,11 +34,44 @@ import { notImplemented } from './not-implemented'
  * `isCustomScoringSystem`. Zero and absent are equivalent; the reason a player
  * scored nothing is not recorded.
  */
-export function getPointsForMatch(
+export function getPlayerPointsForMatch(
   leagueId: LeagueId,
   matchId: MatchId,
 ): Promise<PlayerPoints> {
-  return notImplemented('getPointsForMatch', { leagueId, matchId })
+  return getApi().getPlayerPointsForMatch(leagueId, matchId)
+}
+
+// ---------------------------------------------------------------------------
+// A manager's points
+// ---------------------------------------------------------------------------
+
+/**
+ * One manager's score for one match: their eleven, each player's points, the
+ * captain doubled and the vice-captain at one and a half.
+ */
+export function getPointsForMatch(
+  userId: UserId,
+  leagueId: LeagueId,
+  matchId: MatchId,
+): Promise<number> {
+  return getApi().getPointsForMatch(userId, leagueId, matchId)
+}
+
+/** Summed over the gameweek's matches. */
+export function getPointsForGameWeek(
+  userId: UserId,
+  leagueId: LeagueId,
+  gameWeekId: GameWeekId,
+): Promise<number> {
+  return getApi().getPointsForGameWeek(userId, leagueId, gameWeekId)
+}
+
+/** Every match, plus the manager's transfer points adjustment. */
+export function getPointsForLeague(
+  userId: UserId,
+  leagueId: LeagueId,
+): Promise<number> {
+  return getApi().getPointsForLeague(userId, leagueId)
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +124,26 @@ export function updateCustomPoints(
   })
 }
 
+// ---------------------------------------------------------------------------
+// Standard points entry
+// ---------------------------------------------------------------------------
+
+/** Both teams' players for a match. Refused while either team is TBD. */
+export function getPlayersForMatch(
+  tournamentId: TournamentId,
+  matchId: MatchId,
+): Promise<MatchPlayers> {
+  return getApi().getPlayersForMatch(tournamentId, matchId)
+}
+
+/** To prefill the entry form. Prefill must be reliable — see the write below. */
+export function getStandardPointsForMatch(
+  tournamentId: TournamentId,
+  matchId: MatchId,
+): Promise<PlayerPoints> {
+  return getApi().getStandardPointsForMatch(tournamentId, matchId)
+}
+
 /**
  * Standard points, entered once at tournament level by a system admin and used
  * by every league that has not opted into its own scoring.
@@ -94,16 +151,13 @@ export function updateCustomPoints(
  * **Never copied into a league.** Copying would mean applying one correction in
  * every league that opted in.
  *
- * Same dual-write rule as `updateCustomPoints`.
+ * Same full-replace and dual-write rules as `updateCustomPoints`, and it moves
+ * the tournament's scored-till marker forward in the same write.
  */
 export function updateStandardPoints(
   tournamentId: TournamentId,
   matchId: MatchId,
   playerPoints: PlayerPoints,
 ): Promise<void> {
-  return notImplemented('updateStandardPoints', {
-    tournamentId,
-    matchId,
-    playerPoints,
-  })
+  return getApi().updateStandardPoints(tournamentId, matchId, playerPoints)
 }

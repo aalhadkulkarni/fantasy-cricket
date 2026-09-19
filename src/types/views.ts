@@ -35,7 +35,14 @@ import type {
 import type { Format, LeagueRole, PlayerRole } from './reference'
 import type { Player } from './player'
 import type { Match } from './tournament'
-import type { League, LeagueEntry, LineupRules, RoundConfig } from './league'
+import type { Team } from './team'
+import type {
+  GameWeek,
+  League,
+  LeagueEntry,
+  LineupRules,
+  RoundConfig,
+} from './league'
 import type { ArchivedLeagueIndexEntry, LeagueIndexEntry } from './user'
 import type { BannedUser, JoinRequest } from './membership'
 import type { ManagerAuctionStatus } from './live-auction'
@@ -128,7 +135,11 @@ export interface LeagueSummary {
   leagueJoinCode: string
   phase: LeaguePhase
 
-  /** The next moment anything locks. Absent once the league is finished. */
+  /**
+   * The next team deadline still ahead: the next match's in a match-based
+   * league, the next gameweek's first match's in a gameweek league. Absent
+   * when none is left, or when the next one has no start time yet.
+   */
   nextDeadline?: number
 
   /** Absent for a spectator, and for an admin who does not play. */
@@ -143,6 +154,19 @@ export interface LeagueSummary {
    * it is still editable without reading the league again.
    */
   deadlineOffset: number
+
+  /**
+   * What a manager may change across the whole league. **Absent means
+   * unlimited**, matching the stored counters.
+   *
+   * Carried here so the screen can say "0 of 6" on match one, where there is no
+   * previous match to read a remaining count from.
+   */
+  changeAllowances: {
+    teamChanges?: number
+    captainChanges?: number
+    viceCaptainChanges?: number
+  }
 
   /**
    * The two facts that decide which sections exist. **A league is one type for
@@ -369,6 +393,60 @@ export interface LeaderboardRow {
  */
 export type ScoringWatermark = Match | undefined
 
+/** One round of a gameweek league, as League Details shows it. */
+export interface RoundDetails {
+  roundName: string
+  gameWeeks: number
+  /** Most players changeable going into the round. Absent means unlimited. */
+  beforeRoundCap?: number
+  /** Most players changeable between gameweeks inside it. Absent means unlimited. */
+  betweenGameWeeksCap?: number
+  isImpactSubAllowed: boolean
+}
+
+/**
+ * **A league's configuration, resolved for reading.** Owner and tournament come
+ * back as names, allowances as numbers or absent for unlimited, and rounds in
+ * fixture order, so the page never needs to know how any of it is stored.
+ */
+export interface LeagueDetails {
+  leagueId: LeagueId
+  leagueName: string
+  tournamentName: string
+  ownerName: string
+  isAuctionEnabled: boolean
+  isGameWeeksEnabled: boolean
+  leagueEntry: LeagueEntry
+  managers: number
+  maxSlots: number
+  /** Milliseconds before a match's start that teams lock. */
+  deadlineOffset: number
+  isCustomScoringSystem: boolean
+  scoringRulesText?: string
+  /** Match-based leagues only. Absent means unlimited. */
+  changeAllowances: {
+    teamChanges?: number
+    captainChanges?: number
+    viceCaptainChanges?: number
+  }
+  /** Gameweek leagues only, in fixture order. */
+  rounds: RoundDetails[]
+  finishedAt?: number
+  /** The scheduled start of the league's last match, which gates finishing it. */
+  lastMatchStartsAt?: number
+}
+
+/**
+ * Standings for one locked match or gameweek.
+ *
+ * **Locked is not the same as scored.** `isScored` is false when its points are
+ * not in yet, so the interface can say so rather than rank everyone on zero.
+ */
+export interface PeriodLeaderboard {
+  rows: LeaderboardRow[]
+  isScored: boolean
+}
+
 // ---------------------------------------------------------------------------
 // Transfers
 // ---------------------------------------------------------------------------
@@ -579,5 +657,54 @@ export interface TournamentFilter {
   includeUnpublished?: boolean
 }
 
+/**
+ * One gameweek of a league, with what the screen cannot derive from it.
+ *
+ * A `GameWeek` stores its first and last match id, and **membership is decided
+ * by `matchNumber`** — ids are push keys that sort by creation time rather than
+ * fixture order. Resolving that is the layer's job, so the ids come back
+ * already worked out.
+ */
+export interface LeagueGameWeek {
+  gameWeek: GameWeek
+  /** The round it belongs to, which `my-team.md` asks to be shown beside it. */
+  roundName: string
+  /** The matches it spans, in order. A gameweek aggregate sums across these. */
+  matchIds: readonly MatchId[]
+  /** The first match's start. The deadline is this minus the league's offset. */
+  startsAt?: number
+
+  /**
+   * The most players that may change **going into this gameweek**, from the one
+   * before it. Absent means unlimited, and it is also absent for the very first
+   * gameweek, which has no previous one to differ from.
+   *
+   * **A cap on each transition, not a pool for the round.** Entering a round is
+   * limited by that round's "before the round starts" allowance; moving between
+   * gameweeks inside it by its "between gameweeks" one. Resolved here so a
+   * screen never needs to know how a league's rounds are configured.
+   *
+   * Captain and vice-captain changes have no allowance in a gameweek league and
+   * are unlimited.
+   */
+  changeCap?: number
+}
+
 /** One player's score for a match. Blank and zero are equivalent. */
 export type PlayerPoints = Record<PlayerId, number>
+
+/** One side of a fixture, with the players it has in this tournament. */
+export interface MatchSide {
+  team: Team
+  /** Sorted by name. */
+  players: Player[]
+}
+
+/**
+ * Who can be scored in a match: both teams' players in this tournament. Only
+ * ever returned for a match whose two teams are known.
+ */
+export interface MatchPlayers {
+  match: Match
+  sides: [MatchSide, MatchSide]
+}

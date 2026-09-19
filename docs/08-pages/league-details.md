@@ -2,6 +2,10 @@
 
 **Sidebar item on league home. Everyone can view it; admins edit in place.**
 
+> **Read-only for now.** Editing, with its per-field locks below, comes later.
+> Until Admin Center exists, the owner and admins also **mark the league
+> finished** here.
+
 Full configuration in one place: rules, scoring system, gameweek structure,
 auction settings.
 

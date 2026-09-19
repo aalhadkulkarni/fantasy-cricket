@@ -602,9 +602,16 @@ const dataModel = {
         Absent means not yet, as everywhere else. Note Firebase deletes a key
         written as null, so the read path must treat ABSENT as "not published"
         and "not complete".
+
+        pointsUpdatedTillMatchId is the furthest match, by matchNumber, whose
+        standard points have been entered. Written in the same atomic update as
+        the points, and FORWARD ONLY: correcting match 3 after match 7 leaves it
+        at 7. Points entry opens on the match after it. Absent until the first
+        match is scored.
       */
       publishedAt: 1806000000000,
       completedAt: null,
+      pointsUpdatedTillMatchId: 'match001',
       startDate: 1806431400000,
       endDate: 1811701800000,
       participatingTeams: { team001: true, team004: true },
@@ -1172,8 +1179,11 @@ const dataModel = {
         the league first to know how to interpret what you just fetched. Split,
         the PATH is the discriminant and each node has one concrete shape.
 
-    Density is unchanged: match-based is one entry per match copied forward,
-    game-week is one per game week and never was dense.
+    Both are dense: saving writes the same team to that match or game week
+    and every later one, because a team applies until it is changed. Game
+    week lineups were once one entry per game week, written only when saved;
+    they are copied forward now so a game week always has a team once one has
+    been submitted. A copy replaces the whole node, clearing any impact sub.
     =========================================================
   */
 

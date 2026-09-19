@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 
+import { isSystemAdmin, useAuth } from '@/auth/auth-context'
 import { PageContainer } from '@/components/layout/page-container'
 import { FixturesDialog } from '@/components/tournaments/fixtures-dialog'
 import { LeagueRow } from '@/components/tournaments/league-row'
@@ -12,7 +13,7 @@ import {
   getTeams,
   getTournament,
 } from '@/data-layer'
-import { ROUTES } from '@/routes'
+import { ROUTES, tournamentPointsPath } from '@/routes'
 import type {
   Competition,
   FormatRecord,
@@ -181,6 +182,8 @@ function Header({
   const formatName =
     formats.find((f) => f.formatId === formatId)?.formatName ?? formatId
 
+  const { state } = useAuth()
+
   const matches = Object.keys(tournament.matches ?? {}).length
   const rounds = Object.keys(tournament.rounds ?? {}).length
 
@@ -211,6 +214,17 @@ function Header({
         <Button asChild>
           <Link to={ROUTES.createLeague}>Create a league</Link>
         </Button>
+        {/*
+          System admins only, and only a convenience: the route redirects
+          anyone else and the layer refuses their write.
+        */}
+        {isSystemAdmin(state) && (
+          <Button variant="outline" asChild>
+            <Link to={tournamentPointsPath(tournament.tournamentId)}>
+              Update points
+            </Link>
+          </Button>
+        )}
       </div>
     </div>
   )

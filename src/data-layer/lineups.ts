@@ -12,6 +12,7 @@
  */
 
 import type {
+  LeagueGameWeek,
   ChangesRemaining,
   GameWeek,
   GameWeekId,
@@ -43,6 +44,16 @@ export function getCurrentRound(leagueId: LeagueId): Promise<Round> {
   return getApi().getCurrentRound(leagueId)
 }
 
+/**
+ * Every gameweek in the league, in order, for moving between them.
+ *
+ * Each carries the round it belongs to and the matches it spans, both resolved
+ * by `matchNumber` — ids are push keys and sort by creation time.
+ */
+export function getGameWeeks(leagueId: LeagueId): Promise<LeagueGameWeek[]> {
+  return getApi().getGameWeeks(leagueId)
+}
+
 export function getCurrentGameWeek(leagueId: LeagueId): Promise<GameWeek> {
   return getApi().getCurrentGameWeek(leagueId)
 }
@@ -62,6 +73,18 @@ export function getMyTeamForGameWeek(
   gameWeekId: GameWeekId,
 ): Promise<GameWeekLineup | undefined> {
   return getApi().getMyTeamForGameWeek(leagueId, gameWeekId)
+}
+
+/**
+ * The eleven a gameweek's changes are measured from: the last gameweek with a
+ * saved team before this one, after any impact sub. Absent for the first
+ * gameweek and for a manager's first ever team, where nothing is spent.
+ */
+export function getMyTeamBeforeGameWeek(
+  leagueId: LeagueId,
+  gameWeekId: GameWeekId,
+): Promise<LineupSubmission | undefined> {
+  return getApi().getMyTeamBeforeGameWeek(leagueId, gameWeekId)
 }
 
 /** Absent when nothing has been submitted for this match yet. */
@@ -100,31 +123,31 @@ export function getChangesRemaining(
 /**
  * **Returns nothing when the deadline has not passed and the requester is not
  * that manager.** It does not return the team and trust the caller to hide it.
+ * League admins are not exempt.
  *
  * Identity comes from context. A client-supplied "who is asking" is exactly the
  * cheating vector this exists to close.
  */
-export function getTeamFor(
+export function getTeamForMatch(
   leagueId: LeagueId,
   managerId: UserId,
   matchId: MatchId,
 ): Promise<MatchLineup | undefined> {
-  return notImplemented('getTeamFor', { leagueId, managerId, matchId })
+  return getApi().getTeamForMatch(leagueId, managerId, matchId)
 }
 
 /**
- * The locked eleven, for highlighting a squad and for the leaderboard's team
- * modal.
+ * The same rule for a gameweek, which locks at its first match's deadline.
  *
- * **An impact sub whose match has not started is not visible here.** Visibility
- * is per match rather than per gameweek precisely because of that.
+ * **An impact sub whose match has not reached its deadline is left out.**
+ * Visibility is per match rather than per gameweek precisely because of that.
  */
-export function getLockedTeamFor(
+export function getTeamForGameWeek(
   leagueId: LeagueId,
   managerId: UserId,
-  matchId: MatchId,
-): Promise<MatchLineup | undefined> {
-  return notImplemented('getLockedTeamFor', { leagueId, managerId, matchId })
+  gameWeekId: GameWeekId,
+): Promise<GameWeekLineup | undefined> {
+  return getApi().getTeamForGameWeek(leagueId, managerId, gameWeekId)
 }
 
 // ---------------------------------------------------------------------------
