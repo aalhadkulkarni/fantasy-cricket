@@ -380,10 +380,18 @@ function Standings({
             return (
               <tr
                 key={row.managerId}
-                className={mine ? 'bg-secondary/60' : undefined}
+                className={mine ? 'bg-live/12' : undefined}
                 aria-current={mine ? 'true' : undefined}
               >
-                <td className="rounded-l-lg px-3 py-3.5 font-mono text-sm text-muted-foreground">
+                <td
+                  className={`rounded-l-lg px-3 py-3.5 font-mono text-sm ${
+                    // An accent bar down the left edge, so your row is found
+                    // at a glance rather than by reading for "You".
+                    mine
+                      ? 'font-bold text-foreground shadow-[inset_3px_0_0_var(--live)]'
+                      : 'text-muted-foreground'
+                  }`}
+                >
                   {row.rank}
                 </td>
                 <td className="max-w-0 px-3 py-3.5">

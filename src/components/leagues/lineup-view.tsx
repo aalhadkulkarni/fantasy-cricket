@@ -1,3 +1,4 @@
+import { PlayerName } from '@/components/leagues/player-name'
 import { RoleTag } from '@/components/leagues/role-tag'
 import type { Player, PlayerId, PlayerPoints } from '@/types'
 
@@ -73,9 +74,10 @@ export function LineupView({
               className="flex items-center justify-between gap-3 py-3.5"
             >
               <span className="flex min-w-0 items-center gap-2.5">
-                <span className="truncate text-[15px] font-medium">
-                  {player.playerName}
-                </span>
+                <PlayerName
+                  player={player}
+                  className="text-[15px] font-medium"
+                />
                 <RoleTag role={player.playerRole} />
                 {player.playerId === captainId && <Badge>C</Badge>}
                 {player.playerId === viceCaptainId && <Badge>VC</Badge>}

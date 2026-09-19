@@ -11,6 +11,7 @@ import { LockedTeam } from '@/components/leagues/locked-team'
 import { PeriodNav, type Period } from '@/components/leagues/period-nav'
 import { changeClass } from '@/components/leagues/change'
 import { ChangeMark } from '@/components/leagues/change-mark'
+import { PlayerName } from '@/components/leagues/player-name'
 import { PlayerPicker } from '@/components/leagues/player-picker'
 import { gameWeekPoints, toSaved } from '@/components/leagues/team-data'
 import { Button } from '@/components/ui/button'
@@ -777,13 +778,13 @@ function Captaincy({
           <span className="shrink-0 rounded-[4px] border px-1.5 py-0.5 font-mono text-[9.5px] tracking-[0.08em] text-subtle-foreground uppercase">
             {badge}
           </span>
-          <span
-            className={`truncate text-[15px] ${
-              player === undefined ? 'text-subtle-foreground' : 'font-medium'
-            }`}
-          >
-            {player?.playerName ?? label}
-          </span>
+          {player === undefined ? (
+            <span className="truncate text-[15px] text-subtle-foreground">
+              {label}
+            </span>
+          ) : (
+            <PlayerName player={player} className="text-[15px] font-medium" />
+          )}
         </span>
         <ChangeMark change={change} />
       </SelectTrigger>
@@ -803,7 +804,7 @@ function Captaincy({
           .filter((p) => p.playerId !== exclude)
           .map((p) => (
             <SelectItem key={p.playerId} value={p.playerId}>
-              {p.playerName}
+              <PlayerName player={p} />
             </SelectItem>
           ))}
       </SelectContent>
