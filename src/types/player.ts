@@ -23,6 +23,14 @@ export interface Player {
   playerName: string
   playerShortName: string
 
+  /**
+   * **The team they play for in the tournament being viewed**, as its short
+   * name — "IND". Resolved by the layer from the tournament's frozen
+   * `participatingPlayers`, never from `currentTeams`. Absent wherever no
+   * tournament is in context, such as the admin's player catalogue.
+   */
+  teamShortName?: string
+
   /** Overseas is derived from this: anything that is not India. */
   country: string
 

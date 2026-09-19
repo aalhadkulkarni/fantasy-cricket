@@ -525,12 +525,60 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
    * Ids to players, **in the order given**, because a lineup is a list rather
    * than a set and the order it was picked in is the order it reads back.
    */
-  async function resolvePlayers(ids: readonly PlayerId[]): Promise<Player[]> {
-    const everyone = await service.read<Record<string, Player>>(paths.players())
+  async function resolvePlayers(
+    ids: readonly PlayerId[],
+    leagueId: LeagueId,
+  ): Promise<Player[]> {
+    const [everyone, teamOf] = await Promise.all([
+      service.read<Record<string, Player>>(paths.players()),
+      leagueTeams(leagueId),
+    ])
 
     return ids
       .map((id) => everyone?.[id])
       .filter((player): player is Player => player !== undefined)
+      .map((player) => withTeam(player, teamOf))
+  }
+
+  /**
+   * **Each player's team in this league's tournament, as a short name.** From
+   * the tournament's frozen `participatingPlayers`, so a player who has since
+   * moved club still shows the team they played for here.
+   */
+  async function leagueTeams(leagueId: LeagueId): Promise<Map<string, string>> {
+    const tournamentId = await service.read<TournamentId>(
+      service.path('leagues', leagueId, 'tournamentId'),
+    )
+    if (tournamentId === undefined) return new Map()
+    return tournamentTeams(tournamentId)
+  }
+
+  async function tournamentTeams(
+    tournamentId: TournamentId,
+  ): Promise<Map<string, string>> {
+    const [participants, teams] = await Promise.all([
+      service.read<Partial<Record<string, TeamId>>>(
+        service.path('tournaments', tournamentId, 'participatingPlayers'),
+      ),
+      service.read<Record<string, Team>>(paths.teams()),
+    ])
+
+    const teamOf = new Map<string, string>()
+    for (const [playerId, teamId] of Object.entries(participants ?? {})) {
+      const short =
+        teamId === undefined ? undefined : teams?.[teamId]?.teamShortName
+      // Every participant is kept, even one whose team has no record, so this
+      // also answers "is this player in the tournament"; '' means no name.
+      teamOf.set(playerId, short ?? '')
+    }
+    return teamOf
+  }
+
+  function withTeam(player: Player, teamOf: Map<string, string>): Player {
+    const teamShortName = teamOf.get(player.playerId)
+    return teamShortName === undefined || teamShortName === ''
+      ? player
+      : { ...player, teamShortName }
   }
 
   /**
@@ -591,7 +639,10 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
     )
     if (stored === undefined) return undefined
 
-    return { ...stored, lineup: await resolvePlayers(stored.lineup) }
+    return {
+      ...stored,
+      lineup: await resolvePlayers(stored.lineup, leagueId),
+    }
   }
 
   /** A manager's stored team for a gameweek, resolved. No visibility check. */
@@ -606,10 +657,10 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
     if (stored === undefined) return undefined
 
     const [startingLineup, postImpactSubLineup] = await Promise.all([
-      resolvePlayers(stored.startingLineup),
+      resolvePlayers(stored.startingLineup, leagueId),
       stored.postImpactSubLineup === undefined
         ? undefined
-        : resolvePlayers(stored.postImpactSubLineup),
+        : resolvePlayers(stored.postImpactSubLineup, leagueId),
     ])
 
     return {
@@ -2485,20 +2536,44 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         upcomingDeadline(leagueId, isGameWeeksEnabled === true),
       ])
 
+      const phase = derivePhase({
+        finishedAt,
+        tournamentStartDate: startDate,
+        isAuctionEnabled: isAuctionEnabled === true,
+        auctionStartTime,
+        auctionHasStarted: runtime !== undefined,
+        now: Date.now(),
+      })
+
+      /*
+        **Your place in the overall standings, read from the stored
+        leaderboard**, so it costs a few small reads rather than a recompute —
+        and a miss here warms the cache for the Leaderboard page.
+
+        Only for a manager, and only once the league is under way: before then
+        everyone is on zero and would read as joint first. A failure leaves it
+        absent rather than failing the whole header.
+      */
+      let myRank: number | undefined
+      if (
+        me?.leagueRoles?.manager === true &&
+        (phase === 'active' || phase === 'finished')
+      ) {
+        try {
+          const rows = await api.getLeaderboardForLeague(leagueId)
+          myRank = rows.find((row) => row.managerId === userId)?.rank
+        } catch {
+          myRank = undefined
+        }
+      }
+
       return {
         leagueId,
         leagueName,
         leagueJoinCode: leagueJoinCode ?? '',
-        phase: derivePhase({
-          finishedAt,
-          tournamentStartDate: startDate,
-          isAuctionEnabled: isAuctionEnabled === true,
-          auctionStartTime,
-          auctionHasStarted: runtime !== undefined,
-          now: Date.now(),
-        }),
+        phase,
         ...(nextDeadline === undefined ? {} : { nextDeadline }),
-        // Rank is deliberately absent. See the contract.
+        ...(myRank === undefined ? {} : { myRank }),
         deadlineOffset: offset ?? 0,
         changeAllowances: {
           ...(teamAllowance === undefined
@@ -2686,7 +2761,7 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
 
         const ids = earlier.postImpactSubLineup ?? earlier.startingLineup
         return {
-          lineup: await resolvePlayers(ids),
+          lineup: await resolvePlayers(ids, leagueId),
           captainId: earlier.captainId,
           viceCaptainId: earlier.viceCaptainId,
         }
@@ -3136,17 +3211,15 @@ export function createFirebaseApi(environment: Environment): FirebaseApi {
         throw new DataLayerError('unknown', 'That league no longer exists.')
       }
 
-      const [participants, everyone] = await Promise.all([
-        service.read<Partial<Record<PlayerId, TeamId>>>(
-          service.path('tournaments', tournamentId, 'participatingPlayers'),
-        ),
+      const [teamOf, everyone] = await Promise.all([
+        tournamentTeams(tournamentId),
         service.read<Record<string, Player>>(paths.players()),
       ])
 
-      const ids = new Set(Object.keys(participants ?? {}))
-
+      // Every participant is in the map, so it doubles as the membership test.
       return Object.values(everyone ?? {})
-        .filter((player) => ids.has(player.playerId))
+        .filter((player) => teamOf.has(player.playerId))
+        .map((player) => withTeam(player, teamOf))
         .sort((a, b) => a.playerName.localeCompare(b.playerName))
     },
 

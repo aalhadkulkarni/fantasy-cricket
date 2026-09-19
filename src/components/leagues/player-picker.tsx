@@ -6,6 +6,7 @@ import {
 } from '@/components/ui/select'
 import { changeClass, type Change } from '@/components/leagues/change'
 import { ChangeMark } from '@/components/leagues/change-mark'
+import { PlayerName } from '@/components/leagues/player-name'
 import { RoleTag } from '@/components/leagues/role-tag'
 import type { Player, PlayerId } from '@/types'
 
@@ -65,9 +66,7 @@ export function PlayerPicker({
             </span>
           ) : (
             <>
-              <span className="truncate text-[15px] font-medium">
-                {player.playerName}
-              </span>
+              <PlayerName player={player} className="text-[15px] font-medium" />
               <RoleTag role={player.playerRole} />
             </>
           )}
@@ -92,7 +91,7 @@ export function PlayerPicker({
         {available.map((p) => (
           <SelectItem key={p.playerId} value={p.playerId}>
             <span className="flex w-full items-center justify-between gap-3">
-              <span className="truncate">{p.playerName}</span>
+              <PlayerName player={p} />
               <RoleTag role={p.playerRole} />
             </span>
           </SelectItem>

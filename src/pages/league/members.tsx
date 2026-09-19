@@ -69,7 +69,14 @@ export function Members() {
             {members.map((member) => (
               <li
                 key={member.userId}
-                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-3.5"
+                aria-current={member.userId === me ? 'true' : undefined}
+                className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-3.5 ${
+                  // Tinted and barred like the leaderboard, bleeding to the
+                  // list's edges so it reads as a highlighted row.
+                  member.userId === me
+                    ? '-mx-5 bg-live/12 px-5 shadow-[inset_3px_0_0_var(--live)]'
+                    : ''
+                }`}
               >
                 <div className="min-w-0">
                   <p className="truncate text-[15px] font-medium">
