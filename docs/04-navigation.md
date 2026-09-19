@@ -21,6 +21,7 @@ state.
 | `/tournaments/:tournamentId`        | Tournament detail                         |
 | `/tournaments/:tournamentId/points` | Standard points entry, system admins only |
 | `/leagues/new`                      | Create a league                           |
+| `/points-system`                    | Standard points, per format               |
 | `/admin`                            | System admin panel                        |
 
 ### Inside a league

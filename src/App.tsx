@@ -8,6 +8,7 @@ import { CreateLeague } from './pages/create-league'
 import { Login } from './pages/login'
 import { MyLeagues } from './pages/my-leagues'
 import { NotFound } from './pages/not-found'
+import { PointsSystem } from './pages/points-system'
 import { LeagueDetails } from './pages/league/league-details'
 import { Leaderboard } from './pages/league/leaderboard'
 import { Members } from './pages/league/members'
@@ -64,6 +65,7 @@ function App() {
                 />
                 <Route path={ROUTES.createLeague} element={<CreateLeague />} />
                 <Route path={ROUTES.actions} element={<ActionsCenter />} />
+                <Route path={ROUTES.pointsSystem} element={<PointsSystem />} />
                 {/*
                   League home wraps its sections, so the summary strip and the
                   sidebar are not remounted when moving between them.
