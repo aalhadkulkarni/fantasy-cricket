@@ -167,26 +167,63 @@ function Band({ league }: { league: LeagueSummary }) {
 
       <PageContainer>
         {collapsed ? (
-          <div className="flex items-center justify-between gap-3 py-3">
+          /*
+            **Everything the expanded band shows, in the same two lines.** Name
+            over the join code on the left; the three facts as small
+            label-over-value columns on the right, which is space the single
+            line of text left empty. A phone has no room for the columns, so
+            there they fold into the second line, rank included.
+          */
+          <div className="flex items-center justify-between gap-4 py-3">
             <div className="min-w-0">
               <h1 className="truncate text-lg font-bold tracking-tight">
                 {league.leagueName}
               </h1>
-              <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[11px] text-subtle-foreground">
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[11px] text-subtle-foreground">
                 {league.leagueJoinCode !== '' && (
-                  <span className="tracking-[0.12em]">
-                    {league.leagueJoinCode}
-                  </span>
+                  <JoinCode code={league.leagueJoinCode} compact />
                 )}
-                <span>Next deadline {deadline ?? '—'}</span>
-                {/* Only where it fits; the phone keeps the three above. */}
-                <span className="hidden items-center gap-1.5 sm:flex">
-                  <PhaseDot phase={league.phase} />
-                  {PHASE_LABEL[league.phase]}
+                {/*
+                  Label quiet, value brighter, a dot between items, so the
+                  phone line reads as separate facts rather than one sentence.
+                */}
+                <span className="flex items-center gap-x-3 lg:hidden">
+                  <span>
+                    Deadline{' '}
+                    <span className="text-muted-foreground">
+                      {deadline ?? '—'}
+                    </span>
+                  </span>
+                  {league.myRank !== undefined && (
+                    <>
+                      <span aria-hidden>·</span>
+                      <span>
+                        Rank{' '}
+                        <span className="font-bold text-foreground">
+                          {league.myRank}
+                        </span>
+                      </span>
+                    </>
+                  )}
                 </span>
-              </p>
+              </div>
             </div>
-            <Toggle collapsed onToggle={toggle} />
+
+            <div className="flex shrink-0 items-center gap-6">
+              <div className="hidden items-center gap-6 lg:flex">
+                <MiniFact label="Phase">
+                  <span className="flex items-center gap-1.5">
+                    <PhaseDot phase={league.phase} />
+                    {PHASE_LABEL[league.phase]}
+                  </span>
+                </MiniFact>
+                <MiniFact label="Next deadline">{deadline ?? '—'}</MiniFact>
+                <MiniFact label="Your rank">
+                  {league.myRank === undefined ? '—' : String(league.myRank)}
+                </MiniFact>
+              </div>
+              <Toggle collapsed onToggle={toggle} />
+            </div>
           </div>
         ) : (
           <div className="relative">
@@ -295,6 +332,20 @@ function PhaseDot({ phase }: { phase: LeaguePhase }) {
         phase === 'active' ? 'bg-settled' : 'bg-subtle-foreground'
       }`}
     />
+  )
+}
+
+/** `Fact`, sized for the collapsed band: the same two lines as the name. */
+function MiniFact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <p className="font-mono text-[9.5px] tracking-[0.14em] text-subtle-foreground uppercase">
+        {label}
+      </p>
+      <p className="mt-0.5 text-sm font-semibold whitespace-nowrap">
+        {children}
+      </p>
+    </div>
   )
 }
 
