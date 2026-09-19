@@ -224,9 +224,9 @@ function Band({ league }: { league: LeagueSummary }) {
                 <Fact label="Next deadline">{deadline ?? '—'}</Fact>
 
                 {/*
-                  Absent until the league is active. Working it out needs every
-                  manager's lineups plus the points node, and before a ball is
-                  bowled everyone is on zero.
+                  From the stored leaderboard. Absent until the league is active,
+                  since before a ball is bowled everyone is on zero, and for
+                  anyone not playing.
                 */}
                 <Fact label="Your rank">
                   {league.myRank === undefined ? (
