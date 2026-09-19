@@ -106,7 +106,13 @@ export function SiteHeader() {
   const [isJoinOpen, setIsJoinOpen] = useState(false)
 
   return (
-    <header className="border-b">
+    /*
+      **Pinned to the top while the page scrolls**, so navigation and Actions
+      are always one tap away on a long team or leaderboard. Opaque with a
+      light blur, so content does not show through the links; below the
+      popovers and dialogs, which sit at z-50.
+    */
+    <header className="sticky top-0 z-40 border-b bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/75">
       <PageContainer className="flex h-[58px] items-center gap-6 sm:gap-[26px]">
         <MobileNav
           navItems={navItems}

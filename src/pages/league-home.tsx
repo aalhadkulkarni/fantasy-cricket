@@ -183,12 +183,29 @@ function Band({ league }: { league: LeagueSummary }) {
                 {league.leagueJoinCode !== '' && (
                   <JoinCode code={league.leagueJoinCode} compact />
                 )}
-                <span className="lg:hidden">
-                  Next deadline {deadline ?? '—'}
+                {/*
+                  Label quiet, value brighter, a dot between items, so the
+                  phone line reads as separate facts rather than one sentence.
+                */}
+                <span className="flex items-center gap-x-3 lg:hidden">
+                  <span>
+                    Deadline{' '}
+                    <span className="text-muted-foreground">
+                      {deadline ?? '—'}
+                    </span>
+                  </span>
+                  {league.myRank !== undefined && (
+                    <>
+                      <span aria-hidden>·</span>
+                      <span>
+                        Rank{' '}
+                        <span className="font-bold text-foreground">
+                          {league.myRank}
+                        </span>
+                      </span>
+                    </>
+                  )}
                 </span>
-                {league.myRank !== undefined && (
-                  <span className="lg:hidden">Rank {league.myRank}</span>
-                )}
               </div>
             </div>
 
