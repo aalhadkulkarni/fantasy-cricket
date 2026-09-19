@@ -1141,6 +1141,45 @@ const dataModel = {
     },
   },
 
+  /*
+    =========================================================
+    DERIVED COPIES — thrown away and rebuilt, never edited.
+
+    standardPointsUpdatedAt says when standard points last changed: overall,
+    and per match. Written in the same atomic update() as the points. It is only
+    ever compared for EQUALITY against the value a leaderboard was built from,
+    never against a clock, so a slow browser clock cannot hide a correction.
+
+    leaderboards is a league's stored standings. Each holds its rows, the
+    stamp values it was built from (basedOn), and when. It is valid while both
+    still equal the current stamps; otherwise it is recomputed and overwritten.
+    membersUpdatedAt is bumped by every write that changes who is in the
+    league. Kept out of leagues/ because a join reads the league whole, and a
+    season of standings is around a megabyte.
+    =========================================================
+  */
+  standardPointsUpdatedAt: {
+    tournament001: {
+      overall: 1806500000000,
+      matches: { match001: 1806500000000 },
+    },
+  },
+
+  leaderboards: {
+    league001: {
+      membersUpdatedAt: 1806400000000,
+      main: {
+        rows: [
+          { rank: 1, managerId: 'user001', managerName: 'Asha', fantasyTeamName: 'Asha XI', points: 412 },
+        ],
+        basedOn: { points: 1806500000000, members: 1806400000000 },
+        leaderboardComputedAt: 1806500100000,
+      },
+      // gameWeeks: { gameweek001: { rows, matchIds, firstMatchNumber, basedOn, leaderboardComputedAt } },
+      // matches:   { match001: { rows, firstMatchNumber, basedOn, leaderboardComputedAt } },
+    },
+  },
+
   customPointsByPlayer: {
     league002: {
       player001: {

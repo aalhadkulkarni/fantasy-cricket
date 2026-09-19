@@ -508,7 +508,7 @@ export interface Api {
    *
    * Ties share a rank and the next rank skips by the number tied.
    */
-  getLeaderboard(leagueId: LeagueId): Promise<LeaderboardRow[]>
+  getLeaderboardForLeague(leagueId: LeagueId): Promise<LeaderboardRow[]>
 
   /** **Refused before the gameweek's first match deadline.** */
   getLeaderboardForGameWeek(

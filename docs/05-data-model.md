@@ -102,6 +102,12 @@ league configuration.
 `standardPointsByMatch` · `standardPointsByPlayer` ·
 `customPointsByMatch` · `customPointsByPlayer`
 
+**Derived copies** — thrown away and rebuilt, never edited
+
+`standardPointsUpdatedAt` (when points last changed, overall and per match) ·
+`leaderboards` (a league's stored standings and the stamps they were built
+from). Kept out of `leagues` because a join reads the league whole.
+
 **Indexes**
 
 `leagueCodeToLeagueMapping`
@@ -184,6 +190,10 @@ captain and vice-captain multipliers.
 **Why:** a scoring correction means editing one number, and every view is
 instantly right. Stored totals would mean finding and fixing every manager the
 mistake touched.
+
+**The leaderboard cache does not break this.** It is a derived copy, retired
+whenever the points or members it was built from change, so it can never hold a
+correction's old answer. It is not a place anyone edits.
 
 **The one exception** is `pointsAdjustment` on a league member — the net effect
 of accepted transfers, which is not derivable from player points. It is kept as

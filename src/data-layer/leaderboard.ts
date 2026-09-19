@@ -34,8 +34,10 @@ import type {
 import { getApi } from './api'
 
 /** Overall, which is what the page opens on. */
-export function getLeaderboard(leagueId: LeagueId): Promise<LeaderboardRow[]> {
-  return getApi().getLeaderboard(leagueId)
+export function getLeaderboardForLeague(
+  leagueId: LeagueId,
+): Promise<LeaderboardRow[]> {
+  return getApi().getLeaderboardForLeague(leagueId)
 }
 
 /** **Only locked gameweeks may be asked for.** A gameweek locks at its first match's deadline. */
