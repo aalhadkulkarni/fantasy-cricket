@@ -67,8 +67,7 @@ const API_BASE_URLS: Readonly<Record<Environment, string>> = {
   local: 'http://localhost:3000',
   test: '',
   preprod: '',
-  // Filled in from the real service URL after the first deploy.
-  prod: '',
+  prod: 'https://api-65959591798.asia-southeast1.run.app',
 }
 
 export function apiBaseUrl(environment: Environment): string {
