@@ -11,6 +11,8 @@ on:
     paths-ignore:
       - 'apps/api/**'
       - '.github/workflows/api-deploy.yml'
+      - 'docs/**'
+      - '**/*.md'
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest

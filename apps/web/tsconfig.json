@@ -1,0 +1,8 @@
+{
+  "//": "Solution file for the web app: the browser sources and the Vite config are separate projects with different libs.",
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ]
+}
