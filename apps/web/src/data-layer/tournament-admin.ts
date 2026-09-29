@@ -12,13 +12,14 @@
 
 import type {
   MatchConfig,
+  OfficialLeagues,
   PlayerId,
   TeamId,
   TournamentConfig,
   TournamentId,
   TournamentRoundConfig,
 } from '@fantasy-cricket/shared'
-import { getApi, type OfficialLeagues } from './api'
+import { getApi } from './api'
 
 export type { OfficialLeagues }
 import { notImplemented } from './not-implemented'

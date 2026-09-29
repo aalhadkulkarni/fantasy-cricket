@@ -31,26 +31,26 @@ import type {
   TournamentId,
   TransferProposalId,
   UserId,
-} from './ids'
-import type { Format, LeagueRole, PlayerRole } from './reference'
-import type { Player } from './player'
-import type { Match } from './tournament'
-import type { Team } from './team'
+} from './ids.ts'
+import type { Format, LeagueRole, PlayerRole } from './reference.ts'
+import type { Player } from './player.ts'
+import type { Match } from './tournament.ts'
+import type { Team } from './team.ts'
 import type {
   GameWeek,
   League,
   LeagueEntry,
   LineupRules,
   RoundConfig,
-} from './league'
-import type { ArchivedLeagueIndexEntry, LeagueIndexEntry } from './user'
-import type { BannedUser, JoinRequest } from './membership'
-import type { ManagerAuctionStatus } from './live-auction'
+} from './league.ts'
+import type { ArchivedLeagueIndexEntry, LeagueIndexEntry } from './user.ts'
+import type { BannedUser, JoinRequest } from './membership.ts'
+import type { ManagerAuctionStatus } from './live-auction.ts'
 import type {
   ReceivedTransferProposalEntry,
   SentTransferProposalEntry,
   TransferProposal,
-} from './transfer'
+} from './transfer.ts'
 
 // ---------------------------------------------------------------------------
 // League lifecycle

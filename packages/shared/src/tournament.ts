@@ -14,8 +14,8 @@ import type {
   RoundId,
   TeamId,
   TournamentId,
-} from './ids'
-import type { LeagueEntry } from './league'
+} from './ids.ts'
+import type { LeagueEntry } from './league.ts'
 
 // ---------------------------------------------------------------------------
 // Matches and rounds

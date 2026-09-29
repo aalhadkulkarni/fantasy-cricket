@@ -29,7 +29,7 @@ import type {
   Subscriber,
   SubscriptionErrorHandler,
   Unsubscribe,
-} from './subscriptions'
+} from '@fantasy-cricket/shared'
 
 /**
  * Joined and spectated, merged.

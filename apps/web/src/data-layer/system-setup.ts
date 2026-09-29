@@ -12,7 +12,11 @@
  * hides the button, but that is convenience — the layer is the actual check.
  */
 
-import { getApi, type SamplePlayersResult, type SystemSetupResult } from './api'
+import type {
+  SamplePlayersResult,
+  SystemSetupResult,
+} from '@fantasy-cricket/shared'
+import { getApi } from './api'
 
 export type { SamplePlayersResult, SystemSetupResult }
 

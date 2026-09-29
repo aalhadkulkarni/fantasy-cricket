@@ -13,7 +13,7 @@ import type {
   Subscriber,
   SubscriptionErrorHandler,
   Unsubscribe,
-} from './subscriptions'
+} from '@fantasy-cricket/shared'
 
 /** Fetched once at load and held, not re-fetched per page. */
 export function getActions(): Promise<Action[]> {

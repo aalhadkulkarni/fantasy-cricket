@@ -1,3 +1,5 @@
+import type { Environment } from '@fantasy-cricket/shared'
+
 /**
  * Which deployment this session is running as.
  *
@@ -16,15 +18,10 @@
  * connection. The Firebase service is what performs that translation.
  */
 
-/**
- * All four, because the model defines all four.
- *
- * The array doubles as the runtime validator, the same arrangement the
- * reference tables use in `src/types/reference.ts`.
- */
-export const ENVIRONMENTS = ['local', 'test', 'preprod', 'prod'] as const
-
-export type Environment = (typeof ENVIRONMENTS)[number]
+// Defined in the shared package, because the service needs the same four
+// names: the browser resolves one from its hostname, the service is told one
+// by its deployment.
+export { ENVIRONMENTS, type Environment } from '@fantasy-cricket/shared'
 
 /**
  * **Only `local` and `prod` are reachable today.**

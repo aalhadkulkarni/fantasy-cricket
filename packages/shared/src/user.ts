@@ -21,8 +21,8 @@
  * user ids appear as *values* about as often as they appear as keys.
  */
 
-import type { LeagueId, TournamentId, UserId } from './ids'
-import type { LeagueRole, SystemRole } from './reference'
+import type { LeagueId, TournamentId, UserId } from './ids.ts'
+import type { LeagueRole, SystemRole } from './reference.ts'
 
 /**
  * Tracks the join pipeline and nothing else. Written at exactly two moments:

@@ -1,21 +1,22 @@
 /**
  * The Fantasy Cricket API.
  *
- * **A walking skeleton.** Two routes, enough to prove the chain end to end:
- * the container builds, deploys, reaches the database, and verifies a real
- * signed-in user. The 67 data-layer operations follow once this is standing.
+ * **Every rule the data layer enforces lives here now.** It used to run in the
+ * browser, where anyone could skip it by writing to the database directly.
+ * The browser holds no database access; it signs in, gets a token, and calls
+ * these routes.
  *
- * `docs/10-milestones.md` records why this exists: every rule the data layer
- * enforces is advisory while it runs in the browser.
+ * One route per operation on the contract, registered from the shared
+ * manifest. See `routes.ts`.
  */
 
 import cors from 'cors'
-import express from 'express'
 import { initializeApp, applicationDefault } from 'firebase-admin/app'
-import { getDatabase } from 'firebase-admin/database'
 
+import express from 'express'
 import { authenticate } from './auth.ts'
 import { allowedOrigins, resolveEnvironment } from './environment.ts'
+import { errorHandler, registerRoutes } from './routes.ts'
 
 /*
   Resolved before anything else, so a misconfigured deployment fails at boot
@@ -43,46 +44,16 @@ app.get('/health', (_request, response) => {
 })
 
 /**
- * **The one that matters.** It proves the token check, the database
- * connection and the environment root all work together: it answers with who
- * you are and whether this deployment can read your user record.
+ * **Everything else is the contract, and everything else needs a token.**
+ * The middleware runs before any route, so no operation can be reached
+ * unauthenticated — including the ones whose own checks would have caught it.
  */
-app.get('/v1/whoami', authenticate, async (request, response, next) => {
-  try {
-    const uid = request.session?.uid ?? ''
-    const snapshot = await getDatabase()
-      .ref(`${environment}/users/${uid}/userName`)
-      .get()
+const v1 = express.Router()
+v1.use(authenticate)
+registerRoutes(v1, environment)
+app.use('/v1', v1)
 
-    response.json({
-      uid,
-      environment,
-      userName: (snapshot.val() as string | null) ?? undefined,
-    })
-  } catch (error) {
-    next(error)
-  }
-})
-
-/** Last resort. The message is never returned: it can name internals. */
-app.use(
-  (
-    error: unknown,
-    _request: express.Request,
-    response: express.Response,
-    _next: express.NextFunction,
-  ) => {
-    console.error(
-      JSON.stringify({
-        severity: 'ERROR',
-        message: error instanceof Error ? error.message : String(error),
-      }),
-    )
-    response
-      .status(500)
-      .json({ code: 'internal', message: 'Something went wrong.' })
-  },
-)
+app.use(errorHandler)
 
 /** Cloud Run sets PORT; 3000 is for running it locally. */
 const port = Number(process.env.PORT ?? 3000)

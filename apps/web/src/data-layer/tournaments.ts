@@ -24,7 +24,7 @@ import type {
   Subscriber,
   SubscriptionErrorHandler,
   Unsubscribe,
-} from './subscriptions'
+} from '@fantasy-cricket/shared'
 
 /**
  * **Published only for a non-admin caller.** A tournament with no `publishedAt`

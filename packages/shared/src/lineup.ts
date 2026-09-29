@@ -33,8 +33,8 @@
  * the array beside it.
  */
 
-import type { GameWeekId, MatchId, PlayerId, UserId } from './ids'
-import type { Player } from './player'
+import type { GameWeekId, MatchId, PlayerId, UserId } from './ids.ts'
+import type { Player } from './player.ts'
 
 /**
  * One entry at `matchBasedLineups/{leagueId}/{userId}/{matchId}`.

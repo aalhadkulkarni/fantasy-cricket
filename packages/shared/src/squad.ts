@@ -8,7 +8,7 @@
  * you field out of it.
  */
 
-import type { MatchId, PlayerId, UserId } from './ids'
+import type { MatchId, PlayerId, UserId } from './ids.ts'
 
 /**
  * Keyed by match, because squad membership changes over time: after a transfer

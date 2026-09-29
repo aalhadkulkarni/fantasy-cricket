@@ -10,8 +10,8 @@
  * must not retroactively change what a completed auction ran under.
  */
 
-import type { PlayerId } from './ids'
-import type { LineupRules, LeaguePlayerAuctionDetail } from './league'
+import type { PlayerId } from './ids.ts'
+import type { LineupRules, LeaguePlayerAuctionDetail } from './league.ts'
 
 /**
  * The auction defaults, and the seed for the create form.

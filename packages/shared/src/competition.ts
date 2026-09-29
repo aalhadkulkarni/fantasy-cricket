@@ -6,8 +6,8 @@
  * system-admin concept that never appears in user-facing copy under this name.
  */
 
-import type { CompetitionId } from './ids'
-import type { Format } from './reference'
+import type { CompetitionId } from './ids.ts'
+import type { Format } from './reference.ts'
 
 /**
  * DERIVED: nothing. This node is as small as it looks.

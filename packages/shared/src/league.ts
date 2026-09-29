@@ -22,8 +22,8 @@ import type {
   TournamentId,
   TransferWindowId,
   UserId,
-} from './ids'
-import type { LeagueRole, PlayerCategory, PlayerRole } from './reference'
+} from './ids.ts'
+import type { LeagueRole, PlayerCategory, PlayerRole } from './reference.ts'
 
 // ---------------------------------------------------------------------------
 // Membership
