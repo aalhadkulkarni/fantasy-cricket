@@ -1,0 +1,73 @@
+# Builds the API container and deploys it to Cloud Run.
+#
+# Authentication is keyless: GitHub proves its identity to Google through
+# Workload Identity Federation, which trusts this repository only. No service
+# account key exists anywhere.
+name: Deploy API to Cloud Run on merge to release
+
+on:
+  push:
+    branches:
+      - release
+    paths:
+      - 'apps/api/**'
+      - '.github/workflows/api-deploy.yml'
+  # So the first deploy, and any redeploy, can be run by hand.
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: fantasy-cricket-league-c0346
+  REGION: asia-southeast1
+  SERVICE: api
+  REPOSITORY: api
+
+permissions:
+  contents: read
+  # Required for the federation handshake.
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Allow docker to push to Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      # Tagged with the commit, so a rollback is "deploy the previous tag".
+      - name: Build and push
+        run: |
+          IMAGE=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}
+          docker build -t "$IMAGE" apps/api
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy
+        run: |
+          gcloud run deploy ${{ env.SERVICE }} \
+            --image "$IMAGE" \
+            --region ${{ env.REGION }} \
+            --project ${{ env.PROJECT_ID }} \
+            --service-account api-runtime@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+            --set-env-vars APP_ENVIRONMENT=prod \
+            --allow-unauthenticated \
+            --min-instances 0 \
+            --max-instances 3 \
+            --memory 512Mi \
+            --cpu 1 \
+            --port 3000
+
+      - name: Show the URL
+        run: |
+          gcloud run services describe ${{ env.SERVICE }} \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} \
+            --format='value(status.url)'

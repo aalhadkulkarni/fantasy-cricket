@@ -6,6 +6,11 @@ on:
   push:
     branches:
       - release
+    # The API deploys from its own workflow; a server-only change should not
+    # rebuild and redeploy the site.
+    paths-ignore:
+      - 'apps/api/**'
+      - '.github/workflows/api-deploy.yml'
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest

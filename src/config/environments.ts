@@ -53,6 +53,35 @@ const HOSTNAME_ENVIRONMENTS: Readonly<Record<string, Environment>> = {
 }
 
 /**
+ * Where this environment's API lives.
+ *
+ * **The browser picks which API it talks to; it never picks which database
+ * root that API writes to.** Each deployment of the service knows its own
+ * root, so a local build cannot reach production data by asking nicely.
+ *
+ * `local` is the service running on this machine. Nothing is deployed
+ * anywhere else yet, and an empty entry throws rather than guessing a URL —
+ * the same rule as the hostname table above.
+ */
+const API_BASE_URLS: Readonly<Record<Environment, string>> = {
+  local: 'http://localhost:3000',
+  test: '',
+  preprod: '',
+  // Filled in from the real service URL after the first deploy.
+  prod: '',
+}
+
+export function apiBaseUrl(environment: Environment): string {
+  const url = API_BASE_URLS[environment]
+  if (url === '') {
+    throw new Error(
+      `config: no API is deployed for the "${environment}" environment yet.`,
+    )
+  }
+  return url
+}
+
+/**
  * A pull request preview channel, which Firebase names
  * `<project>--<channel>-<hash>.web.app`.
  *
