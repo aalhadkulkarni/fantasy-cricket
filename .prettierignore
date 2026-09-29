@@ -1,4 +1,4 @@
 dist
 node_modules
 package-lock.json
-src/components/ui
+apps/web/src/components/ui
