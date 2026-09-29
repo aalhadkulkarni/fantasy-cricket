@@ -199,6 +199,7 @@ to retrofit. Contrast is already handled by the design tokens.
 | `docs/design-reference.html`    | **Open in a browser.** The source of truth for exact CSS values  |
 | `docs/08-pages/`                | One document per page. Start at `index.md`.                      |
 | `docs/09-future-exploration.md` | Optimisations deliberately deferred. **Not a gap list**          |
+| `docs/10-milestones.md`         | What each milestone shipped, and **where the code departs from the docs** |
 | `src/types/`                    | The frontend's data types. **Not the schema** — see below        |
 
 **`src/types/` is not a copy of the schema.** It started as one, which is why
