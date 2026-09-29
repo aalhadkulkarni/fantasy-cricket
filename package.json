@@ -8,20 +8,22 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace @fantasy-cricket/web",
-    "dev:api": "npm run dev --workspace @fantasy-cricket/api",
     "build": "npm run build --workspace @fantasy-cricket/web",
     "build:api": "npm run build --workspace @fantasy-cricket/api",
-    "preview": "npm run preview --workspace @fantasy-cricket/web",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
+    "dev": "concurrently --names web,api --prefix-colors cyan,magenta --kill-others-on-fail \"npm:dev:web\" \"npm:dev:api\"",
+    "dev:api": "APP_ENVIRONMENT=local npm run dev --workspace @fantasy-cricket/api",
+    "dev:web": "npm run dev --workspace @fantasy-cricket/web",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "preview": "npm run preview --workspace @fantasy-cricket/web",
     "typecheck": "tsc -b --noEmit && npm run typecheck --workspace @fantasy-cricket/shared"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.13.3",
+    "concurrently": "^10.0.5",
     "eslint": "^10.10.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",
