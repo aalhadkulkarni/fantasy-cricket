@@ -7,11 +7,16 @@
  * here rather than deeper.
  */
 
-import type { User, UserId } from '@fantasy-cricket/shared'
+import type {
+  SignInOutcome,
+  SignedInIdentity,
+  User,
+  UserId,
+} from '@fantasy-cricket/shared'
 
-import { getApi, type SignInOutcome, type SignedInIdentity } from './api'
+import { getApi } from './api'
 import { notImplemented } from './not-implemented'
-import type { Subscriber, Unsubscribe } from './subscriptions'
+import type { Subscriber, Unsubscribe } from '@fantasy-cricket/shared'
 
 export type { SignInOutcome, SignedInIdentity }
 

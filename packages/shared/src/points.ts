@@ -9,7 +9,7 @@
  * fixing every manager the mistake touched.
  */
 
-import type { LeagueId, MatchId, PlayerId, TournamentId } from './ids'
+import type { LeagueId, MatchId, PlayerId, TournamentId } from './ids.ts'
 
 /**
  * Zero and absent are equivalent. The reason a player scored nothing — did not

@@ -32,5 +32,7 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src"],
+  /* Frozen copies of the pre-service data layer. See its README. */
+  "exclude": ["src/data-layer/firebase/archived"]
 }

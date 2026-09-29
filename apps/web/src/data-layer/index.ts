@@ -82,7 +82,7 @@
 // re-exported either — a path is pure schema, and the fifth rule above is that
 // the schema does not leak upward.
 export { setEnvironment } from './api'
-export type { Api } from './api'
+export type { Api } from '@fantasy-cricket/shared'
 
 export * from './users'
 export * from './actions'
@@ -106,4 +106,4 @@ export type {
   Subscriber,
   SubscriptionErrorHandler,
   Unsubscribe,
-} from './subscriptions'
+} from '@fantasy-cricket/shared'

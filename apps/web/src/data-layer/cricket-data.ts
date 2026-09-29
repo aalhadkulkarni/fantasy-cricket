@@ -12,6 +12,7 @@ import type {
   Competition,
   CompetitionConfig,
   CompetitionId,
+  CreatePlayersResult,
   FormatRecord,
   Match,
   MatchId,
@@ -25,7 +26,7 @@ import type {
   TeamFilter,
   TeamId,
 } from '@fantasy-cricket/shared'
-import { getApi, type CreatePlayersResult } from './api'
+import { getApi } from './api'
 
 export type { CreatePlayersResult }
 import { notImplemented } from './not-implemented'

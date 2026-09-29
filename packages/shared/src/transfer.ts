@@ -5,7 +5,7 @@
  * transfer window is open.
  */
 
-import type { MatchId, PlayerId, TransferProposalId, UserId } from './ids'
+import type { MatchId, PlayerId, TransferProposalId, UserId } from './ids.ts'
 
 /**
  * The interface says "offer" rather than "proposal", because "propose an offer"

@@ -122,7 +122,7 @@ function Count({ league }: { league: Card }) {
 
 /**
  * The same five states as league home. **One derivation shared by both**, in
- * `src/data-layer/league-phase.ts`; this only names them.
+ * `apps/api/src/league-phase.ts`; this only names them.
  *
  * **Named for what is happening, not for the state.** `my-leagues.md` lists
  * these as Pre-auction, Auction phase, Team submission, Active and Finished,

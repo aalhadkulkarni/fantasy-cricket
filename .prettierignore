@@ -2,3 +2,4 @@ dist
 node_modules
 package-lock.json
 apps/web/src/components/ui
+apps/web/src/data-layer/firebase/archived

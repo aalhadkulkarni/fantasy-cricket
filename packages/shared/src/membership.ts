@@ -6,8 +6,8 @@
  * request along with a league's name.
  */
 
-import type { UserId } from './ids'
-import type { LeagueRole } from './reference'
+import type { UserId } from './ids.ts'
+import type { LeagueRole } from './reference.ts'
 
 /**
  * `Rejected` is soft — the person may request again. There is no hard-rejected

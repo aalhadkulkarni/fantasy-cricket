@@ -49,26 +49,26 @@
  * **Durations stay `number` regardless.** That part is decided.
  */
 
-export type * from './ids'
-export type * from './reference'
-export type * from './standards'
-export type * from './user'
-export type * from './competition'
-export type * from './system'
-export type * from './team'
-export type * from './player'
-export type * from './tournament'
-export type * from './league'
-export type * from './membership'
-export type * from './lineup'
-export type * from './squad'
-export type * from './points'
-export type * from './transfer'
-export type * from './live-auction'
+export type * from './ids.ts'
+export type * from './reference.ts'
+export type * from './standards.ts'
+export type * from './user.ts'
+export type * from './competition.ts'
+export type * from './system.ts'
+export type * from './team.ts'
+export type * from './player.ts'
+export type * from './tournament.ts'
+export type * from './league.ts'
+export type * from './membership.ts'
+export type * from './lineup.ts'
+export type * from './squad.ts'
+export type * from './points.ts'
+export type * from './transfer.ts'
+export type * from './live-auction.ts'
 
 // Shapes no database node holds, invented so the data layer's signatures could
 // be written. Collected in one file so the guesses stay visible.
-export type * from './views'
+export type * from './views.ts'
 
 // The reference tables also export runtime values — the key arrays, which
 // double as validators for anything arriving from the database.
@@ -80,4 +80,29 @@ export {
   PLAYER_CATEGORIES,
   AUCTION_PHASES,
   TIMELINE_EVENTS,
-} from './reference'
+} from './reference.ts'
+
+// ---------------------------------------------------------------------------
+// The contract between the browser and the service
+// ---------------------------------------------------------------------------
+
+// The interface both sides implement, and the shapes its operations take.
+export type * from './contract/api.ts'
+export type * from './contract/subscriptions.ts'
+
+// The routing manifest: one entry per operation that crosses the wire.
+export { API_METHODS } from './contract/methods.ts'
+export type { MethodSpec, WireMethod } from './contract/methods.ts'
+
+// Errors travel as a code plus the message the service wrote.
+export {
+  DataLayerError,
+  httpStatusFor,
+  isDataLayerError,
+} from './contract/errors.ts'
+export type { ErrorBody, ErrorCode } from './contract/errors.ts'
+
+// Which deployment this is. The browser resolves it from its hostname; the
+// service takes it from its own configuration and never from a request.
+export { ENVIRONMENTS, isEnvironment } from './contract/environment.ts'
+export type { Environment } from './contract/environment.ts'

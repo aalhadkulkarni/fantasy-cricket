@@ -5,7 +5,7 @@
  * league membership.
  */
 
-import type { CompetitionId, PlayerId, TeamId } from './ids'
+import type { CompetitionId, PlayerId, TeamId } from './ids.ts'
 
 /**
  * A team's squad is per competition, because the same team name means

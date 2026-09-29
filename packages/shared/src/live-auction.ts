@@ -18,13 +18,19 @@
  * over, which is why none of this needs transactions.
  */
 
-import type { BidId, NoBidId, PlayerId, TimelineMessageId, UserId } from './ids'
+import type {
+  BidId,
+  NoBidId,
+  PlayerId,
+  TimelineMessageId,
+  UserId,
+} from './ids.ts'
 import type {
   AuctionPhase,
   PlayerCategory,
   PlayerRole,
   TimelineEventId,
-} from './reference'
+} from './reference.ts'
 
 // ---------------------------------------------------------------------------
 // State

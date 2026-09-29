@@ -34,7 +34,7 @@ import type {
   Subscriber,
   SubscriptionErrorHandler,
   Unsubscribe,
-} from './subscriptions'
+} from '@fantasy-cricket/shared'
 
 // ---------------------------------------------------------------------------
 // Reads

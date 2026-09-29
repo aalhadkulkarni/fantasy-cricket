@@ -4,8 +4,8 @@
  * A cricketer. The fantasy participants are managers, and they are users.
  */
 
-import type { CompetitionId, PlayerId, TeamId } from './ids'
-import type { PlayerRole } from './reference'
+import type { CompetitionId, PlayerId, TeamId } from './ids.ts'
+import type { PlayerRole } from './reference.ts'
 
 /**
  * JOIN: `currentTeams` values → `teams`, and its keys → `competitions`.
