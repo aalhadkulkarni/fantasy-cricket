@@ -11,6 +11,8 @@ on:
       - release
     paths:
       - 'apps/api/**'
+      - 'packages/shared/**'
+      - 'package-lock.json'
       - '.github/workflows/api-deploy.yml'
   # So the first deploy, and any redeploy, can be run by hand.
   workflow_dispatch:
@@ -47,7 +49,8 @@ jobs:
       - name: Build and push
         run: |
           IMAGE=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}
-          docker build -t "$IMAGE" apps/api
+          # Root context: the service imports the shared workspace package.
+          docker build -f apps/api/Dockerfile -t "$IMAGE" .
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
