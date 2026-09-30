@@ -1,25 +1,34 @@
 /**
  * `Api` implemented against Firebase.
  *
+ * **TODO: rename this file.** "api" means three things in this repo — the
+ * `Api` contract, the `apps/api` workspace, and the deployed service — so
+ * `firebase-api` inside `apps/api` reads badly. The accurate word is
+ * *adapter*: `Api` is the port, this is the Firebase adapter for it, and a
+ * SQL one would sit beside it under the same port. Left alone for now to keep
+ * the migration diff readable.
+ *
  * **This is where backend knowledge lives.** Which paths hold what, that a
  * user record is keyed by the auth UID, that seeding is one atomic multi-path
  * update — all of it stops here. Above this line an operation is just an
  * operation.
  *
  * It holds a `FirebaseService`, which is the client: paths, reads, writes,
- * atomic updates, claims, subscriptions. **That service is private to this
- * folder.** Nothing above imports it, which is what stops schema knowledge
- * leaking upward.
+ * atomic updates and claims. **That client is private to this folder.**
+ * Nothing above imports it, which is what stops schema knowledge leaking
+ * upward.
  *
- * A future `RestApi` sits beside this file, satisfying the same interface with
- * an HTTP client instead. Neither replaces the other; both can exist, and a
- * third could delegate per operation while a migration runs.
+ * **The browser satisfies the same interface with `HttpApi`**, which calls
+ * this service over HTTP rather than reaching a database at all. Both
+ * implement `Api`, which is what let the backend move without touching a
+ * single page.
  *
  * ---
  *
- * **One file for now.** It carries six operations. It gets split by subject —
- * `api/users.ts`, `api/leagues.ts` — mirroring the public files by name, once
- * that stops being comfortable to read.
+ * **One file for now**, carrying all 64 operations that cross the wire. It
+ * gets split by subject — `leagues.ts`, `lineups.ts`, `scoring.ts` —
+ * mirroring the public files by name, once that stops being comfortable to
+ * read. At 3,900 lines that point is close.
  */
 
 import type {

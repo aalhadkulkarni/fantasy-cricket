@@ -255,3 +255,9 @@ Small items logged instead of fixed. None blocks anything.
   and in `lineup-view.tsx`. They should share one definition.
 - "Transfers" (the changes box on My Team) collides with the auction's
   Transfers Center.
+- **`apps/api/src/firebase/firebase-api.ts` is misnamed.** "api" already means
+  the `Api` contract, the `apps/api` workspace and the deployed service.
+  *Adapter* is the accurate word — `Api` is the port, this is its Firebase
+  adapter — so `firebase/adapter.ts` with `createFirebaseAdapter`, and
+  `firebase-service.ts` becomes `firebase/client.ts`, which is what it calls
+  itself in its own header.
