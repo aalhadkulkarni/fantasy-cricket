@@ -271,9 +271,80 @@ the whole app clicked through with the rules denying clients.
 | **Renaming `firebase-api.ts`** | "api" means three things in this repo. *Adapter* is the accurate word — see the backlog |
 | **Response validation (zod)** | Responses are cast, not parsed. The same trust the Firebase reads had |
 
-## Next
+## Milestone 4 — the auction
 
-**Milestone 4 is being scoped. The auction is the likely first piece.**
+**Status: in progress.** Phase A under way.
+
+**Goal:** a live auction for an **official auction league**, end to end — from
+publishing the tournament that opens the league to managers picking an XI from
+the squad they won. The BBL in January is the playtest.
+
+### Phases
+
+| Phase                    | What                                                                                                                                                                                                                                                                       |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A — prerequisites**    | **A1** gameweek length per round, chosen at publish. **A2** category and base price required on every new player, written to `standardAuctionConfig`. **A3** base tournaments (competitions) created and edited, with an optional home nation copied onto each tournament. |
+| **B — the league**       | A "create official auction league" option at **publish**: standard rules, public, 6 slots, join deadline equal to the auction start, which the admin picks. The publishing system admin is owner and auctioneer.                                                           |
+| **C — navigation**       | A blank auction page; Auction Center in the league; a Go to auction button for everyone.                                                                                                                                                                                   |
+| **D — display only**     | Everything the auction page shows, rendered from the data if it existed, tested with temporary fake data. The auctioneer and manager control panels, with no actions.                                                                                                      |
+| **E — live bidding**     | Start the auction, pick the batch and the player, start bidding; bid and pass; accepting bids, the timer and the calls; sell to the leader, the manual fallback sale, unsold.                                                                                              |
+| **F — the draft**        | Start the draft, next manager (skipping anyone who cannot pick), the manager's pick, the auctioneer accepting it.                                                                                                                                                          |
+| **G — running the room** | Rewind inside Start/End recovery, pause and resume, add time, end the auction.                                                                                                                                                                                             |
+| **H — in the league**    | The Squads page; My Team picking only from the manager's squad, under the XI rules and the overseas cap.                                                                                                                                                                   |
+
+**An action is done only end to end:** the UI to perform it, every database
+write it implies (squads, budgets, history, phase), the change on the actor's
+screen and on everyone else's, and its timeline event.
+
+### Not in this milestone
+
+- The backup auctioneer, and switching auctioneers
+- Custom auction rules — only the official league's standard ones
+- UI polish such as the countdown, added at the end of the milestone
+- Transfers
+
+### Decisions
+
+Recorded in the documents they belong to; listed here so a planner sees them
+together.
+
+- **Overseas** is a player's country not matching the tournament's
+  `homeNation`, copied from the competition at tournament creation. It replaced
+  a hardcoded India, which would have made the BBL unplayable.
+- **The draft order is assigned as managers join**, at random from the
+  positions still free; unclaimed positions show as TBA. There is no "generate
+  draft order" step.
+- **Bidding:** the only budget check is not going below zero, and a manager at
+  the maximum squad size cannot bid. The draft pool is General plus everything
+  unsold in Marquee and Star.
+- **The timer restarts from each accepted bid**, and lateness is judged by the
+  server's clock when it processes the bid.
+- **The live auction page is open to everyone, always**, and after the auction
+  it is the historical record. Auction Center is a reference page, the same in
+  every phase.
+- **Manual sell** exists as a last-resort fallback.
+- **Rewind** undoes the last round's result, repeatedly, only inside recovery,
+  and appends to the timeline rather than rewriting it. A non-production reset
+  exists for testing.
+- **Team submission begins only when the auctioneer ends the auction.**
+- **Existing players are not backfilled** with auction values; environments are
+  re-seeded.
+
+### Open
+
+| Item                                                   | State                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Where bids are accepted**                            | Proposed: on the service rather than the auctioneer's browser. That removes the single writer the design relied on, so two concurrent bids could both read the same asking price and one overwrite the other — a lost bid, not the accepted ordering race. Needs a serialisation choice (a transaction on the current round, or one writer per league) and a reworded race row in `CLAUDE.md`. Settle before E. |
+| **Who writes the three calls and time up**             | The service runs only while handling a request, so nothing on it ticks at 20, 10 and 5 seconds. Settle before E.                                                                                                                                                                                                                                                                                                |
+| **Two simultaneous joins claiming one draft position** | Proposed: check and retry after assigning. The check must look for a **duplicate position**, not a missing manager, and needs a later sweep (at auction start, say), because a check straight after joining can miss the one overwritten. A transaction is the alternative. Settle in B.                                                                                                                        |
+| **Batch sequence within a category**                   | A fixed role order, or only Marquee → Star → Draft. Settle in C.                                                                                                                                                                                                                                                                                                                                                |
+| **Live updates and state**                             | How changes reach other browsers, and the state library. Settle before D.                                                                                                                                                                                                                                                                                                                                       |
+| **Phase derivation**                                   | `apps/api/src/league-phase.ts` reports team submission as soon as the auction starts, and reads the whole `liveAuctions/{id}` node to find out. To be fixed in E or G.                                                                                                                                                                                                                                          |
+| **Scheduled start passed, auction not started**        | What the league shows. Decided at implementation.                                                                                                                                                                                                                                                                                                                                                               |
+
+---
+
+## Next
 
 ### What decides the timing
 

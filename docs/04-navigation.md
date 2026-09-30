@@ -140,15 +140,10 @@ league never reaches either, so the first two rows never apply to one.
 **The button through to `/leagues/:leagueId/auction` lives in Auction Center and
 opens a new browser tab.**
 
-**Who sees it is role-conditional, not phase-conditional.** The auctioneer and
-the backup see it from the pre-auction state onward, labelled *Open auction
-room*; everyone else sees it only once the auction is live, labelled *Go to
-Auction*.
-
-> **Otherwise no auction could ever start.** The Start auction control lives on
-> the auction page, so a button that appeared only once an auction was live
-> would be waiting on something that could never happen. See
-> `08-pages/auction-center.md`.
+**Everyone who can see the league sees it, in every phase**, labelled _Go to
+auction_. Someone with no role in the auction arrives with no controls, which is
+harmless. The auctioneer reaches the Start auction control through the same
+button.
 
 The auction is a self-contained, high-focus activity. Keeping it in its own tab
 means a manager cannot lose it by clicking something else — and if they do

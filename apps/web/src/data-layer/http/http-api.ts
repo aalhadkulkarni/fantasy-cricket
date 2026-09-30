@@ -19,6 +19,7 @@
 import type {
   Api,
   Competition,
+  CompetitionConfig,
   CompetitionId,
   CreatePlayersResult,
   Environment,
@@ -119,6 +120,20 @@ export function createHttpApi(
 
     getCompetitions(): Promise<Competition[]> {
       return call('getCompetitions', []) as Promise<Competition[]>
+    },
+
+    createCompetition(config: CompetitionConfig): Promise<CompetitionId> {
+      return call('createCompetition', [config]) as Promise<CompetitionId>
+    },
+
+    updateCompetition(
+      competitionId: CompetitionId,
+      changes: Partial<CompetitionConfig>,
+    ): Promise<void> {
+      return call('updateCompetition', [
+        competitionId,
+        changes,
+      ]) as Promise<void>
     },
 
     getPlayerRoles(): Promise<PlayerRoleRecord[]> {

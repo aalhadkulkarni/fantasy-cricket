@@ -113,6 +113,12 @@ export function createPaths(service: FirebaseService) {
     systemSetup: () => under('systemSetup'),
 
     standardAuctionConfig: () => under('standardAuctionConfig'),
+    /**
+     * Each player's standard category and base price, written with the player.
+     * A league copies the ones it needs when it is created.
+     */
+    standardPlayerAuctionDetails: (playerId?: PlayerId) =>
+      under('standardAuctionConfig', 'playerDetails', playerId),
     standardFantasyLineupRules: () => under('standardFantasyLineupRules'),
     standardFantasyLeagueTeamChangesDeadlineOffset: () =>
       under('standardFantasyLeagueTeamChangesDeadlineOffset'),

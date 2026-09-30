@@ -46,6 +46,7 @@ import type {
   ArchivedLeagueIndexEntry,
   BannedUser,
   Competition,
+  CompetitionConfig,
   CompetitionId,
   FormatRecord,
   GameWeek,
@@ -59,6 +60,7 @@ import type {
   LeagueIndexEntry,
   LeagueJoinCode,
   LeagueMember,
+  LeaguePlayerAuctionDetail,
   LeagueSummary,
   LineupRules,
   LineupSubmission,
@@ -98,7 +100,12 @@ import type {
   UserId,
 } from '@fantasy-cricket/shared'
 
-import { DataLayerError } from '@fantasy-cricket/shared'
+import {
+  DataLayerError,
+  FORMATS,
+  PLAYER_CATEGORIES,
+  PLAYER_ROLES,
+} from '@fantasy-cricket/shared'
 import { derivePhase } from '../league-phase.ts'
 import {
   AUCTION_PHASE_RECORDS,
@@ -109,6 +116,8 @@ import {
   SAMPLE_COMPETITION_NAME,
   SAMPLE_PLAYERS,
   SAMPLE_TEAM_SHORT_NAMES,
+  SAMPLE_AUCTION_VALUES,
+  SAMPLE_DEFAULT_AUCTION_VALUE,
   SEED_COMPETITIONS,
   STANDARD_AUCTION_CONFIG,
   STANDARD_FANTASY_LINEUP_RULES,
@@ -261,6 +270,79 @@ export function createFirebaseApi(
   }
 
   /**
+   * A trimmed, non-empty name no other base tournament has, ignoring case.
+   *
+   * **Read-then-write, and that is enough here.** Only system admins create
+   * base tournaments, a handful of times a year; two creating the same name in
+   * the same second is not a case worth a transaction.
+   */
+  async function uniqueCompetitionName(
+    raw: string,
+    self?: CompetitionId,
+  ): Promise<string> {
+    const name = raw.trim()
+    if (name === '') {
+      throw new DataLayerError('invalid', 'A base tournament needs a name.')
+    }
+
+    const all = await service.read<Record<string, Competition>>(
+      paths.competitions(),
+    )
+    const clash = Object.values(all ?? {}).find(
+      (competition) =>
+        competition.competitionId !== self &&
+        competition.competitionName.toLowerCase() === name.toLowerCase(),
+    )
+    if (clash !== undefined) {
+      throw new DataLayerError(
+        'invalid',
+        `There is already a base tournament called ${clash.competitionName}.`,
+      )
+    }
+    return name
+  }
+
+  function assertFormat(formatId: unknown): void {
+    if (!(FORMATS as readonly unknown[]).includes(formatId)) {
+      throw new DataLayerError('invalid', 'Pick a format.')
+    }
+  }
+
+  /**
+   * **A player's standard auction values, checked.** The category must be one
+   * of the three, and the base price positive and on the 0.5 grid every bid
+   * moves along, so no auction can open at a price no bid could reach.
+   */
+  function auctionDetailFor(
+    playerName: string,
+    playerCategory: unknown,
+    playerBasePrice: unknown,
+  ): LeaguePlayerAuctionDetail {
+    if (!(PLAYER_CATEGORIES as readonly unknown[]).includes(playerCategory)) {
+      throw new DataLayerError(
+        'invalid',
+        `${playerName} needs a category: marquee, star or general.`,
+      )
+    }
+    if (
+      typeof playerBasePrice !== 'number' ||
+      !Number.isFinite(playerBasePrice) ||
+      playerBasePrice <= 0 ||
+      !Number.isInteger(playerBasePrice * 2)
+    ) {
+      throw new DataLayerError(
+        'invalid',
+        `${playerName} needs a base price above zero, in steps of 0.5.`,
+      )
+    }
+    return {
+      playerCategory:
+        playerCategory as LeaguePlayerAuctionDetail['playerCategory'],
+      playerBasePrice,
+    }
+  }
+
+  /**
    * **Eight characters**, as `05-data-model.md` specifies, from an alphabet
    * with no `0`/`O` or `1`/`I`/`L` because people read these aloud and type
    * them from memory.
@@ -295,48 +377,86 @@ export function createFirebaseApi(
   }
 
   /**
-   * One gameweek per round.
+   * **Each round split into equal gameweeks of the length chosen for it.**
+   * Numbered and named across the whole tournament, so the third gameweek is
+   * "Game Week 3" whichever round it falls in.
    *
-   * The impact sub is a change *during* a gameweek, so it is forced off where a
-   * round holds a single match and there is no during.
+   * **Refused unless every round has a length that divides its match count**,
+   * since gameweeks are equal length within a round. This is the check; the
+   * publish form offering only divisors is convenience.
+   *
+   * The impact sub is a change *during* a gameweek, so it is forced off in a
+   * round whose gameweeks are a single match and there is no during.
    */
-  function oneGameWeekPerRound(
+  function gameWeeksFor(
     tournament: Tournament,
+    lengths: Partial<Record<RoundId, number>> | undefined,
   ): Record<string, RoundConfig> {
     const matches = tournament.matches ?? {}
     const numberOf = (matchId: MatchId) => matches[matchId]?.matchNumber ?? 0
+    const idAt = new Map(
+      Object.values(matches).map((match) => [match.matchNumber, match.matchId]),
+    )
 
     const rounds = Object.values(tournament.rounds ?? {}).sort(
       (a, b) => numberOf(a.firstMatchId) - numberOf(b.firstMatchId),
     )
 
     const configs: Record<string, RoundConfig> = {}
+    let gameWeekNumber = 0
 
-    rounds.forEach((round, index) => {
-      const gameWeekId = service.generateKey() as GameWeekId
-      const span =
-        numberOf(round.lastMatchId) - numberOf(round.firstMatchId) + 1
+    for (const round of rounds) {
+      const first = numberOf(round.firstMatchId)
+      const span = numberOf(round.lastMatchId) - first + 1
+      const length = lengths?.[round.roundId]
+
+      if (length === undefined) {
+        throw new DataLayerError(
+          'invalidConfig',
+          `Choose a gameweek length for ${round.roundName}.`,
+        )
+      }
+      if (
+        !Number.isInteger(length) ||
+        length < 1 ||
+        length > span ||
+        span % length !== 0
+      ) {
+        throw new DataLayerError(
+          'invalidConfig',
+          `${round.roundName} has ${span} matches, so its gameweeks can only be a length that divides ${span}.`,
+        )
+      }
+
+      const gameWeeks: Record<string, GameWeek> = {}
+
+      for (let start = first; start < first + span; start += length) {
+        const startMatchId = idAt.get(start)
+        const endMatchId = idAt.get(start + length - 1)
+        if (startMatchId === undefined || endMatchId === undefined) {
+          throw new DataLayerError(
+            'invalidConfig',
+            `${round.roundName} names a match that does not exist.`,
+          )
+        }
+
+        gameWeekNumber += 1
+        const gameWeekId = service.generateKey() as GameWeekId
+        gameWeeks[gameWeekId] = {
+          gameWeekId,
+          gameWeekName: `Game Week ${gameWeekNumber}`,
+          gameWeekNumber,
+          startMatchId,
+          endMatchId,
+        }
+      }
 
       configs[round.roundId] = {
         // Absent allowances mean unlimited, which is what an open league wants.
-        isImpactSubAllowed: span > 1,
-        gameWeeks: {
-          [gameWeekId]: {
-            gameWeekId,
-            /*
-              **Named for itself, not for its round.** Naming it after the round
-              made a team saved per gameweek read as one saved per round, which
-              is a different thing: a round holds gameweeks, and in a longer
-              tournament it holds several.
-            */
-            gameWeekName: `Game Week ${index + 1}`,
-            gameWeekNumber: index + 1,
-            startMatchId: round.firstMatchId,
-            endMatchId: round.lastMatchId,
-          },
-        },
+        isImpactSubAllowed: length > 1,
+        gameWeeks,
       }
-    })
+    }
 
     return configs
   }
@@ -362,10 +482,12 @@ export function createFirebaseApi(
       offset: number
       joinDeadline: number
     },
-    gameWeeks: boolean,
+    /** Present for a gameweek league, absent for a match-based one. */
+    roundConfigs: Record<string, RoundConfig> | undefined,
   ): Promise<Record<string, unknown>> {
     const { tournament, ownerId, ownerName, rules, offset, joinDeadline } =
       inputs
+    const gameWeeks = roundConfigs !== undefined
 
     const leagueId = service.generateKey() as LeagueId
     const leagueJoinCode = await claimJoinCode(leagueId)
@@ -401,7 +523,7 @@ export function createFirebaseApi(
         ? {
             ...base,
             isGameWeeksEnabled: true,
-            roundConfigs: oneGameWeekPerRound(tournament),
+            roundConfigs,
           }
         : {
             ...base,
@@ -1353,6 +1475,71 @@ export function createFirebaseApi(
       return Object.values(all ?? {})
     },
 
+    async createCompetition(config: CompetitionConfig): Promise<CompetitionId> {
+      await assertSystemAdmin()
+
+      const competitionName = await uniqueCompetitionName(
+        config.competitionName,
+      )
+      assertFormat(config.formatId)
+      const homeNation = config.homeNation?.trim() ?? ''
+
+      const competitionId = service.generateKey() as CompetitionId
+
+      await service.write(paths.competitions(competitionId), {
+        competitionId,
+        competitionName,
+        formatId: config.formatId,
+        // Absent is how "no notion of overseas" is spelled.
+        ...(homeNation === '' ? {} : { homeNation }),
+      } satisfies Competition)
+
+      return competitionId
+    },
+
+    /**
+     * **Changing the format does not reach existing tournaments' matches**, and
+     * nothing here pretends otherwise: a tournament reads its format through the
+     * competition, so it follows. The home nation does not, because each
+     * tournament froze its own copy when it was created.
+     */
+    async updateCompetition(
+      competitionId: CompetitionId,
+      changes: Partial<CompetitionConfig>,
+    ): Promise<void> {
+      await assertSystemAdmin()
+
+      const existing = await service.read<Competition>(
+        paths.competitions(competitionId),
+      )
+      if (existing === undefined) {
+        throw new DataLayerError('notFound', 'No such base tournament.')
+      }
+
+      const update: Record<string, unknown> = {}
+      const at = (field: string) =>
+        service.path('competitions', competitionId, field)
+
+      if (changes.competitionName !== undefined) {
+        update[at('competitionName')] = await uniqueCompetitionName(
+          changes.competitionName,
+          competitionId,
+        )
+      }
+      if (changes.formatId !== undefined) {
+        assertFormat(changes.formatId)
+        update[at('formatId')] = changes.formatId
+      }
+      if (changes.homeNation !== undefined) {
+        const homeNation = changes.homeNation.trim()
+        // Null deletes the key, which is what clearing it means.
+        update[at('homeNation')] = homeNation === '' ? null : homeNation
+      }
+
+      if (Object.keys(update).length === 0) return
+      await service.update(update)
+    },
+
     async getPlayerRoles(): Promise<PlayerRoleRecord[]> {
       const all = await service.read<Record<string, PlayerRoleRecord>>(
         paths.playerRoles(),
@@ -1475,9 +1662,22 @@ export function createFirebaseApi(
      * player list entirely, and `system-admin.md` defers a Retired Players view
      * to Phase 2 — retirement is rare enough not to come up here.
      */
+    /**
+     * **Carries each player's standard auction values**, from one extra read of
+     * `standardAuctionConfig/playerDetails`, so the admin's player dialog can
+     * show and edit them. Players created before they were required have none.
+     */
     async getPlayers(filter?: PlayerFilter): Promise<Player[]> {
-      const all = await service.read<Record<string, Player>>(paths.players())
-      let players = Object.values(all ?? {})
+      const [all, auctionDetails] = await Promise.all([
+        service.read<Record<string, Player>>(paths.players()),
+        service.read<Record<string, LeaguePlayerAuctionDetail>>(
+          paths.standardPlayerAuctionDetails(),
+        ),
+      ])
+      let players = Object.values(all ?? {}).map((player) => {
+        const detail = auctionDetails?.[player.playerId]
+        return detail === undefined ? player : { ...player, ...detail }
+      })
 
       if (filter?.includeRetired !== true) {
         players = players.filter((p) => p.isRetired !== true)
@@ -1510,6 +1710,11 @@ export function createFirebaseApi(
      * **Existing names are skipped, not duplicated.** Matched on name, which is
      * the only thing a person can be expected to keep stable, so re-adding a
      * squad is safe.
+     *
+     * **Every row is checked before anything is written**, including the
+     * category and base price, which land in `standardAuctionConfig` in the
+     * same update. One bad row refuses the whole batch rather than saving the
+     * rest and leaving the admin to work out which were missed.
      */
     async createPlayers(
       players: readonly PlayerConfig[],
@@ -1528,7 +1733,22 @@ export function createFirebaseApi(
       let created = 0
 
       for (const config of players) {
-        const playerName = config.playerName.trim()
+        const playerName = (config.playerName ?? '').trim()
+        if (playerName === '') {
+          throw new DataLayerError('invalid', 'Every player needs a name.')
+        }
+        if ((config.country ?? '').trim() === '') {
+          throw new DataLayerError('invalid', `${playerName} needs a country.`)
+        }
+        if (!(PLAYER_ROLES as readonly unknown[]).includes(config.playerRole)) {
+          throw new DataLayerError('invalid', `${playerName} needs a role.`)
+        }
+        const auctionDetail = auctionDetailFor(
+          playerName,
+          config.playerCategory,
+          config.playerBasePrice,
+        )
+
         if (takenNames.has(playerName.toLowerCase())) {
           skipped.push(playerName)
           continue
@@ -1549,6 +1769,7 @@ export function createFirebaseApi(
           isRetired: false,
           ...(Object.keys(currentTeams).length > 0 ? { currentTeams } : {}),
         }
+        update[paths.standardPlayerAuctionDetails(playerId)] = auctionDetail
 
         // The other side of each membership, written in the same call.
         for (const [competitionId, teamId] of Object.entries(currentTeams)) {
@@ -1590,6 +1811,23 @@ export function createFirebaseApi(
       }
       if (changes.playerRole !== undefined) {
         update[at('playerRole')] = changes.playerRole
+      }
+
+      // The two auction values are one record, so either changing rewrites it
+      // whole — merged with what is stored, since a player created before they
+      // were required has nothing to merge with and must be given both.
+      if (
+        changes.playerCategory !== undefined ||
+        changes.playerBasePrice !== undefined
+      ) {
+        const stored = await service.read<LeaguePlayerAuctionDetail>(
+          paths.standardPlayerAuctionDetails(playerId),
+        )
+        update[paths.standardPlayerAuctionDetails(playerId)] = auctionDetailFor(
+          changes.playerName?.trim() || 'This player',
+          changes.playerCategory ?? stored?.playerCategory,
+          changes.playerBasePrice ?? stored?.playerBasePrice,
+        )
       }
 
       if (Object.keys(update).length === 0) return
@@ -1922,6 +2160,13 @@ export function createFirebaseApi(
         )
       }
 
+      const competition = await service.read<Competition>(
+        paths.competitions(config.competitionId),
+      )
+      if (competition === undefined) {
+        throw new DataLayerError('notFound', 'No such base tournament.')
+      }
+
       const tournamentId = service.generateKey() as TournamentId
       const matchIds = Array.from(
         { length: config.matchCount },
@@ -1946,6 +2191,11 @@ export function createFirebaseApi(
         tournamentId,
         tournamentName: config.tournamentName.trim(),
         competitionId: config.competitionId,
+        // Copied and frozen, so editing the base tournament later never shifts
+        // who is overseas here.
+        ...(competition.homeNation === undefined
+          ? {}
+          : { homeNation: competition.homeNation }),
         matches,
         rounds: {
           [roundId]: {
@@ -2435,6 +2685,13 @@ export function createFirebaseApi(
         )
       }
 
+      // Checked before anything is claimed or written, so a bad length refuses
+      // the publish outright rather than half-way through it.
+      const roundConfigs =
+        officialLeagues?.gameWeekBased === true
+          ? gameWeeksFor(tournament, officialLeagues.gameWeekLengths)
+          : undefined
+
       const update: Record<string, unknown> = {}
 
       // Absent means not published, so this is only written when it is missing.
@@ -2472,10 +2729,10 @@ export function createFirebaseApi(
         }
 
         if (officialLeagues?.matchBased === true) {
-          Object.assign(update, await officialLeague(common, false))
+          Object.assign(update, await officialLeague(common, undefined))
         }
-        if (officialLeagues?.gameWeekBased === true) {
-          Object.assign(update, await officialLeague(common, true))
+        if (roundConfigs !== undefined) {
+          Object.assign(update, await officialLeague(common, roundConfigs))
         }
       }
 
@@ -3890,6 +4147,8 @@ export function createFirebaseApi(
             playerShortName: player.playerShortName,
             country: player.country,
             playerRole: player.playerRole,
+            ...(SAMPLE_AUCTION_VALUES[player.playerName] ??
+              SAMPLE_DEFAULT_AUCTION_VALUE),
             currentTeams:
               teamId === undefined ? {} : { [competitionId]: teamId },
           }

@@ -47,19 +47,21 @@ export function getCompetition(
 
 /**
  * The format is set here and **inherited by every tournament** under this
- * competition, rather than set on each one.
+ * competition, rather than set on each one. The home nation is **copied** onto
+ * each tournament when it is created.
  */
 export function createCompetition(
   config: CompetitionConfig,
 ): Promise<CompetitionId> {
-  return notImplemented('createCompetition', { config })
+  return getApi().createCompetition(config)
 }
 
+/** A home nation of `''` clears it. Existing tournaments keep their copy. */
 export function updateCompetition(
   competitionId: CompetitionId,
   changes: Partial<CompetitionConfig>,
 ): Promise<void> {
-  return notImplemented('updateCompetition', { competitionId, changes })
+  return getApi().updateCompetition(competitionId, changes)
 }
 
 // ---------------------------------------------------------------------------

@@ -20,6 +20,20 @@ inside a tournament.
 - **Bulk upload via CSV paste** on every entity
 - **In-place editing** for existing records
 
+## Base Tournaments
+
+Create and edit: **name, format, and an optional home nation.**
+
+**The home nation decides who is overseas** — IPL → India, BBL → Australia. A
+player whose country is not the home nation counts as overseas in that base
+tournament's tournaments, which matters for the auction league's overseas cap.
+**Leave it empty for an international competition**, where overseas means
+nothing.
+
+> **It is copied onto each tournament when the tournament is created, and frozen
+> there.** Changing it later affects tournaments created afterwards, never one
+> already running.
+
 ## Creating and editing a tournament
 
 1. Choose the parent **Base Tournament** — **the format is derived from it**,
@@ -32,6 +46,13 @@ inside a tournament.
 **Publishing** sets `publishedAt`, and is what makes a tournament visible in the
 tournament list and selectable when creating a league. It requires at least the
 first match to have a start time.
+
+**Publishing can open official leagues in the same write.** When any gameweek
+league is among them, the admin **must choose a gameweek length for every
+round** — a divisor of that round's match count, 1 to N, with no default. One
+choice per round serves every gameweek league opened in that publish. A length
+of one match has no "during the gameweek", so the impact sub is off in that
+round.
 
 **Marking a tournament complete** sets `completedAt`. It is prompted when points
 for its last match are entered — but never done automatically, since the admin
@@ -53,6 +74,10 @@ transfers left.
 ## Players
 
 - Add in **bulk**
+- **Category and base price are required when a player is created**, alongside
+  name, country and role. They are the player's standard auction values, and
+  are written with the player in one atomic update. Players created before this
+  requirement have none; they are not backfilled.
 - **Edit in place** — role, category, base price
 - **Set a player's current team**, per competition
 - **Mark retired from a competition** — done by removing that competition from

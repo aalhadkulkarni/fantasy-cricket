@@ -32,7 +32,12 @@ import type {
   TransferProposalId,
   UserId,
 } from './ids.ts'
-import type { Format, LeagueRole, PlayerRole } from './reference.ts'
+import type {
+  Format,
+  LeagueRole,
+  PlayerCategory,
+  PlayerRole,
+} from './reference.ts'
 import type { Player } from './player.ts'
 import type { Match } from './tournament.ts'
 import type { Team } from './team.ts'
@@ -549,9 +554,17 @@ export interface TeamFilter {
   format?: Format
 }
 
+/**
+ * What the base tournament form submits.
+ *
+ * **`homeNation` as an empty string clears it** on an update. Absent in a
+ * partial update means leave it alone, so "no home nation" needs a value of its
+ * own.
+ */
 export interface CompetitionConfig {
   competitionName: string
   formatId: Format
+  homeNation?: string
 }
 
 /**
@@ -576,13 +589,21 @@ export interface PlayerConfig {
   playerShortName: string
 
   /**
-   * Free text. **Overseas is derived from this being anything but India**,
-   * which is hardcoded and a known Phase 1 limitation — so a fixed country list
-   * would imply a precision the model does not have.
+   * Free text. Overseas is derived from this against a tournament's
+   * `homeNation`, so it only has to match that string.
    */
   country: string
 
   playerRole: PlayerRole
+
+  /**
+   * **The standard auction values, required on creation.** Written to
+   * `standardAuctionConfig` in the same atomic update as the player, so every
+   * player created from here on can be auctioned. The base price is positive
+   * and a multiple of 0.5, the bid increment.
+   */
+  playerCategory: PlayerCategory
+  playerBasePrice: number
 
   /**
    * Which team, in which competition. Absent or empty means unassigned.

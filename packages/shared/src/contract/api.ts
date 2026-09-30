@@ -30,6 +30,7 @@
 import type {
   ArchivedLeagueCard,
   Competition,
+  CompetitionConfig,
   CompetitionId,
   FormatRecord,
   GameWeek,
@@ -59,6 +60,7 @@ import type {
   PlayerPoints,
   PlayerRoleRecord,
   Round,
+  RoundId,
   Team,
   TeamConfig,
   TeamFilter,
@@ -123,8 +125,17 @@ export interface CreatePlayersResult {
 export interface OfficialLeagues {
   /** Changes counted across the whole tournament. */
   matchBased?: boolean
-  /** One gameweek per round, so the impact sub exists wherever a round has more than one match. */
   gameWeekBased?: boolean
+
+  /**
+   * **How many matches make a gameweek, per round.** Required for every round
+   * whenever a gameweek league is asked for, and refused unless it divides that
+   * round's match count — gameweeks are equal length within a round.
+   *
+   * One set serves every gameweek league opened in the same publish. A length
+   * of one has no "during the gameweek", so the impact sub is off there.
+   */
+  gameWeekLengths?: Partial<Record<RoundId, number>>
 }
 
 /**
@@ -178,6 +189,23 @@ export interface Api {
 
   /** The interface calls these Base Tournaments and never "competitions". */
   getCompetitions(): Promise<Competition[]>
+
+  /**
+   * **System admins only.** Names are unique, ignoring case — the interface
+   * picks base tournaments from a list by name, so two called "IPL" could not be
+   * told apart.
+   */
+  createCompetition(config: CompetitionConfig): Promise<CompetitionId>
+
+  /**
+   * **System admins only.** A home nation of `''` clears it. Changing it
+   * reaches tournaments created afterwards and never one already created,
+   * which carries its own frozen copy.
+   */
+  updateCompetition(
+    competitionId: CompetitionId,
+    changes: Partial<CompetitionConfig>,
+  ): Promise<void>
 
   /**
    * The reference table. Display names live in the database rather than in the
