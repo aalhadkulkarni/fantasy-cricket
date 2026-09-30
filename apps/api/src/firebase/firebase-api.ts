@@ -1196,6 +1196,19 @@ export function createFirebaseApi(
    * `systemAdmin` or `systemOwner`. Checked here because hiding a button is
    * convenience and anyone can write to the database with the client SDK.
    */
+  /**
+   * **Asks rather than refuses**, for the reads that show an admin more
+   * instead of turning everyone else away.
+   */
+  async function isSystemAdmin(): Promise<boolean> {
+    if (session === undefined) return false
+
+    const roles = await service.read<User['systemUserRoles']>(
+      service.path('users', session.uid, 'systemUserRoles'),
+    )
+    return roles?.systemAdmin === true || roles?.systemOwner === true
+  }
+
   async function assertSystemAdmin(): Promise<void> {
     const session = requireSession()
 
@@ -1649,7 +1662,15 @@ export function createFirebaseApi(
       )
       let tournaments = Object.values(all ?? {})
 
-      if (filter?.includeUnpublished !== true) {
+      /*
+        **A draft belongs to whoever is building it.** The flag comes from the
+        caller, so it cannot be the thing that decides: an unpublished
+        tournament carries unannounced fixtures, squads and dates, and
+        `08-pages/tournaments.md` says it is invisible until published.
+        Dropped rather than refused, so the tournaments page keeps working
+        for everyone and the admin panel sees more.
+      */
+      if (filter?.includeUnpublished !== true || !(await isSystemAdmin())) {
         tournaments = tournaments.filter((t) => t.publishedAt !== undefined)
       }
       if (filter?.competitionId !== undefined) {
@@ -1674,6 +1695,10 @@ export function createFirebaseApi(
           `No tournament with id ${tournamentId}.`,
         )
       }
+
+      // Knowing the id is not permission to read a draft.
+      if (tournament.publishedAt === undefined) await assertSystemAdmin()
+
       return tournament
     },
 
@@ -2992,6 +3017,12 @@ export function createFirebaseApi(
       await service.update(changes)
     },
 
+    /**
+     * **Any manager's total, deliberately.** The leaderboard shows these
+     * anyway, and a total is not a team: it cannot be worked back into an
+     * eleven. The rule that matters — nobody sees an unlocked team — is
+     * enforced in `getTeamForMatch`, and an unscored match totals zero.
+     */
     async getPointsForMatch(
       userId: UserId,
       leagueId: LeagueId,

@@ -172,6 +172,29 @@ planner should know them.
 - The blue "floodlit" treatment is used throughout. `docs/07-design-system.md`
   rule 1, which reserved blue for live states, **was removed**.
 
+### Authorization, as it stands
+
+**Writes are role-checked.** `assertSystemAdmin` on the 20 system-admin
+writes, `assertManager` on team submissions, `assertLeagueAdmin` on league
+lifecycle, plus the join checks (slots, ban, deadline, membership).
+
+**Reads are open to any signed-in caller.** Leagues, tournaments, members and
+leaderboards are public by design, and a read cannot be pointed at another
+user's own data: `getMyTeam*`, `getActiveLeagues` and `getCurrentUser` take
+their uid from the token.
+
+**The one exception is an unlocked team.** `getTeamForMatch` and
+`getTeamForGameWeek` return another manager's eleven only once that period's
+deadline has passed; an impact sub stays hidden until its own match locks; a
+leaderboard for an unlocked period is refused with `periodNotLocked`.
+`getPointsForMatch(userId, …)` deliberately accepts any uid — it returns a
+total, never a lineup.
+
+**Unpublished tournaments are system-admin only**, in both the list and the
+single read.
+
+**A new endpoint must say which of those it is.**
+
 ### Enforcement — what is and is not real
 
 **The data layer checks everything a server would:** system-admin role on every
@@ -179,11 +202,12 @@ system-admin write, `manager` role on team writes, deadlines, squad legality,
 change allowances and caps, owner or admin for league finishing, and team
 visibility.
 
-**But the data layer runs in the browser and the security rules are
-permissive**, so none of this is enforced against someone writing to the
-database directly with the client SDK. It becomes real when the backend
-arrives. Known read-side gap: `getTournament` returns unpublished draft
-tournaments to anyone.
+**This is now real, environment by environment.** The checks run in
+`apps/api`, and the browser holds no database access, so there is no path
+around them. The rules deny clients under `local`; `prod` is still open until
+the new frontend and service are deployed there, at which point it is locked
+too. Both known gaps are closed: drafts are admin-only, and nothing in the
+browser reads the database.
 
 ---
 

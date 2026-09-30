@@ -79,10 +79,14 @@ rather than reporting completion.
 
 ### All data access goes through the data layer
 
-**Phase 1 is the frontend only.** The app talks directly to Firebase Realtime
-Database from the browser; there is no server. **Phase 2 will put a real backend
-behind it**, and the data layer is what makes that possible without touching
-anything above it.
+**There is a server, and the browser has no database access.** The React app
+calls an Express service on Cloud Run (`apps/api`), which verifies the caller's
+Firebase ID token and talks to the database with the Admin SDK. The browser
+keeps Firebase Auth and nothing else. `packages/shared` holds the contract both
+sides compile against.
+
+The seam is what made that swap cheap: `getApi()` returns `HttpApi` instead of
+`FirebaseApi`, and nothing above `src/data-layer` changed.
 
 1. **No component imports Firebase.** Ever.
 2. **No Firebase-shaped type crosses the boundary** — no snapshots, no
@@ -96,21 +100,37 @@ anything above it.
    split across two nodes, or that points are held in both a match-major and a
    player-major copy, the function is wrong.
 
-### The data layer is the Phase 1 server
+### Every rule is enforced in the service
 
-**Any rule that will be a server-side check in Phase 2 is enforced in the data
-layer now** — not in components.
-
-This covers team visibility, join deadlines, squad validity, bid legality,
+**Checks live in `apps/api`, never in components.** This covers team
+visibility, join deadlines, squad validity, allowances, roles, bid legality,
 transfer validity and ban checks.
 
-> UI-level gating is convenience, never the guard. Anyone can read the database
-> directly with the client SDK.
+> UI-level gating is convenience, never the guard. Hiding a button stops
+> nobody; the endpoint refusing does.
 
-### Firebase security rules stay permissive
+**The authorization policy, in one line each:**
 
-Deliberate for Phase 1. The data layer enforces access. **Do not write
-restrictive rules — they will break reads.**
+- **Writes are role-checked.** System-admin writes behind `assertSystemAdmin`,
+  team submissions behind `assertManager`, league lifecycle behind
+  `assertLeagueAdmin`.
+- **Reads are open to any signed-in caller**, because leagues, tournaments,
+  members and leaderboards are public by design.
+- **The one exception: a team whose deadline has not passed is visible only to
+  the manager who owns it.** An impact sub stays hidden until its own match
+  locks, and a leaderboard for an unlocked period is refused.
+- **Unpublished tournaments are system-admin only.**
+
+**A new endpoint has to say which of those it is.** Identity comes from the
+verified token and never from an argument.
+
+### Firebase security rules deny everything
+
+Clients hold no database access: the service reaches the database as a
+privileged service account, which bypasses rules by design. Locked under
+`local` today, and under `prod` once the service is deployed there. **Do not open a
+node without a reason recorded here** — the live auction will need one, for
+browsers listening to it directly.
 
 ---
 
@@ -161,8 +181,8 @@ Two more worth knowing:
 | Build      | Vite                                                    |
 | Styling    | Tailwind, themed through CSS custom properties          |
 | Components | shadcn/ui — added individually as needed, not upfront   |
-| Data       | Firebase Realtime Database, through the data layer only |
-| Auth       | Firebase Google auth                                    |
+| Data       | Firebase Realtime Database, reached only by the API service |
+| Auth       | Firebase Google auth in the browser; the service verifies its token |
 
 **Routing and state management libraries are not yet chosen.** One hard
 requirement on state: **live auction updates must not re-render unrelated

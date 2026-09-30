@@ -23,8 +23,11 @@ preserved just because it is written down.
 
 ## Why this layer exists
 
-**Phase 2 replaces Firebase with a real backend.** The data layer is the seam
-that makes that possible without touching anything above it.
+**The backend arrived, and nothing above this layer changed.** That was the
+point of the seam: `getApi()` returns `HttpApi` instead of `FirebaseApi`, the
+browser holds no database access, and the implementation now runs in
+`apps/api` against the Admin SDK. The rules below are why that swap cost one
+line.
 
 Four rules follow, and none is negotiable:
 
@@ -36,7 +39,7 @@ Four rules follow, and none is negotiable:
    listener are different things with different lifecycles.
 5. **The schema does not leak either.**
 
-If Firebase leaks upward, the Phase 2 promise breaks and the layer was pointless.
+Firebase leaking upward would have made that swap a rewrite instead of a line.
 
 ### On the fifth rule
 
@@ -65,10 +68,10 @@ a signature that Phase 2 will have to break.
 
 ## The layer is the server
 
-**Any rule that will be a server-side check in Phase 2 is enforced here now.**
-
-The data layer is effectively the Phase 1 server. UI gating is convenience; this
-is the actual guard. It applies to:
+**Every rule is enforced in `apps/api`, and is now genuinely enforced**: the
+database refuses clients outright, so the only way to its data is through an
+endpoint that checks first. UI gating is convenience; this is the guard. It
+applies to:
 
 - **Team visibility** — a manager's team for a match is returned to others only
   after that match's deadline
@@ -105,7 +108,7 @@ getTeamForMatch(leagueId, managerId, matchId)  // correct
 ```
 
 > **Why:** a client-supplied "who is asking" is exactly the cheating vector on
-> team visibility. In Phase 2 the server reads identity from the session and
+> team visibility. The server reads identity from the verified token and
 > never trusts a client value. The layer should behave the same way now, so
 > nothing above it has to change later.
 
@@ -154,7 +157,7 @@ At the expected size — twenty managers, sixty-four matches — that is roughly
 
 Summing player points across a manager's teams, applying captain and
 vice-captain multipliers, and layering transfer adjustments — **all of it happens
-here.** That logic belongs on a server, and this is the Phase 1 server.
+here.** That logic belongs on a server, and now runs on one.
 
 **The multipliers are 2x for the captain and 1.5x for the vice-captain, and
 they are fixed.** The vice-captain is **not** promoted to 2x when the captain
