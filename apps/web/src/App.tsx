@@ -33,11 +33,12 @@ import { ROUTES } from './routes'
  *
  * The header sits outside `Routes` so it is not remounted on navigation.
  *
- * **No route guards yet.** `docs/04-navigation.md` specifies redirects for a
- * signed-out visitor, a non-member, a banned user, a spectator on My Team and a
- * non-admin on the admin panel. All of those need auth and league data. When
- * they arrive, note that guards are convenience — the data layer is the actual
- * check, because anyone can type a URL.
+ * **Two guards, and both are convenience.** `RequireAccount` sends a
+ * signed-out visitor to the login page, and `RequireSystemAdmin` sends
+ * everyone else home from the admin routes. The service is the actual check —
+ * anyone can type a URL, or skip the app altogether. The rest of the redirects
+ * in `docs/04-navigation.md` — a non-member, a banned user, a spectator on My
+ * Team — need league data and are not built.
  */
 function App() {
   return (

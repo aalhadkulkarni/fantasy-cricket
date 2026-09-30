@@ -1120,11 +1120,21 @@ const dataModel = {
     Only exists for leagues where isCustomScoringSystem is true. The league
     admin calculates and enters these themselves.
 
-    RESOLUTION IS FALLBACK, NEVER A COPY:
-    a league reads its own store first and falls back to standardPoints.
-    Standard points are never copied into a league — otherwise correcting a
+    RESOLUTION IS BY FLAG, AND NEVER A COPY:
+    isCustomScoringSystem decides which store a league reads, and there is no
+    fallback between them. A custom-scoring league reads only its own points,
+    so a match its admin has not entered yet scores zero rather than borrowing
+    the standard figures — otherwise one league would score some matches by
+    its own rules and others by the standard ones, and nobody would see it
+    happen.
+
+    Standard points are never copied into a league either — correcting a
     scoring mistake would mean fixing it in every league that opted in, which
     is the fan-out problem this model avoids everywhere else.
+
+    (An earlier draft of this file described a fallback. The code has never
+    done that; docs/06-data-layer.md and src/types/points.ts agree with what
+    is written here.)
 
     Stored both ways for the same reason as standard points, and carrying the
     same revisit-at-implementation note.
