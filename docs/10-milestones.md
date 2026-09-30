@@ -63,15 +63,10 @@ users join, submit and edit a team, see points, and follow a leaderboard.
 
 ### Documents that are now wrong
 
-Fix these, or read them with this list beside them.
+One left. The others on this list have been corrected at source.
 
 | Where | What it says | What is true |
 | --- | --- | --- |
-| `CLAUDE.md` ("Standard points are never copied…" row), `docs/01-overview.md` ("Standard and custom points resolve by fallback"), `docs/data-model.js` (points header, "falls back to standardPoints") | A league reads its own points store first and **falls back** to standard. | **There is no fallback.** A league reads custom points **or** standard points according to `isCustomScoringSystem`, never both. A custom-scoring league with no entry for a match scores zero for it. `docs/06-data-layer.md` and the code agree on this; the three places listed do not. |
-| `docs/08-pages/site-header.md`, `docs/08-pages/my-leagues.md` | Create a League is in the header and on the empty My Leagues state. | Removed from both for now (see deferred). |
-| `docs/05-data-model.md`, future-work table, "Materialised leaderboards" | Deferred. | Still deferred as described (computing on write). **Separately**, a read-side leaderboard *cache* now exists — see below. They are different things. |
-| `src/data-layer/firebase/paths.ts` header | "Nothing is implemented; every function returns `notImplemented`." | About 65 are implemented, behind the `Api` interface. |
-| `src/App.tsx` comment | "No route guards yet." | `RequireAccount` and `RequireSystemAdmin` guard routes. |
 | `docs/data-model.js`, `formats` (TBD3) | Formal scoring rules will live on each format. | The Points System page reads a **static file**, `src/content/points-system.ts`. A deliberate choice; moving it into `formats` later changes only where the page reads from. |
 
 ### Decisions taken during the build
@@ -243,8 +238,6 @@ most repeat reads; sparse lineups would cut the rest by roughly 5–7×.
 
 Small items logged instead of fixed. None blocks anything.
 
-- Fix the stale documents listed above, in particular the points fallback.
-- `getTournament` should not return unpublished drafts to non-admins.
 - Custom-scoring points entry, and a cache stamp for it
   (`customPointsUpdatedAt/{leagueId}`).
 - Actions Center: derive real items, starting with "a team deadline with no

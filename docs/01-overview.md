@@ -113,12 +113,17 @@ finding and fixing every manager it touched.
 The only exception is `pointsAdjustment` — the net effect of accepted transfers,
 which is not derivable from player points.
 
-### Standard and custom points resolve by fallback, never by copying
+### Standard and custom points resolve by a flag, never by copying
 
 A league either uses standard points (entered once by a system admin at
-tournament level) or enters its own. **A league reading points checks its own
-store first and falls back to standard.** Standard points are never copied into
-a league — that would reintroduce the fan-out problem above.
+tournament level) or enters its own. **The league's `isCustomScoringSystem`
+flag decides which store it reads, and there is no fallback between them.** A
+custom-scoring league reads only its own points, so a match its admin has not
+entered scores zero rather than borrowing the standard figures — falling back
+per match would let one league score some matches by its own rules and others
+by the standard ones, which is worse than showing nothing because nobody would
+notice. Standard points are never copied into a league either: that would
+reintroduce the fan-out problem above.
 
 ### Team visibility is a correctness rule, not a UI preference
 

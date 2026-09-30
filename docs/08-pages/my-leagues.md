@@ -123,6 +123,8 @@ Pending are both empty.
 > and so does anyone evaluating the project for the first time. The eventual
 > target is a fuller exploration screen offering three paths — join by code,
 > browse tournaments, create a league — but the simple version ships first.
+> **Two paths today**, since creating a league is hidden until its form is
+> built: see `create-league.md`.
 
 > **Rejected: a guided tour.** Substantial to build, most people skip them, and
 > a first-time visitor will click straight through. A well-designed empty state
