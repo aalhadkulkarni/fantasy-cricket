@@ -47,10 +47,14 @@ jobs:
 
       # Tagged with the commit, so a rollback is "deploy the previous tag".
       - name: Build and push
+        # -e fails the step on the first bad command, -x echoes each one, and
+        # plain progress keeps the full build output rather than collapsing it.
+        # Without these a failing layer reports only "exited with code 1".
         run: |
+          set -euxo pipefail
           IMAGE=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}
           # Root context: the service imports the shared workspace package.
-          docker build -f apps/api/Dockerfile -t "$IMAGE" .
+          docker build --progress=plain -f apps/api/Dockerfile -t "$IMAGE" .
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
@@ -69,8 +73,21 @@ jobs:
             --cpu 1 \
             --port 3000
 
-      - name: Show the URL
+      - name: Show the URL, and check it answers
         run: |
-          gcloud run services describe ${{ env.SERVICE }} \
+          set -euxo pipefail
+          URL=$(gcloud run services describe ${{ env.SERVICE }} \
             --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} \
-            --format='value(status.url)'
+            --format='value(status.url)')
+          echo "$URL"
+          # A deploy that starts but cannot serve is a failed deploy.
+          curl --fail --silent --show-error --max-time 30 "$URL/health"
+
+      # Cloud Run keeps the container's own output, which is where a crash on
+      # startup explains itself. Only on failure, and only the last few lines.
+      - name: Service logs, if the deploy failed
+        if: failure()
+        run: |
+          gcloud run services logs read ${{ env.SERVICE }} \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} \
+            --limit 50 || true
