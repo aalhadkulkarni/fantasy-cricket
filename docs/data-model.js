@@ -100,6 +100,9 @@ const dataModel = {
   },
 
   standardAuctionConfig: {
+    // Written for each player IN THE SAME ATOMIC UPDATE that creates them, so
+    // every player created from Milestone 4 onward has a category and base
+    // price. Players created earlier have no entry.
     playerDetails: {
       player001: {
         playerCategory: 'marquee',
@@ -382,6 +385,16 @@ const dataModel = {
       competitionId: 'competition001',
       competitionName: 'IPL',
       formatId: 't20',
+      /*
+        OPTIONAL. The nation a player must be from NOT to count as overseas in
+        this competition's tournaments. Absent means the competition has no
+        notion of overseas at all — an international series, say.
+
+        COPIED onto each tournament at creation (tournaments/{id}/homeNation)
+        and frozen there, like participatingPlayers, so editing a competition
+        never shifts who is overseas under a running tournament.
+      */
+      homeNation: 'India',
     },
     competition002: {
       competitionId: 'competition002',
@@ -555,6 +568,10 @@ const dataModel = {
       tournamentId: 'tournament001',
       tournamentName: 'IPL 2027',
       competitionId: 'competition001',
+      // Copied from competitions/{competitionId}/homeNation at creation, then
+      // frozen. Absent when the competition had none. A player is overseas in
+      // this tournament when their country is not this.
+      homeNation: 'India',
       /*
         AUTHORITATIVE FOR READS, MAINTAINED ON WRITE.
 
@@ -1002,7 +1019,13 @@ const dataModel = {
           },
         },
         draftOrder: {
-          // or it will be empty if not decided yet
+          /*
+            ASSIGNED ON JOIN, not generated at the auction's start: each manager
+            takes a random position nobody holds yet as they join, so the order
+            is known before any bidding. Positions nobody holds are shown as
+            TBA. How two simultaneous joins are kept from taking the same
+            position is still open — see docs/10-milestones.md.
+          */
           user003: 1,
           user004: 5,
           user005: 3,
@@ -1180,7 +1203,13 @@ const dataModel = {
       membersUpdatedAt: 1806400000000,
       main: {
         rows: [
-          { rank: 1, managerId: 'user001', managerName: 'Asha', fantasyTeamName: 'Asha XI', points: 412 },
+          {
+            rank: 1,
+            managerId: 'user001',
+            managerName: 'Asha',
+            fantasyTeamName: 'Asha XI',
+            points: 412,
+          },
         ],
         basedOn: { points: 1806500000000, members: 1806400000000 },
         leaderboardComputedAt: 1806500100000,
@@ -1558,9 +1587,12 @@ const dataModel = {
 
         It may also cover an admin reassigning the auctioneer mid-auction.
 
-        MECHANICS DEFERRED TO IMPLEMENTATION, deliberately and not by oversight:
-        what exactly enters and leaves it, how far back a rewind may go, and who
-        may do either. Not a Phase 1 priority.
+        RESOLVED (Milestone 4): the auctioneer enters it with Start recovery
+        and leaves it with End recovery. Inside it, rewind undoes the last
+        round's result (a sale or an unsold); the round before then becomes
+        the last, so repeated rewinds walk back to the start. Individual bids
+        are not undone. The timeline is appended to (auctionBeingRecovered,
+        auctionRecovered), never rewritten.
       */
       phaseId: 'recovering',
       phaseName: 'Recovering',

@@ -14,13 +14,22 @@ import type { Format } from './reference.ts'
  *
  * JOIN: `formatId` → `formats`, for the display name. The format is inherited
  * by every tournament under this competition rather than set on each one.
- *
- * NOT MODELLED HERE: there is no home-country field, which is why the overseas
- * rule is currently hardcoded to India. That is correct for the IPL and wrong
- * for any competition that is not an Indian one. See `05-data-model.md`.
  */
 export interface Competition {
   competitionId: CompetitionId
   competitionName: string
   formatId: Format
+
+  /**
+   * **Who is not overseas here** — IPL → India, BBL → Australia. A player whose
+   * country is anything else counts as overseas in this competition's
+   * tournaments.
+   *
+   * **Absent means the competition has no notion of overseas**, which is right
+   * for an international series.
+   *
+   * **Copied onto each tournament at creation**, not read from here, so editing
+   * it never changes who is overseas under a tournament already running.
+   */
+  homeNation?: string
 }

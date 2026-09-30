@@ -35,6 +35,8 @@ export const API_METHODS: Readonly<Record<WireMethod, MethodSpec>> = {
   getCurrentUser: { verb: 'get', params: [] },
   createUser: { verb: 'post', params: ['userName'] },
   getCompetitions: { verb: 'get', params: [] },
+  createCompetition: { verb: 'post', params: ['config'] },
+  updateCompetition: { verb: 'post', params: ['competitionId', 'changes'] },
   getPlayerRoles: { verb: 'get', params: [] },
   getFormats: { verb: 'get', params: [] },
   getTeams: { verb: 'get', params: ['filter'] },

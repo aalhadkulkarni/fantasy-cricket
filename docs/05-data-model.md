@@ -232,7 +232,9 @@ all copied into the league at creation.** Points are not, and resolve
 dynamically instead. That looks inconsistent and is not.
 
 **Why the auction config is copied.** `standardAuctionConfig.playerDetails`
-holds a base price and category for **every player in the system**. A league
+holds a base price and category for **every player in the system** — written
+in the same atomic update that creates the player, so every player created
+from Milestone 4 onward has one. A league
 needs only the players actually participating in its tournament. So the copy is
 not a snapshot of the standard, it is a **projection of it onto one
 tournament** — a genuinely different and much smaller thing. Resolving
@@ -339,19 +341,25 @@ A reject-and-ban creates a membership record holding only that role, for someone
 who was never a member. That is consistent — membership already holds
 non-playing relationships, since spectators live there too.
 
-### Overseas is derived from the player's country
+### Overseas is derived from the player's country and the tournament
 
-**A player is overseas when `players/{playerId}/country` is not India.** There
-is no stored overseas flag, and nothing on the competition records what counts
-as home.
+**A player is overseas in a tournament when their `country` is not that
+tournament's `homeNation`.** There is no stored overseas flag.
+
+`homeNation` is an **optional field on a competition**, set by a system admin
+(IPL → India, BBL → Australia). It is **copied onto each tournament at
+creation and frozen there**, like its participants, so editing a competition
+never changes who is overseas in a tournament already running. **A tournament
+with no `homeNation` has no notion of overseas**, which is right for an
+international series.
 
 The overseas cap lives only in `auctionConfig`, as
 `maxOverseasPlayersAllowedInXI`. Regular leagues have no cap — that is
 deliberate, and recorded on `league001` in the example file.
 
-> **This hardcodes India**, which is correct for the IPL and wrong for any base
-> tournament that is not an Indian competition. It holds for Phase 1 because
-> the IPL is the only auction tournament in play.
+> **This replaced a hardcoded India**, which was correct for the IPL and made
+> the BBL unplayable: nearly every BBL player would have been overseas, and a
+> cap of four would have left nobody able to field a legal XI.
 
 ---
 

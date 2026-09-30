@@ -198,6 +198,10 @@ is a single catalogue read — so this is a component, not a data change.
 
 ## 5. Gameweek length on an official league
 
+> **Taken up in Milestone 4 (A1).** Publishing now asks for a gameweek length
+> per round, on the publish screen. Kept here for the reasoning; see
+> `docs/10-milestones.md`.
+
 **Frontend only.**
 
 Publishing a tournament can open an official gameweek league, and it currently

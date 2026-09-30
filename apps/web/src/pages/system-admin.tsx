@@ -1,5 +1,6 @@
 import { useState } from 'react'
 
+import { CompetitionsPanel } from '@/components/admin/competitions-panel'
 import { PlayersPanel } from '@/components/admin/players-panel'
 import { TeamsPanel } from '@/components/admin/teams-panel'
 import { TournamentsPanel } from '@/components/admin/tournaments-panel'
@@ -45,6 +46,11 @@ export function SystemAdmin() {
         <SetUpBasicSystem onSetUp={catalogueChanged} />
 
         <CreateSamplePlayers onCreated={catalogueChanged} />
+
+        <CompetitionsPanel
+          catalogueVersion={catalogueVersion}
+          onChanged={catalogueChanged}
+        />
 
         <TeamsPanel
           catalogueVersion={catalogueVersion}

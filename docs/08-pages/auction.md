@@ -16,6 +16,10 @@
 Opened in a **new browser tab** from Auction Center, so a manager cannot lose
 the auction by clicking something else.
 
+**Anyone who can see the league can open it, at any time** — before, during and
+after the auction. Someone without a role simply sees it with no controls.
+There is no harm in looking, so there is no gate.
+
 ---
 
 ## The core mechanic — preserved, do not redesign
@@ -38,6 +42,11 @@ over — which is why this needs no transactions.
 > A wrote first. **This is accepted. It is not a defect and must not be
 > "fixed".**
 
+> **Under review in Milestone 4.** With a server now in place, accepting bids
+> can run on the service rather than in the auctioneer's browser. Whether it
+> does, and how concurrent bids are then serialised, is **not yet decided** —
+> see `docs/10-milestones.md`. Until it is, this section stands.
+
 ## Shared display
 
 **Always visible:**
@@ -54,6 +63,16 @@ over — which is why this needs no transactions.
 - Players **remaining / sold / unsold** — counts and lists
 - **Managers table** — name · budget · number of players. Clicking the player
   count opens that squad in a modal.
+
+**After the auction** the page stays open and becomes its historical record:
+
+- **Every sale** — who bought whom, and for how much, plus every unsold player
+- **The bidding on any individual player**, on drill-down: who bid what, in
+  order, and what it finally went for
+
+> This is not the same as Squads. Squads shows who owns whom **now**, and that
+> drifts as transfers happen. The auction record shows what was **paid**, which
+> never changes.
 
 ## Timeline
 
@@ -101,7 +120,10 @@ state instead, which is authoritative and always present.
 **The increment is 0.5.** Every bid is the current asking price, and the asking
 price rises by 0.5 at a time regardless of the player's value.
 
-**The round timer is 30 seconds**, refreshed from the last accepted bid. Thirty
+**The round timer is 30 seconds**, and **every accepted bid restarts it**: the
+deadline is the last accepted bid plus thirty seconds. A bid processed after the
+deadline is ignored. **The clock that decides is the server's, at the moment the
+bid is processed** — bids are not stamped with a time of their own. Thirty
 seconds proved comfortably enough across real auctions. **Neither is
 configurable in Phase 1** — the auctioneer can add seconds to a round in
 progress, and making the timer a league setting is a Phase 2 idea.
@@ -126,31 +148,56 @@ silently doing nothing.
 screen:** squad rules, their current squad composition, remaining budget,
 remaining players and their roles.
 
-> **The auction does not prevent an illegal squad.** A manager may buy ten
-> batsmen. The consequence lands later — they cannot field a legal XI and score
+**Two checks, and only two:**
+
+- **A bid may not take the budget below zero.** There is no reserve held back
+  for filling the minimum squad — a manager who spends everything early is left
+  unable to bid, and that is theirs to manage.
+- **A manager whose squad is at the maximum size cannot bid.**
+
+> **The auction does not prevent an illegal squad**, meaning one that cannot
+> field a legal XI. A manager may buy ten batsmen. The consequence lands later — they cannot field a legal XI and score
 > zero for that gameweek. Across eight real auctions nobody has ever done this.
 > Show them what they need and let them be wrong.
 
 ## Auctioneer controls
 
 - **Start auction**
-- **Generate the draft order** — done at the very start, before any bidding,
-  because a manager's strategy depends on where they sit in the draft
 - **Select batch** — by category and role
 - **Select player** — chosen directly, or picked at random from the batch
 - **Sell** — **manual, deliberately.** The system does not auto-resolve on
   timeout, so the auctioneer can make allowances for someone with connection
-  trouble.
+  trouble. Sells to the current leader at the leading bid.
+- **Sell manually to a chosen manager at a chosen price** — **a last resort**,
+  for when something unexpected has broken and the auction must not stall. The
+  bid history is kept as it is, and the sale is appended as the final bid if it
+  is not already there.
 - **Mark unsold**
 - **Pause / resume** — freezes the timer; it resets on resume
-- **Add extra seconds** *(good to have, not essential)*
-- **Rewind** the last round — undoing a sale or unsold result, restoring budgets
-  and squad membership. **Gated behind the `Recovering` phase**, which the
-  auctioneer enters deliberately, so a rewind cannot fire mid-round by accident
-- **Accept a draft pick** when a manager takes their turn
+- **Add extra seconds** _(good to have, not essential)_
+- **Start recovery / End recovery**, and **Rewind** inside it — see below
+- **Next manager**, and **accept a draft pick** when a manager takes their turn
 - **End auction** — the system prompts when the end looks reached, but the
   auctioneer decides
-- **Hand off** to another admin
+- **Hand off** — always to the backup auctioneer
+
+**There is no "generate draft order" control.** The order is assigned as
+managers join — see below.
+
+### Recovery and rewind
+
+- **Rewind undoes the last round** — a sale or an unsold result — restoring
+  budgets and squad membership. Once it is undone, the round before it becomes
+  the last round, so **rewinding repeatedly walks the auction back to its
+  start.** That is needed for testing, where an auction is reset many times.
+- **Only possible between Start recovery and End recovery.** The auctioneer
+  enters recovery deliberately, so a rewind cannot fire mid-round by accident.
+- **It does not undo individual bids**, or anything else that is not a round's
+  result.
+- **The timeline is appended to, never rewritten.** A rewind adds its own
+  entries rather than removing the ones it undoes.
+- **A reset-auction control exists outside production**, as a fallback for
+  testing. It is hidden in prod because it is dangerous.
 
 **Not in Phase 1:** autopilot, where the system advances rounds automatically.
 
@@ -161,8 +208,22 @@ remaining players and their roles.
 The draft is **turn-based rather than concurrent**, and differs from the auction
 proper:
 
-- The order is **randomly generated and snakes** — 1 to 6, then 6 back to 1,
-  repeating
+- **The draft pool is the General category plus every player unsold in Marquee
+  and Star**
+- The order is **random and snakes** — 1 to 6, then 6 back to 1, repeating
+- **A position is assigned when a manager joins**, at random from those not yet
+  claimed, so the order is known before any bidding — a manager's strategy
+  depends on where they sit. Positions nobody holds yet show as **TBA**:
+
+  ```
+  1 · TBA
+  2 · Thane
+  3 · Pune
+  4 · TBA
+  5 · TBA
+  6 · Bangalore
+  ```
+
 - The manager whose turn it is picks a player and confirms; the auctioneer
   accepts
 - **All draft picks go at base price**, with budget deducted
@@ -171,23 +232,27 @@ proper:
 - **No round limit.** The draft continues while valid choices remain — a single
   manager with budget and squad space keeps picking after everyone else is
   finished
-- **A manager who can no longer pick is skipped, not blocked on.** The draft
-  proceeds with a shrinking set of eligible pickers and ends when nobody is
-  eligible
+- **A manager who can no longer pick is skipped, not blocked on.** The
+  auctioneer's **Next manager** moves past them. The draft proceeds with a
+  shrinking set of eligible pickers and ends when nobody is eligible
 
 > The draft currently happens over WhatsApp. This is new, not preserved
 > behaviour.
 
 ## Auctioneer handover
 
-The owner may reassign at any time, including mid-auction, and the current
-auctioneer may hand off. Either takes effect immediately and revokes the
-previous auctioneer's control.
+The owner may change the auctioneer or the backup at any time, including
+mid-auction. The current auctioneer may hand off, **which always passes control
+to the backup.** Either takes effect immediately and revokes the previous
+auctioneer's control.
+
+> **Not built in Milestone 4.** The official auction league has one auctioneer,
+> the system admin who published it, and no backup.
 
 **Presence detection and automatic failover are Phase 2.** For now, if an
 auctioneer goes silent, an admin reassigns manually.
 
 > **The `Recovering` phase covers this and the mistake case**, and is entered
-> deliberately rather than detected. Its mechanics — what enters and leaves it,
-> how far back a rewind may go, and who may do either — are **deferred to
-> implementation** rather than specified here.
+> deliberately rather than detected — see "Recovery and rewind" above. Whether
+> the old auctioneer becomes the backup after a handoff is left to
+> implementation.
