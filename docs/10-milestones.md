@@ -197,40 +197,119 @@ system-admin write, `manager` role on team writes, deadlines, squad legality,
 change allowances and caps, owner or admin for league finishing, and team
 visibility.
 
-**This is now real, environment by environment.** The checks run in
-`apps/api`, and the browser holds no database access, so there is no path
-around them. The rules deny clients under `local`; `prod` is still open until
-the new frontend and service are deployed there, at which point it is locked
-too. Both known gaps are closed: drafts are admin-only, and nothing in the
-browser reads the database.
+**This is now real.** The checks run in `apps/api`, the browser holds no
+database access, and the rules deny every client in every environment, so
+there is no path around them. Both known gaps are closed: drafts are
+admin-only, and nothing in the browser reads the database.
 
 ---
 
+## Milestone 3 — a real backend
+
+**Status: complete, 30 September 2026.** Built in a day; the estimate was a
+week, and the estimate was wrong because the seam did its job.
+
+**Goal:** make the rules real. Every check the data layer performed ran in the
+browser, and the security rules were permissive, so anyone could skip all of it
+and write to the database with the client SDK.
+
+### What shipped
+
+- **An Express service on Cloud Run** (`apps/api`), `asia-southeast1`, beside
+  the database. It verifies the caller's Firebase ID token, runs the checks,
+  and reaches the database with the Admin SDK.
+- **The browser holds no database access.** It keeps Firebase Auth, which is
+  what produces the token, and calls the service for everything else. The
+  bundle lost 192KB with the database SDK.
+- **The rules deny every client**, in every environment. The service is
+  privileged, so it is unaffected — which is the whole point.
+- **An npm workspaces monorepo**: `apps/web`, `apps/api`, `packages/shared`.
+- **`packages/shared` holds the contract** both sides compile against: the
+  `Api` interface, the error codes with their HTTP statuses, the environment
+  union, and `API_METHODS` — one table giving each operation its verb and
+  argument order, so a name or verb cannot drift between client and server.
+- **Keyless deploys.** GitHub Actions authenticates through Workload Identity
+  Federation; no service-account key exists anywhere. The frontend and the
+  service deploy independently, both from `release`.
+
+### Decisions
+
+| | |
+| --- | --- |
+| **Host** | Cloud Run, container, `asia-southeast1`. Cloud Functions was the alternative; the container is portable and can hold a WebSocket if the auction ever needs one |
+| **Framework** | Express, deliberately boring. Fastify was considered and rejected: with zod covering validation, its advantages did not apply here |
+| **Endpoints** | One per `Api` method, named after it — `GET /v1/getLeagueDetails`, `POST /v1/updateTeamForMatch`. Reads are GET, writes are POST |
+| **Types** | One shared package, not duplicated copies. Changes are additive; a structural change means a new type rather than an edited one |
+| **Auth** | Firebase ID token per request, verified with the Admin SDK. Roles are read from the database per request rather than baked into claims |
+| **Session** | The api object is built per request, closing over the caller, so `requireSession()` reads a closure and a handler cannot see another caller's identity |
+| **Errors** | A code per rule plus the server-rendered message. The code is for branching and logs; the message is what a person reads |
+| **Environments** | One service per environment, and **the environment comes from the deployment, never from the request** |
+| **Cutover** | Big bang, not method by method: a routing table between two backends is a mechanism that exists only to be deleted |
+
+### Authorization
+
+Audited across all 64 operations and written down in full under
+"Authorization, as it stands" above, and in `CLAUDE.md`. The audit found the
+rules already enforced; the two gaps it closed were both about unpublished
+tournaments rather than teams.
+
+### Verified
+
+By hand, with ID tokens minted for an admin and a non-admin: reads with and
+without arguments, an object filter, a write, an admin-only call, a refusal
+returning the right code and status, drafts hidden from the non-admin, and
+another manager's team returned on a locked match but not an open one. Then
+the whole app clicked through with the rules denying clients.
+
+### Deferred
+
+| Item | State |
+| --- | --- |
+| **Automated tests** | None. Every rule above is guarded by having been clicked once. The user's stated next priority |
+| **`preprod` and `test`** | Placeholders in `environments.ts`; no service, no hosting target |
+| **`apps/web/src/data-layer/firebase/archived`** | The pre-service browser copies, kept for reference, excluded from typecheck, lint and formatting. They no longer compile, so they are not a fallback |
+| **Renaming `firebase-api.ts`** | "api" means three things in this repo. *Adapter* is the accurate word — see the backlog |
+| **Response validation (zod)** | Responses are cast, not parsed. The same trust the Firebase reads had |
+
 ## Next
 
-**Agreed order: the backend, then the auction.**
+**Milestone 4 is being scoped. The auction is the likely first piece.**
 
-The backend is still being decided. The leading option is a **Node service on
-Google Cloud** using the Firebase Admin SDK, with the browser holding no
-database access (`.read` and `.write` false) apart from whichever auction nodes
-need live listeners. The `Api` interface in `src/data-layer/api.ts` is the
-contract: a new implementation calls the service, and nothing above the data
-layer changes.
+### What decides the timing
 
-Things the backend design has to settle:
+- **BBL in January is the auction playtest.** Eight teams and a deep enough
+  pool for six managers to fill squads; a bilateral series is not — two squads
+  is about thirty players, and six managers need eighty or more.
+- **IPL squads are not settled until the mini auction in January**, after the
+  transfer window closes in December. There is no point holding a fantasy
+  auction before then, which is why BBL comes first and IPL follows in
+  February–March.
+- **AUS vs SA runs on the current system**, as a match-based league with about
+  five people. It is the first time the season loop has been exercised by more
+  than one human, and worth treating as the experiment it is — including
+  timing how long one match's points entry actually takes.
+- **The auction's mechanics need no audience.** A synthetic tournament with
+  enough sample players exercises bidding, selling, undo, purses and squad
+  limits with one person. Only the atmosphere needs a room full of people.
 
-- **Where it runs, and the region**, which follows the database's region.
-- **Which reads stay direct.** Only the auction needs live updates; everything
-  else can go through the service, with polling where freshness matters. The
-  auction nodes need a node-by-node look, since bids may need to be private.
-- **The leaderboard cache** can move from the database into server memory, or
-  stay.
-- **Sparse lineups** (`docs/05-data-model.md`) are the other large cost saving
-  and are cheaper to do during the move than after.
+### Ideas raised, with the reasoning
 
-**Known costs** at 100 managers over a 74-match season: dense lineups make an
-uncached leaderboard read about 3.8 MB, the dominant cost. The cache removes
-most repeat reads; sparse lineups would cut the rest by roughly 5–7×.
+- **Live chat during the auction** — cheap, rides on the rules carve-out the
+  auction needs anyway, and makes the room self-contained. First choice if the
+  auction is buffed.
+- **Co-managers on one team** — more people in the room, but it changes the
+  single-writer-per-team property the bidding design relies on, and touches
+  every "is this your team" check. Most of its value lands in the season,
+  which January will not have.
+- **Head-to-head fixtures, survivor, chips** — engagement features derived
+  from points already collected, so they add **no recurring admin work**. The
+  best of the cheap wins, once there are users to engage.
+- **Predict-and-win** — rejected for now, not because it is dull but because
+  it adds per-match admin work forever, on top of manual points entry.
+- **Automated scoring ingestion** — the sleeper. Points are typed in by hand
+  today, which is survivable for five people and not for a season with real
+  users. Needs lead time, and the hard part (matching external player names to
+  internal ids) is the interesting part.
 
 ---
 
