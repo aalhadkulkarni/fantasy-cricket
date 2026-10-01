@@ -395,6 +395,23 @@ together.
 
 Small items logged instead of fixed. None blocks anything.
 
+- **Every API request pays a CORS preflight.** The site and the service are on
+  different origins and requests carry `Authorization`, so the browser sends an
+  `OPTIONS` before each one, and `cors()` in `apps/api/src/index.ts` sets no
+  `maxAge`, so the browser re-asks almost every time. A gameweek switch on My
+  Team is 3 requests plus up to 3 preflights. **Latency, not money** — preflights
+  never touch the database and sit far inside Cloud Run's free tier. Two fixes,
+  either or both:
+  - `maxAge` on `cors()` (Chrome caps it at 2 hours): one line, but cached per
+    exact URL, so each gameweek's first visit still preflights;
+  - serving the API from the site's origin — a Firebase Hosting rewrite of
+    `/api/**` to Cloud Run, and a Vite proxy locally — which removes CORS
+    entirely. An infrastructure change; check Hosting can rewrite to Cloud Run
+    in `asia-southeast1` first.
+- **My Team refetches a gameweek on every visit.** Remembering loaded periods
+  (cleared on save), and fetching the neighbouring ones in the background, would
+  make going back instant. Page-only.
+
 - Custom-scoring points entry, and a cache stamp for it
   (`customPointsUpdatedAt/{leagueId}`).
 - Actions Center: derive real items, starting with "a team deadline with no
