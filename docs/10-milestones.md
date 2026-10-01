@@ -273,7 +273,7 @@ the whole app clicked through with the rules denying clients.
 
 ## Milestone 4 — the auction
 
-**Status: in progress.** Phase A merged (#74). Phase B under way.
+**Status: in progress.** Phases A (#74) and B (#75) merged. Phase C under way.
 
 **Goal:** a live auction for an **official auction league**, end to end — from
 publishing the tournament that opens the league to managers picking an XI from
@@ -326,13 +326,23 @@ together.
 - **Rewind** undoes the last round's result, repeatedly, only inside recovery,
   and appends to the timeline rather than rewriting it. A non-production reset
   exists for testing.
-- **Team submission begins only when the auctioneer ends the auction.**
+- **Team submission begins only when the auctioneer ends the auction.** An
+  auction league is pre-auction until the auction is started and in its auction
+  until it is ended, regardless of the scheduled start or the first ball; only
+  then do team submission and active follow. `league-phase.ts` derives it from
+  the live auction's own phase field, read alone.
 - **Existing players are not backfilled** with auction values; environments are
   re-seeded. **In a league's pool, a participant without values goes in as
   General at 2**, applied when the league copies the standard values.
 - **A draft position is claimed transactionally on join**, like a join code, so
   two simultaneous joins cannot share one. `draftOrder` is keyed position →
   manager for that reason.
+- **The batch sequence** lives in `standardAuctionConfig.batchSequence` and is
+  copied into each auction league: Marquee batsmen, bowlers, keepers,
+  all-rounders, then the same for Star, then the draft as a batch of its own.
+- **My Team stays in an auction league's sidebar** and says "Team submission
+  will open after the auction" until the auction is ended. An auction league
+  lands on Auction Center.
 - **The official auction league** is created at publish: public, six slots,
   standard auction rules, join deadline equal to the auction start. The start
   must be in the future and before the first match. The publisher owns it and
@@ -344,9 +354,7 @@ together.
 | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Where bids are accepted**                            | Proposed: on the service rather than the auctioneer's browser. That removes the single writer the design relied on, so two concurrent bids could both read the same asking price and one overwrite the other — a lost bid, not the accepted ordering race. Needs a serialisation choice (a transaction on the current round, or one writer per league) and a reworded race row in `CLAUDE.md`. Settle before E. |
 | **Who writes the three calls and time up**             | The service runs only while handling a request, so nothing on it ticks at 20, 10 and 5 seconds. Settle before E.                                                                                                                                                                                                                                                                                                |
-| **Batch sequence within a category**                   | A fixed role order, or only Marquee → Star → Draft. Settle in C.                                                                                                                                                                                                                                                                                                                                                |
 | **Live updates and state**                             | How changes reach other browsers, and the state library. Settle before D.                                                                                                                                                                                                                                                                                                                                       |
-| **Phase derivation**                                   | `apps/api/src/league-phase.ts` reports team submission as soon as the auction starts, and reads the whole `liveAuctions/{id}` node to find out. To be fixed in E or G.                                                                                                                                                                                                                                          |
 | **Scheduled start passed, auction not started**        | What the league shows. Decided at implementation.                                                                                                                                                                                                                                                                                                                                                               |
 
 ---

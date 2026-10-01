@@ -189,13 +189,13 @@ should redirect to the league's default section rather than showing an error:
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | Auction Center, Transfers Center | Auction leagues only                                                                                                                  |
 | Squads                           | Auction leagues, **after the auction has run**. One page, not two — see `docs/08-pages/squads.md`                                     |
-| My Team                          | Everyone except spectators — and in an auction league, **not before the auction has completed**, since there is no squad to pick from |
+| My Team                          | Everyone except spectators. In an auction league it says **"Team submission will open after the auction"** until the auctioneer closes the auction, since there is no squad to pick from |
 | Admin Center                     | Owner and admins only                                                                                                                 |
 
 > **My Team before an auction is a real case, not an edge case.** A manager
 > joins an auction league days before the auction. There is nothing for them to
-> pick yet. The sidebar item should be absent or disabled with an explanation —
-> never a link to an empty page.
+> pick yet, so the page says when that changes — never an empty form, and never
+> a "you missed the deadline" message for a team they could not have picked.
 
 ---
 

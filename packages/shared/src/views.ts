@@ -42,6 +42,7 @@ import type { Player } from './player.ts'
 import type { Match } from './tournament.ts'
 import type { Team } from './team.ts'
 import type {
+  AuctionBatch,
   GameWeek,
   League,
   LeagueEntry,
@@ -513,16 +514,43 @@ export interface AuctionManagerStatus extends ManagerAuctionStatus {
 
 /** A player in the auction pool, with this league's category and price. */
 export interface AuctionPoolPlayer {
+  /** Carries `teamShortName` for this league's tournament. */
   player: Player
-  playerCategory: string
+  playerCategory: PlayerCategory
   playerBasePrice: number
 }
 
-/** Whose turn it is, in order. Position one picks first. */
+/**
+ * One draft position. **Every position is listed**, held or not: one nobody has
+ * claimed yet has no manager, and reads as TBA. Position one picks first, and
+ * the order snakes back after the last.
+ */
 export interface DraftOrderEntry {
-  managerId: UserId
-  managerName: string
   position: number
+  managerId?: UserId
+  managerName?: string
+  fantasyTeamName?: string
+}
+
+/**
+ * **What a manager prepares from**, for Auction Center: when, under what
+ * rules, in what order, and who is running it. The fast part of the page — the
+ * player pool is its own read, because it is the slow one.
+ */
+export interface AuctionSettings {
+  auctionStartTime: number
+  totalBudget: number
+  minSquadSize: number
+  maxSquadSize: number
+  /** Absent means no cap. */
+  maxOverseasPlayersAllowedInXI?: number
+  /** The fixed step every bid rises by. */
+  bidIncrement: number
+  /** How long a round runs from its last accepted bid. */
+  roundSeconds: number
+  /** Absent on a league created before the sequence existed. */
+  batchSequence?: AuctionBatch[]
+  auctioneer: { userId: UserId; userName: string }
 }
 
 // ---------------------------------------------------------------------------

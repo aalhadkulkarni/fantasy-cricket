@@ -64,6 +64,15 @@ export const ROUTES = {
   leagueTeam: '/leagues/:leagueId/team',
   leagueLeaderboard: '/leagues/:leagueId/leaderboard',
   leagueMembers: '/leagues/:leagueId/members',
+  /** Auction leagues only. The auction as an event: what to prepare from. */
+  leagueAuctionCenter: '/leagues/:leagueId/auction-center',
+
+  /**
+   * **The live auction, outside the league's layout.** It opens in a new tab,
+   * so it has to load from its URL alone, and it gets the whole screen rather
+   * than a corner beside the sidebar.
+   */
+  auction: '/leagues/:leagueId/auction',
 } as const
 
 export type RoutePath = (typeof ROUTES)[keyof typeof ROUTES]
@@ -81,6 +90,10 @@ export function leaguePath(leagueId: string, section?: string): string {
   return section === undefined
     ? `/leagues/${leagueId}`
     : `/leagues/${leagueId}/${section}`
+}
+
+export function auctionPath(leagueId: string): string {
+  return `/leagues/${leagueId}/auction`
 }
 
 export function adminTournamentPath(tournamentId: string): string {

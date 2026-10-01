@@ -29,9 +29,12 @@
 
 import type {
   ArchivedLeagueCard,
+  AuctionPoolPlayer,
+  AuctionSettings,
   Competition,
   CompetitionConfig,
   CompetitionId,
+  DraftOrderEntry,
   FormatRecord,
   GameWeek,
   GameWeekId,
@@ -600,6 +603,31 @@ export interface Api {
    * admins, then by name.
    */
   getMembers(leagueId: LeagueId): Promise<LeagueMemberSummary[]>
+
+  // -- the auction, before it runs ------------------------------------------
+
+  /**
+   * **What a manager prepares from**: the start, the rules, the batch order and
+   * the auctioneer. Reads only the league, never the auction runtime, which
+   * does not exist before the auction starts.
+   *
+   * Open to any signed-in caller. Refused for a league that holds no auction.
+   */
+  getAuctionSettings(leagueId: LeagueId): Promise<AuctionSettings>
+
+  /**
+   * **Every draft position, 1 to the league's slots**, with the manager holding
+   * it or none — a position nobody has claimed yet reads as TBA. Positions are
+   * claimed as managers join.
+   */
+  getDraftOrder(leagueId: LeagueId): Promise<DraftOrderEntry[]>
+
+  /**
+   * Every player in the auction, with this league's frozen category and base
+   * price and the team they play for in this tournament. Ordered by category,
+   * then role, then name. The slow read on Auction Center, so it is its own.
+   */
+  getAuctionPlayerPool(leagueId: LeagueId): Promise<AuctionPoolPlayer[]>
 
   /**
    * Sets `finishedAt`. Owner and admins only, and refused until the league's

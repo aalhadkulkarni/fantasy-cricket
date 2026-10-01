@@ -45,11 +45,16 @@ import type { Session } from '../auth.ts'
 import type {
   ArchivedLeagueCard,
   ArchivedLeagueIndexEntry,
+  AuctionBatch,
   AuctionConfig,
+  AuctionPhase,
+  AuctionPoolPlayer,
+  AuctionSettings,
   BannedUser,
   Competition,
   CompetitionConfig,
   CompetitionId,
+  DraftOrderEntry,
   FormatRecord,
   GameWeek,
   GameWeekId,
@@ -104,10 +109,12 @@ import type {
 } from '@fantasy-cricket/shared'
 
 import {
+  BID_INCREMENT,
   DataLayerError,
   FORMATS,
   PLAYER_CATEGORIES,
   PLAYER_ROLES,
+  ROUND_SECONDS,
 } from '@fantasy-cricket/shared'
 import { derivePhase } from '../league-phase.ts'
 import {
@@ -313,6 +320,10 @@ export function createFirebaseApi(
       ...(maxOverseas === undefined
         ? {}
         : { maxOverseasPlayersAllowedInXI: maxOverseas }),
+      // Frozen with the league, like the prices. An environment seeded before
+      // the sequence existed has none stored, so the seed's is used.
+      batchSequence:
+        standard?.batchSequence ?? STANDARD_AUCTION_CONFIG.batchSequence ?? [],
     }
   }
 
@@ -793,25 +804,11 @@ export function createFirebaseApi(
       entries.map(async ([leagueId, entry]) => {
         const id = leagueId as LeagueId
 
-        const [members, finishedAt, auctionStartTime, auctionRuntime] =
-          await Promise.all([
-            service.read<Record<string, LeagueMember>>(paths.leagueMembers(id)),
-            service.read<number>(service.path('leagues', id, 'finishedAt')),
-            entry.isAuctionEnabled
-              ? service.read<number>(
-                  service.path(
-                    'leagues',
-                    id,
-                    'auctionDetails',
-                    'auctionStartTime',
-                  ),
-                )
-              : undefined,
-            // Its absence is the normal pre-auction state, never an error.
-            entry.isAuctionEnabled
-              ? service.read<unknown>(service.path('liveAuctions', id))
-              : undefined,
-          ])
+        const [members, finishedAt, auctionPhase] = await Promise.all([
+          service.read<Record<string, LeagueMember>>(paths.leagueMembers(id)),
+          service.read<number>(service.path('leagues', id, 'finishedAt')),
+          entry.isAuctionEnabled ? liveAuctionPhase(id) : undefined,
+        ])
 
         return {
           ...entry,
@@ -823,8 +820,7 @@ export function createFirebaseApi(
             finishedAt,
             tournamentStartDate: startDates.get(entry.tournamentId),
             isAuctionEnabled: entry.isAuctionEnabled,
-            auctionStartTime,
-            auctionHasStarted: auctionRuntime !== undefined,
+            auctionPhase,
             now,
           }),
         }
@@ -912,6 +908,42 @@ export function createFirebaseApi(
       teamOf.set(playerId, short ?? '')
     }
     return teamOf
+  }
+
+  /**
+   * **Refuses anything but an existing auction league.** The auction reads all
+   * start here, so a regular league's id gets a clear answer rather than a
+   * page of absences.
+   */
+  async function assertAuctionLeague(leagueId: LeagueId): Promise<void> {
+    const isAuction = await service.read<boolean>(
+      service.path('leagues', leagueId, 'isAuctionEnabled'),
+    )
+    if (isAuction === undefined) {
+      throw new DataLayerError('notFound', 'That league no longer exists.')
+    }
+    if (!isAuction) {
+      throw new DataLayerError('invalid', 'This league holds no auction.')
+    }
+  }
+
+  /**
+   * **The live auction's phase, and nothing else from it.** After an auction
+   * the runtime node holds every bid and the whole timeline, and a league card
+   * needs one word of it. Absent until the auction is started, which is the
+   * normal pre-auction state rather than an error.
+   */
+  function liveAuctionPhase(
+    leagueId: LeagueId,
+  ): Promise<AuctionPhase | undefined> {
+    return service.read<AuctionPhase>(
+      service.path('liveAuctions', leagueId, 'auctionState', 'phase'),
+    )
+  }
+
+  /** A path under a league's auction details. Never read the node whole. */
+  function auctionDetailsPath(leagueId: LeagueId, ...rest: string[]): DbPath {
+    return service.path('leagues', leagueId, 'auctionDetails', ...rest)
   }
 
   function withTeam(player: Player, teamOf: Map<string, string>): Player {
@@ -3059,43 +3091,24 @@ export function createFirebaseApi(
         throw new DataLayerError('notFound', 'That league no longer exists.')
       }
 
-      const [
-        tournamentName,
-        startDate,
-        offset,
-        auctionStartTime,
-        runtime,
-        nextDeadline,
-      ] = await Promise.all([
-        service.read<string>(
-          service.path('tournaments', tournamentId, 'tournamentName'),
-        ),
-        service.read<number>(
-          service.path('tournaments', tournamentId, 'startDate'),
-        ),
-        service.read<number>(at('fantasyLeagueTeamChangesDeadlineOffset')),
-        isAuctionEnabled === true
-          ? service.read<number>(
-              service.path(
-                'leagues',
-                leagueId,
-                'auctionDetails',
-                'auctionStartTime',
-              ),
-            )
-          : undefined,
-        isAuctionEnabled === true
-          ? service.read<unknown>(service.path('liveAuctions', leagueId))
-          : undefined,
-        upcomingDeadline(leagueId, isGameWeeksEnabled === true),
-      ])
+      const [tournamentName, startDate, offset, auctionPhase, nextDeadline] =
+        await Promise.all([
+          service.read<string>(
+            service.path('tournaments', tournamentId, 'tournamentName'),
+          ),
+          service.read<number>(
+            service.path('tournaments', tournamentId, 'startDate'),
+          ),
+          service.read<number>(at('fantasyLeagueTeamChangesDeadlineOffset')),
+          isAuctionEnabled === true ? liveAuctionPhase(leagueId) : undefined,
+          upcomingDeadline(leagueId, isGameWeeksEnabled === true),
+        ])
 
       const phase = derivePhase({
         finishedAt,
         tournamentStartDate: startDate,
         isAuctionEnabled: isAuctionEnabled === true,
-        auctionStartTime,
-        auctionHasStarted: runtime !== undefined,
+        auctionPhase,
         now: Date.now(),
       })
 
@@ -3979,6 +3992,171 @@ export function createFirebaseApi(
           lastMatchStartsAt: last?.startTimestamp,
         }),
       }
+    },
+
+    /**
+     * **Field by field, never `auctionConfig` whole**, which carries a price
+     * for every player in the tournament — the pool is its own read.
+     */
+    async getAuctionSettings(leagueId: LeagueId): Promise<AuctionSettings> {
+      await assertAuctionLeague(leagueId)
+
+      const config = (field: string) =>
+        auctionDetailsPath(leagueId, 'auctionConfig', field)
+
+      const [
+        auctionStartTime,
+        auctioneerId,
+        totalBudget,
+        minSquadSize,
+        maxSquadSize,
+        maxOverseas,
+        batchSequence,
+      ] = await Promise.all([
+        service.read<number>(auctionDetailsPath(leagueId, 'auctionStartTime')),
+        service.read<UserId>(auctionDetailsPath(leagueId, 'primaryAuctioneer')),
+        service.read<number>(config('totalBudget')),
+        service.read<number>(config('minSquadSize')),
+        service.read<number>(config('maxSquadSize')),
+        service.read<number>(config('maxOverseasPlayersAllowedInXI')),
+        service.read<AuctionBatch[]>(config('batchSequence')),
+      ])
+
+      if (
+        auctionStartTime === undefined ||
+        auctioneerId === undefined ||
+        totalBudget === undefined ||
+        minSquadSize === undefined ||
+        maxSquadSize === undefined
+      ) {
+        throw new DataLayerError(
+          'internal',
+          'This auction league is missing part of its configuration.',
+        )
+      }
+
+      const auctioneerName = await service.read<string>(
+        service.path('users', auctioneerId, 'userName'),
+      )
+
+      return {
+        auctionStartTime,
+        totalBudget,
+        minSquadSize,
+        maxSquadSize,
+        bidIncrement: BID_INCREMENT,
+        roundSeconds: ROUND_SECONDS,
+        auctioneer: {
+          userId: auctioneerId,
+          userName: auctioneerName ?? 'Unknown',
+        },
+        ...omitUndefined({
+          maxOverseasPlayersAllowedInXI: maxOverseas,
+          batchSequence,
+        }),
+      }
+    },
+
+    /**
+     * **Every position from 1 to the league's slots**, held or not.
+     *
+     * Stored position → manager, which RTDB hands back as an array with holes
+     * where positions are free, so both shapes are read.
+     */
+    async getDraftOrder(leagueId: LeagueId): Promise<DraftOrderEntry[]> {
+      await assertAuctionLeague(leagueId)
+
+      const [maxSlots, raw] = await Promise.all([
+        service.read<number>(service.path('leagues', leagueId, 'maxSlots')),
+        service.read<unknown>(auctionDetailsPath(leagueId, 'draftOrder')),
+      ])
+
+      const held = new Map<number, UserId>()
+      if (raw !== null && typeof raw === 'object') {
+        for (const [key, holder] of Object.entries(raw)) {
+          if (typeof holder === 'string') {
+            held.set(Number(key), holder as UserId)
+          }
+        }
+      }
+
+      const positions = Array.from({ length: maxSlots ?? 0 }, (_, i) => i + 1)
+
+      return Promise.all(
+        positions.map(async (position): Promise<DraftOrderEntry> => {
+          const managerId = held.get(position)
+          if (managerId === undefined) return { position }
+
+          const [managerName, fantasyTeamName] = await Promise.all([
+            service.read<string>(service.path('users', managerId, 'userName')),
+            service.read<string>(
+              service.path(
+                'leagues',
+                leagueId,
+                'leagueMembers',
+                managerId,
+                'fantasyTeamName',
+              ),
+            ),
+          ])
+
+          return {
+            position,
+            managerId,
+            managerName: managerName ?? 'Unknown',
+            ...omitUndefined({ fantasyTeamName }),
+          }
+        }),
+      )
+    },
+
+    /**
+     * **The league's frozen pool**, not the tournament's participants as they
+     * are today: the prices and categories managers bid against were copied
+     * when the league was created.
+     */
+    async getAuctionPlayerPool(
+      leagueId: LeagueId,
+    ): Promise<AuctionPoolPlayer[]> {
+      await assertAuctionLeague(leagueId)
+
+      const [tournamentId, details] = await Promise.all([
+        service.read<TournamentId>(
+          service.path('leagues', leagueId, 'tournamentId'),
+        ),
+        service.read<Record<string, LeaguePlayerAuctionDetail>>(
+          auctionDetailsPath(leagueId, 'auctionConfig', 'playerDetails'),
+        ),
+      ])
+      if (tournamentId === undefined) {
+        throw new DataLayerError('notFound', 'That league no longer exists.')
+      }
+
+      const [teamOf, everyone] = await Promise.all([
+        tournamentTeams(tournamentId),
+        service.read<Record<string, Player>>(paths.players()),
+      ])
+
+      const pool: AuctionPoolPlayer[] = []
+      for (const [playerId, detail] of Object.entries(details ?? {})) {
+        const player = everyone?.[playerId]
+        if (player === undefined) continue
+        pool.push({
+          player: withTeam(player, teamOf),
+          playerCategory: detail.playerCategory,
+          playerBasePrice: detail.playerBasePrice,
+        })
+      }
+
+      // The order the auction runs in: category, then role, then name.
+      return pool.sort(
+        (a, b) =>
+          PLAYER_CATEGORIES.indexOf(a.playerCategory) -
+            PLAYER_CATEGORIES.indexOf(b.playerCategory) ||
+          PLAYER_ROLES.indexOf(a.player.playerRole) -
+            PLAYER_ROLES.indexOf(b.player.playerRole) ||
+          a.player.playerName.localeCompare(b.player.playerName),
+      )
     },
 
     async getMembers(leagueId: LeagueId): Promise<LeagueMemberSummary[]> {

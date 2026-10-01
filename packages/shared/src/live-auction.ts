@@ -33,6 +33,23 @@ import type {
 } from './reference.ts'
 
 // ---------------------------------------------------------------------------
+// Fixed for Phase 1
+// ---------------------------------------------------------------------------
+
+/**
+ * **Every bid is the asking price, and the asking price rises by this.** The
+ * same step whatever the player is worth. Not configurable in Phase 1.
+ */
+export const BID_INCREMENT = 0.5
+
+/**
+ * **A round runs this long from its last accepted bid**, so every accepted bid
+ * restarts it. Thirty seconds proved comfortably enough across real auctions.
+ * Not configurable in Phase 1; the auctioneer can add time to a round.
+ */
+export const ROUND_SECONDS = 30
+
+// ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 

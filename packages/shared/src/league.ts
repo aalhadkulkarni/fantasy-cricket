@@ -127,6 +127,17 @@ export interface RoundConfig {
 // Auction configuration
 // ---------------------------------------------------------------------------
 
+/**
+ * **One step of the auction's running order.** A bidding batch is a category
+ * and a role — Marquee batsmen — and the draft is a batch of its own, turn-based
+ * rather than bid for, holding the General category plus everything unsold.
+ *
+ * Ids, not display names, matching how the current batch is stored.
+ */
+export type AuctionBatch =
+  | { kind: 'auction'; playerCategory: PlayerCategory; playerRole: PlayerRole }
+  | { kind: 'draft' }
+
 /** Per-player overrides for this league. Role is deliberately not overridable. */
 export interface LeaguePlayerAuctionDetail {
   playerCategory: PlayerCategory
@@ -153,8 +164,20 @@ export interface AuctionConfig {
   totalBudget: number
   minSquadSize: number
   maxSquadSize: number
-  /** Absent means no cap. Overseas means the player's country is not India. */
+  /**
+   * Absent means no cap. Overseas means the player's country is not the
+   * tournament's home nation.
+   */
   maxOverseasPlayersAllowedInXI?: number
+
+  /**
+   * **The order batches are auctioned in**, copied from the standard when the
+   * league is created and frozen with it, like the prices. An array, because it
+   * is read and written whole and its order is the point.
+   *
+   * Absent on leagues created before it existed.
+   */
+  batchSequence?: AuctionBatch[]
 }
 
 /**

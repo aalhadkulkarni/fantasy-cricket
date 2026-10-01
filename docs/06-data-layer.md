@@ -715,10 +715,17 @@ A reference page, the same in every phase. See `08-pages/auction-center.md`.
 
 **Reads**
 
-- `getLeagueConfig(leagueId)` — the rules, the scheduled start, the auctioneer
-- `getMembers(leagueId)` — who is bidding
-- `getAuctionPlayerPool(leagueId)` — base prices, categories, roles
-- `getDraftOrder(leagueId)` — including positions nobody holds yet
+- `getAuctionSettings(leagueId)` — the start, the rules (budget, squad size,
+  overseas cap, bid step, round timer), the batch sequence and the auctioneer.
+  The fast part; reads league fields one by one, never `auctionConfig` whole
+- `getDraftOrder(leagueId)` — every position, with TBA for those nobody holds
+- `getMembers(leagueId)` and `getLineupRules(leagueId)` — who is bidding, and
+  the XI rules
+- `getAuctionPlayerPool(leagueId)` — base prices, categories, roles, team. The
+  slow part, so it is its own read
+
+All are reads open to any signed-in caller, and refuse a league that holds no
+auction.
 
 > **`liveAuctions/{leagueId}` does not exist before the auction.** It is
 > created by `startAuction` and by nothing else. **The layer must treat an

@@ -247,6 +247,11 @@ bid. If a system admin edited a standard base price mid-season and leagues
 resolved dynamically, a completed auction would retroactively appear to have run
 under prices nobody bid against.
 
+**The batch sequence is copied the same way.** `standardAuctionConfig.batchSequence`
+is the order an auction runs in — Marquee batsmen, bowlers, keepers and
+all-rounders, then the same for Star, then the draft — and each auction league
+freezes its own copy at creation, for the same reason as the prices.
+
 **Why points are not copied.** Points are corrected after the fact, and a
 correction must reach every league that opted in. Copying would mean applying
 one fix in every league separately, which is the fan-out problem the whole model

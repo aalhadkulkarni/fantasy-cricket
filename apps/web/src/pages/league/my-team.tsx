@@ -84,6 +84,34 @@ function slotsFor(
  * matches, editing and the impact sub are B8 to B11.
  */
 export function MyTeam() {
+  const { league } = useLeague()
+
+  /*
+    **No team before the squads exist.** In an auction league the eleven is
+    picked from the squad won at auction, so until the auctioneer closes it
+    there is nothing to pick from, and the page says when that changes rather
+    than offering a form or talking about missed deadlines.
+  */
+  if (
+    league.isAuctionEnabled &&
+    (league.phase === 'preAuction' || league.phase === 'auction')
+  ) {
+    return (
+      <section className="floodlit rounded-xl border bg-card p-5 text-card-foreground sm:p-7">
+        <h2 className="text-xl font-bold tracking-tight sm:text-2xl">
+          Your XI
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Team submission will open after the auction.
+        </p>
+      </section>
+    )
+  }
+
+  return <TeamSelection />
+}
+
+function TeamSelection() {
   const { league, reload } = useLeague()
   const [joining, setJoining] = useState(false)
 

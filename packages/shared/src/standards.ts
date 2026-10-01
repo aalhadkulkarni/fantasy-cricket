@@ -11,7 +11,11 @@
  */
 
 import type { PlayerId } from './ids.ts'
-import type { LineupRules, LeaguePlayerAuctionDetail } from './league.ts'
+import type {
+  AuctionBatch,
+  LineupRules,
+  LeaguePlayerAuctionDetail,
+} from './league.ts'
 
 /**
  * The auction defaults, and the seed for the create form.
@@ -39,6 +43,14 @@ export interface StandardAuctionConfig {
 
   totalBudget: number
   maxOverseasPlayersAllowedInXI?: number
+
+  /**
+   * The running order every new auction league copies: Marquee batsmen,
+   * bowlers, keepers, all-rounders, then the same for Star, then the draft.
+   * Absent in an environment seeded before it existed, where the seed's own
+   * value is used.
+   */
+  batchSequence?: AuctionBatch[]
 }
 
 /** Default per-role composition limits for a legal XI. */

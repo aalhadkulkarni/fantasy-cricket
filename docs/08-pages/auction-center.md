@@ -55,7 +55,9 @@ and checks back against mid-auction:
 - **The draft order**, with positions nobody holds yet shown as **TBA**. It is
   assigned as managers join, not generated at the start — see
   `08-pages/auction.md`.
-- **The batch sequence** — Marquee, then Star, then the draft
+- **The batch sequence** — the order players go up in, from the league's frozen
+  copy of the standard: Marquee batsmen, bowlers, wicket keepers, all-rounders;
+  the same four for Star; then the draft, which is a batch of its own
 
 > **The rules are read-only and abbreviated.** They exist so a manager can plan
 > without leaving the page. The full configuration is in League Details.
