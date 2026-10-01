@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState, type ReactNode } from 'react'
 
 import { JoinLeagueDialog } from '@/components/join-league-dialog'
 import {
@@ -13,7 +13,13 @@ import { changeClass } from '@/components/leagues/change'
 import { ChangeMark } from '@/components/leagues/change-mark'
 import { PlayerName } from '@/components/leagues/player-name'
 import { PlayerPicker } from '@/components/leagues/player-picker'
-import { gameWeekPoints, toSaved } from '@/components/leagues/team-data'
+import {
+  gameWeekPoints,
+  matchLabel,
+  toSaved,
+  type PeriodPoints,
+} from '@/components/leagues/team-data'
+import { FixturesDialog } from '@/components/tournaments/fixtures-dialog'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -121,6 +127,9 @@ export function MyTeam() {
   const [baseline, setBaseline] = useState<SavedTeam | undefined>(undefined)
   const [savedToken, setSavedToken] = useState(0)
   const [points, setPoints] = useState<PlayerPoints>({})
+  // Each match's points, labelled at render from the fixtures already loaded.
+  const [byMatch, setByMatch] = useState<PeriodPoints['byMatch']>([])
+  const [showingFixtures, setShowingFixtures] = useState(false)
 
   const [picks, setPicks] = useState<(PlayerId | undefined)[]>(
     Array.from({ length: XI }, () => undefined),
@@ -275,7 +284,8 @@ export function MyTeam() {
 
         setSnapshot(toSaved(mine))
         setBaseline(toSaved(previous))
-        setPoints(scored)
+        setPoints(scored.total)
+        setByMatch(scored.byMatch)
 
         // The form starts from whatever is already there, or empty.
         setPicks(slotsFor(eleven))
@@ -395,6 +405,33 @@ export function MyTeam() {
 
   const canSubmit = complete && captaincyOk && !saving && !locked
 
+  const breakdown = byMatch.map((entry) => ({
+    label: matchLabel(
+      matches.find((m) => m.matchId === entry.matchId),
+      teams,
+    ),
+    points: entry.points,
+  }))
+
+  /*
+    **A gameweek's matches, one tap away**, from the match count in the
+    subline. The subline can only fit a count, and a gameweek of several
+    matches needs its fixtures to be picked for.
+  */
+  const weekMatches =
+    gameWeek === undefined
+      ? []
+      : matches.filter((m) => gameWeek.matchIds.includes(m.matchId))
+  const fixturesDialog =
+    gameWeek !== undefined && showingFixtures ? (
+      <FixturesDialog
+        matches={weekMatches}
+        teams={teams}
+        title={`Game week ${gameWeek.gameWeek.gameWeekNumber} fixtures`}
+        onClose={() => setShowingFixtures(false)}
+      />
+    ) : null
+
   async function submit() {
     if (captainId === undefined || viceCaptainId === undefined) return
     setSaving(true)
@@ -513,12 +550,18 @@ export function MyTeam() {
           onSelect={setSelectedId}
         />
 
-        <h2 className="mt-5 text-xl font-bold tracking-tight sm:text-2xl">
-          Your XI
-        </h2>
-        <p className="mt-2 font-mono text-sm font-medium text-muted-foreground">
-          {subline(match, gameWeek, teams, deadline, true)}
-        </p>
+        <div className="mt-5 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-bold tracking-tight sm:text-2xl">
+              Your XI
+            </h2>
+            <p className="mt-2 font-mono text-sm font-medium text-muted-foreground">
+              {subline(match, gameWeek, teams, deadline, true, () =>
+                setShowingFixtures(true),
+              )}
+            </p>
+          </div>
+        </div>
 
         {snapshot === undefined ? (
           <p className="mt-6 max-w-prose text-sm text-subtle-foreground">
@@ -537,9 +580,12 @@ export function MyTeam() {
               rules={rules}
               allowances={allowances}
               isGameWeek={league.isGameWeeksEnabled}
+              breakdown={breakdown}
             />
           </div>
         )}
+
+        {fixturesDialog}
       </section>
     )
   }
@@ -559,7 +605,9 @@ export function MyTeam() {
             {snapshot === undefined ? 'Pick your XI' : 'Your XI'}
           </h2>
           <p className="mt-2 font-mono text-sm font-medium text-muted-foreground">
-            {subline(match, gameWeek, teams, deadline, false)}
+            {subline(match, gameWeek, teams, deadline, false, () =>
+              setShowingFixtures(true),
+            )}
           </p>
         </div>
 
@@ -661,6 +709,8 @@ export function MyTeam() {
           </p>
         </div>
       </div>
+
+      {fixturesDialog}
     </section>
   )
 }
@@ -699,8 +749,7 @@ function Nav({
  *
  * **The gameweek number, not its stored name.** A league created before the
  * naming was fixed carries its round's name on the gameweek, and reading the
- * number instead makes those read correctly without being rebuilt. The round is
- * named beside it, which `my-team.md` asks for.
+ * number instead makes those read correctly without being rebuilt.
  */
 function subline(
   match: Match | undefined,
@@ -708,17 +757,36 @@ function subline(
   teams: readonly Team[],
   deadline: number | undefined,
   locked: boolean,
-): string {
-  const parts: string[] = []
+  onShowFixtures: () => void,
+): ReactNode {
+  const parts: ReactNode[] = []
 
+  /*
+    **No round.** "Round 1 · 5 matches" read as though the team were for the
+    whole round, when a team applies from this gameweek until it is changed.
+  */
   if (gameWeek !== undefined) {
     parts.push(`Game week ${gameWeek.gameWeek.gameWeekNumber}`)
-    if (gameWeek.roundName !== '') parts.push(gameWeek.roundName)
   } else if (match !== undefined) {
     parts.push(`Match ${match.matchNumber}`)
   }
 
-  if (match !== undefined) {
+  /*
+    A gameweek of several matches is a count, and **the count is the link to
+    its fixtures** — the place the question "which matches?" comes up.
+    Naming only the first made it read as a single match.
+  */
+  if (gameWeek !== undefined && gameWeek.matchIds.length > 1) {
+    parts.push(
+      <button
+        type="button"
+        onClick={onShowFixtures}
+        className="underline decoration-dotted underline-offset-4 hover:text-foreground focus-visible:text-foreground focus-visible:outline-none"
+      >
+        {gameWeek.matchIds.length} matches
+      </button>,
+    )
+  } else if (match !== undefined) {
     const short = (teamId: string | undefined) =>
       teamId === undefined
         ? 'TBD'
@@ -742,7 +810,12 @@ function subline(
         })}`,
   )
 
-  return parts.join(' · ')
+  return parts.map((part, i) => (
+    <Fragment key={i}>
+      {i > 0 && ' · '}
+      {part}
+    </Fragment>
+  ))
 }
 
 function Captaincy({

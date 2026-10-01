@@ -152,8 +152,9 @@ export function TournamentHome() {
 
             {showingFixtures && (
               <FixturesDialog
-                tournament={tournament}
+                matches={Object.values(tournament.matches ?? {})}
                 teams={teams}
+                description={`${tournament.tournamentName} · ${matchCount(tournament)}`}
                 onClose={() => setShowingFixtures(false)}
               />
             )}
@@ -250,4 +251,10 @@ function day(timestamp: number): string {
     month: 'short',
     year: 'numeric',
   })
+}
+
+/** "64 matches", as the fixtures dialog has always described a tournament. */
+function matchCount(tournament: Tournament): string {
+  const count = Object.keys(tournament.matches ?? {}).length
+  return `${count} ${count === 1 ? 'match' : 'matches'}`
 }

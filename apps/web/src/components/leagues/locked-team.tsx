@@ -23,6 +23,7 @@ export function LockedTeam({
   rules,
   allowances,
   isGameWeek,
+  breakdown,
 }: {
   team: SavedTeam
   /** The period before's team, which the transfers are measured from. */
@@ -31,6 +32,8 @@ export function LockedTeam({
   rules: LineupRules
   allowances: Allowances
   isGameWeek: boolean
+  /** Each match's points, for a gameweek. See `LineupView`. */
+  breakdown?: readonly { label: string; points: PlayerPoints }[]
 }) {
   return (
     <div className="gap-5 lg:flex">
@@ -41,6 +44,7 @@ export function LockedTeam({
           viceCaptainId={team.viceCaptainId}
           points={points}
           totalLabel="Total"
+          breakdown={breakdown}
         />
       </div>
 

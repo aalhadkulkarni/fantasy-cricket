@@ -9,10 +9,12 @@ import type {
   GameWeekLineup,
   LeagueId,
   LineupSubmission,
+  Match,
   MatchId,
   MatchLineup,
   PlayerId,
   PlayerPoints,
+  Team,
 } from '@fantasy-cricket/shared'
 
 /**
@@ -43,18 +45,27 @@ export function toSaved(
   }
 }
 
+/** A period's points: summed per player, and as each match scored them. */
+export interface PeriodPoints {
+  total: PlayerPoints
+  /** In the order the matches were asked for, which is fixture order. */
+  byMatch: { matchId: MatchId; points: PlayerPoints }[]
+}
+
 /**
- * Points across a set of matches, summed per player.
+ * Points across a set of matches, summed per player, **with the per-match
+ * figures kept** for the breakdown a gameweek shows on tap.
  *
  * **A gameweek's figure is an aggregate**, which is option 2 in `my-team.md` —
  * one column of totals rather than one column per match, because the per-match
- * table cannot fit a phone without a scroll. A match-based league passes one
- * match and gets it back unchanged.
+ * table cannot fit a phone without a scroll. The breakdown costs no extra
+ * reads: the per-match figures are what the total is summed from. A
+ * match-based league passes one match and gets it back unchanged.
  */
 export async function gameWeekPoints(
   leagueId: LeagueId,
   matchIds: readonly MatchId[],
-): Promise<PlayerPoints> {
+): Promise<PeriodPoints> {
   const perMatch = await Promise.all(
     matchIds.map((matchId) => getPlayerPointsForMatch(leagueId, matchId)),
   )
@@ -65,5 +76,25 @@ export async function gameWeekPoints(
       total[playerId as PlayerId] = (total[playerId as PlayerId] ?? 0) + value
     }
   }
-  return total
+
+  return {
+    total,
+    byMatch: matchIds.map((matchId, i) => ({
+      matchId,
+      points: perMatch[i] ?? {},
+    })),
+  }
+}
+
+/** "M2 · IND v AUS", the label a match goes by in a breakdown. */
+export function matchLabel(
+  match: Match | undefined,
+  teams: readonly Team[],
+): string {
+  if (match === undefined) return 'Match'
+  const short = (teamId: string | undefined) =>
+    teamId === undefined
+      ? 'TBD'
+      : (teams.find((t) => t.teamId === teamId)?.teamShortName ?? 'TBD')
+  return `M${match.matchNumber} · ${short(match.team1Id)} v ${short(match.team2Id)}`
 }
