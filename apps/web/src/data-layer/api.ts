@@ -57,6 +57,21 @@ export function setEnvironment(environment: Environment): void {
   currentApi = createHttpApi(environment, apiBaseUrl(environment))
 }
 
+/**
+ * **Which root this session reads.** Only the live auction needs it: its reads
+ * go to the database directly, so the browser has to name the root itself,
+ * where every other read lets the service decide.
+ */
+export function activeEnvironment(): Environment {
+  if (currentApi === undefined) {
+    throw new DataLayerError(
+      'internal',
+      'data-layer: no environment. Call setEnvironment() at bootstrap.',
+    )
+  }
+  return currentApi.environment
+}
+
 /** The active backend. Throws until `setEnvironment` has run. */
 export function getApi(): Api {
   if (currentApi === undefined) {

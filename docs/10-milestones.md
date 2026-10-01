@@ -337,6 +337,11 @@ together.
 - **A draft position is claimed transactionally on join**, like a join code, so
   two simultaneous joins cannot share one. `draftOrder` is keyed position →
   manager for that reason.
+- **Live auction reads come straight from the database in the browser**, per
+  league, through a read-only rule set in the console
+  (`$env/liveAuctions/$leagueId`, signed-in only; `/liveAuctions` itself stays
+  closed). Writes still go through the service. The database SDK is loaded only
+  where it is used. **State on the auction page is Zustand.**
 - **The batch sequence** lives in `standardAuctionConfig.batchSequence` and is
   copied into each auction league: Marquee batsmen, bowlers, keepers,
   all-rounders, then the same for Star, then the draft as a batch of its own.
@@ -354,7 +359,6 @@ together.
 | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Where bids are accepted**                            | Proposed: on the service rather than the auctioneer's browser. That removes the single writer the design relied on, so two concurrent bids could both read the same asking price and one overwrite the other — a lost bid, not the accepted ordering race. Needs a serialisation choice (a transaction on the current round, or one writer per league) and a reworded race row in `CLAUDE.md`. Settle before E. |
 | **Who writes the three calls and time up**             | The service runs only while handling a request, so nothing on it ticks at 20, 10 and 5 seconds. Settle before E.                                                                                                                                                                                                                                                                                                |
-| **Live updates and state**                             | How changes reach other browsers, and the state library. Settle before D.                                                                                                                                                                                                                                                                                                                                       |
 | **Scheduled start passed, auction not started**        | What the league shows. Decided at implementation.                                                                                                                                                                                                                                                                                                                                                               |
 
 ---
