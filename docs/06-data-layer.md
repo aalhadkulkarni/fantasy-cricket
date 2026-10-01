@@ -760,8 +760,16 @@ auction.
 
 **Subscriptions**
 
-- `onAuctionStateChanged(leagueId, callback)`
-- `onTimelineEvent(leagueId, callback)`
+- `onAuctionStateChanged(leagueId, callback)` — `undefined` until the auction
+  is started, which is normal
+- `onTimelineEvent(leagueId, callback)` — every entry so far, then each new one
+- `onServerTimeOffset(callback)` — this device's clock against the database's,
+  for the countdown
+
+> **These are read straight from the database in the browser**, not through
+> the service — the auction changes several times a second for everyone
+> watching. A console rule allows signed-in reads of `liveAuctions/<leagueId>`
+> and nothing else; writes still go through the service. See `CLAUDE.md`.
 
 > **The page stays open after the auction**, and is then the historical record:
 > every sale, every unsold player, and the bidding on each.

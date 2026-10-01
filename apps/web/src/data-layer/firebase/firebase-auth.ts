@@ -1,11 +1,11 @@
 /**
  * Signing in, and the token every API call carries.
  *
- * **The only Firebase left in the browser.** Reads and writes go through the
- * service now; this stays because a Google popup and an auth-state listener
- * cannot cross HTTP. It is also what produces the ID token the service
- * verifies, so the browser proves who it is without ever holding database
- * access.
+ * **Firebase in the browser is this, plus the live auction.** Reads and
+ * writes go through the service; this stays because a Google popup and an
+ * auth-state listener cannot cross HTTP. It is also what produces the ID token
+ * the service verifies. The only database access the browser has is reading a
+ * league's live auction, in `realtime.ts`, which shares this module's app.
  *
  * Split out of `FirebaseService`, which has moved to the service with the
  * rest of the data access.
@@ -37,9 +37,18 @@ import {
  */
 let app: FirebaseApp | undefined
 
-function auth(): Auth {
+/**
+ * The session's one Firebase app, created on first use. Shared with
+ * `realtime.ts`, so the live auction's reads carry this session's sign-in —
+ * which is what the database rule checks.
+ */
+export function firebaseApp(): FirebaseApp {
   app ??= initializeApp(FIREBASE_CONFIG)
-  return getAuth(app)
+  return app
+}
+
+function auth(): Auth {
+  return getAuth(firebaseApp())
 }
 
 function toIdentity(user: FirebaseAuthUser): SignedInIdentity {

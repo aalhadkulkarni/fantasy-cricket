@@ -31,6 +31,11 @@ import type {
   TimelineMessage,
 } from '@fantasy-cricket/shared'
 import { getApi } from './api'
+import {
+  listenToChildrenAdded,
+  listenToServerTimeOffset,
+  listenToValue,
+} from './firebase/realtime'
 import { notImplemented } from './not-implemented'
 import type {
   Subscriber,
@@ -168,17 +173,38 @@ export function submitNoBid(
 // Subscriptions
 // ---------------------------------------------------------------------------
 
-/** The shared display's live feed. Everything authoritative arrives here. */
+/**
+ * The shared display's live feed. Everything authoritative arrives here.
+ *
+ * **Read straight from the database**, not through the service: the auction
+ * changes several times a second for everyone watching. Read-only — every
+ * write still goes through the service.
+ *
+ * **`undefined` until the auctioneer starts the auction**, and that is the
+ * normal pre-auction state, not an error.
+ */
 export function onAuctionStateChanged(
   leagueId: LeagueId,
-  callback: Subscriber<AuctionState>,
+  callback: Subscriber<AuctionState | undefined>,
   onError?: SubscriptionErrorHandler,
 ): Unsubscribe {
-  return notImplemented('onAuctionStateChanged', {
-    leagueId,
+  return listenToValue<AuctionState>(
+    ['liveAuctions', leagueId, 'auctionState'],
     callback,
     onError,
-  })
+  )
+}
+
+/**
+ * **This device's clock against the database's**, in milliseconds. The
+ * countdown is computed from server time, never the local clock: the server's
+ * now is `Date.now()` plus this.
+ */
+export function onServerTimeOffset(
+  callback: Subscriber<number>,
+  onError?: SubscriptionErrorHandler,
+): Unsubscribe {
+  return listenToServerTimeOffset(callback, onError)
 }
 
 /**
@@ -196,5 +222,10 @@ export function onTimelineEvent(
   callback: Subscriber<TimelineMessage>,
   onError?: SubscriptionErrorHandler,
 ): Unsubscribe {
-  return notImplemented('onTimelineEvent', { leagueId, callback, onError })
+  // Every entry so far, then each new one, in the order they were written.
+  return listenToChildrenAdded<TimelineMessage>(
+    ['liveAuctions', leagueId, 'timeline'],
+    callback,
+    onError,
+  )
 }

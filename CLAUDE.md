@@ -129,8 +129,14 @@ verified token and never from an argument.
 Clients hold no database access: the service reaches the database as a
 privileged service account, which bypasses rules by design. Locked under
 `local` today, and under `prod` once the service is deployed there. **Do not open a
-node without a reason recorded here** — the live auction will need one, for
-browsers listening to it directly.
+node without a reason recorded here.**
+
+**The rules live in the Firebase console, not in this repo.** Open nodes, each
+with its reason:
+
+| Rule | Why |
+| --- | --- |
+| `$env/liveAuctions/$leagueId/.read = "auth != null"` | The live auction changes several times a second for everyone watching, so browsers listen to it directly (`apps/web/src/data-layer/firebase/realtime.ts`). **Read only, and per league**: `/liveAuctions` itself stays closed, so nobody can list every league's auction. Every write — bids, sells, auctioneer actions — still goes through the service. |
 
 ---
 
@@ -184,9 +190,9 @@ Two more worth knowing:
 | Data       | Firebase Realtime Database, reached only by the API service |
 | Auth       | Firebase Google auth in the browser; the service verifies its token |
 
-**Routing and state management libraries are not yet chosen.** One hard
-requirement on state: **live auction updates must not re-render unrelated
-components.** Plain React Context re-renders every consumer on any change, which
+**Routing is not yet chosen. State management is Zustand, on the live auction
+page only** — every other page fetches what it shows. One hard requirement on
+state: **live auction updates must not re-render unrelated components.** Plain React Context re-renders every consumer on any change, which
 is a real problem for a screen updating several times a second.
 
 ---
