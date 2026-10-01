@@ -563,6 +563,10 @@ allowances, and the full auction configuration.
   according to the league's `isCustomScoringSystem` flag. **Not a fallback
   chain:** a custom-scoring league never reads standard points, so a match its
   admin has not entered yet has no points rather than borrowed ones.
+- `getPlayerPointsForMatches(leagueId, matchIds)` — the same for several
+  matches in one request, one entry per match in the order asked. **What a
+  gameweek's points are read with**, so a gameweek costs one round trip however
+  many matches it holds.
 - `getChangesRemaining(leagueId, roundId)`
 
 **Writes**

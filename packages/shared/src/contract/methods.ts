@@ -84,6 +84,10 @@ export const API_METHODS: Readonly<Record<WireMethod, MethodSpec>> = {
   getGameWeeks: { verb: 'get', params: ['leagueId'] },
   getFixtures: { verb: 'get', params: ['tournamentId'] },
   getPlayerPointsForMatch: { verb: 'get', params: ['leagueId', 'matchId'] },
+  getPlayerPointsForMatches: {
+    verb: 'get',
+    params: ['leagueId', 'matchIds'],
+  },
   getPointsForMatch: { verb: 'get', params: ['userId', 'leagueId', 'matchId'] },
   getPointsForGameWeek: {
     verb: 'get',
