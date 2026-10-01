@@ -411,6 +411,22 @@ export const STANDARD_AUCTION_CONFIG: StandardAuctionConfig = {
   slots: 6,
   totalBudget: 100,
   maxOverseasPlayersAllowedInXI: 4,
+  /*
+    **The running order**: batsmen, bowlers, keepers, all-rounders — Marquee
+    first, then the same for Star — and then the draft, a batch of its own.
+    Copied into each auction league when it is created.
+  */
+  batchSequence: [
+    { kind: 'auction', playerCategory: 'marquee', playerRole: 'batsman' },
+    { kind: 'auction', playerCategory: 'marquee', playerRole: 'bowler' },
+    { kind: 'auction', playerCategory: 'marquee', playerRole: 'wicketKeeper' },
+    { kind: 'auction', playerCategory: 'marquee', playerRole: 'allRounder' },
+    { kind: 'auction', playerCategory: 'star', playerRole: 'batsman' },
+    { kind: 'auction', playerCategory: 'star', playerRole: 'bowler' },
+    { kind: 'auction', playerCategory: 'star', playerRole: 'wicketKeeper' },
+    { kind: 'auction', playerCategory: 'star', playerRole: 'allRounder' },
+    { kind: 'draft' },
+  ],
 }
 
 /**

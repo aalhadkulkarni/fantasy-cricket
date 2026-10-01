@@ -82,6 +82,9 @@ export {
   TIMELINE_EVENTS,
 } from './reference.ts'
 
+// The two bidding constants, fixed for Phase 1 and needed on both sides.
+export { BID_INCREMENT, ROUND_SECONDS } from './live-auction.ts'
+
 // ---------------------------------------------------------------------------
 // The contract between the browser and the service
 // ---------------------------------------------------------------------------

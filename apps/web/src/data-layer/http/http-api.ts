@@ -18,6 +18,9 @@
 
 import type {
   Api,
+  AuctionPoolPlayer,
+  AuctionSettings,
+  DraftOrderEntry,
   Competition,
   CompetitionConfig,
   CompetitionId,
@@ -431,6 +434,20 @@ export function createHttpApi(
 
     getMembers(leagueId: LeagueId): Promise<LeagueMemberSummary[]> {
       return call('getMembers', [leagueId]) as Promise<LeagueMemberSummary[]>
+    },
+
+    getAuctionSettings(leagueId: LeagueId): Promise<AuctionSettings> {
+      return call('getAuctionSettings', [leagueId]) as Promise<AuctionSettings>
+    },
+
+    getDraftOrder(leagueId: LeagueId): Promise<DraftOrderEntry[]> {
+      return call('getDraftOrder', [leagueId]) as Promise<DraftOrderEntry[]>
+    },
+
+    getAuctionPlayerPool(leagueId: LeagueId): Promise<AuctionPoolPlayer[]> {
+      return call('getAuctionPlayerPool', [leagueId]) as Promise<
+        AuctionPoolPlayer[]
+      >
     },
 
     markLeagueFinished(leagueId: LeagueId): Promise<void> {

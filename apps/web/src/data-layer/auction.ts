@@ -21,6 +21,7 @@
 import type {
   AuctionManagerStatus,
   AuctionPoolPlayer,
+  AuctionSettings,
   AuctionState,
   DraftOrderEntry,
   LeagueId,
@@ -29,6 +30,7 @@ import type {
   PlayerId,
   TimelineMessage,
 } from '@fantasy-cricket/shared'
+import { getApi } from './api'
 import { notImplemented } from './not-implemented'
 import type {
   Subscriber,
@@ -55,11 +57,25 @@ export function getAuctionState(
   return notImplemented('getAuctionState', { leagueId })
 }
 
-/** Every player up for auction, with this league's category and base price. */
+/**
+ * **What a manager prepares from**: the start, the rules, the batch order and
+ * the auctioneer. Reads only the league, so it works for weeks before the
+ * auction exists.
+ */
+export function getAuctionSettings(
+  leagueId: LeagueId,
+): Promise<AuctionSettings> {
+  return getApi().getAuctionSettings(leagueId)
+}
+
+/**
+ * Every player up for auction, with this league's category and base price.
+ * The slow read on Auction Center, so it is fetched on its own.
+ */
 export function getAuctionPlayerPool(
   leagueId: LeagueId,
 ): Promise<AuctionPoolPlayer[]> {
-  return notImplemented('getAuctionPlayerPool', { leagueId })
+  return getApi().getAuctionPlayerPool(leagueId)
 }
 
 export function getSoldPlayers(leagueId: LeagueId): Promise<Player[]> {
@@ -87,12 +103,13 @@ export function getManagerStatuses(
 }
 
 /**
- * Generated at the very start, before any bidding, because a manager's strategy
- * depends on where they sit. **It snakes** — 1 to 6, then 6 back to 1,
- * repeating. Empty until the auctioneer generates it.
+ * **Every position, held or not.** A position is claimed when a manager joins,
+ * so the order is known before any bidding — a manager's strategy depends on
+ * where they sit. One nobody holds yet has no manager, and reads as TBA. **It
+ * snakes** — 1 to 6, then 6 back to 1, repeating.
  */
 export function getDraftOrder(leagueId: LeagueId): Promise<DraftOrderEntry[]> {
-  return notImplemented('getDraftOrder', { leagueId })
+  return getApi().getDraftOrder(leagueId)
 }
 
 /**

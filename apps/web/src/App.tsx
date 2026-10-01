@@ -13,7 +13,9 @@ import { LeagueDetails } from './pages/league/league-details'
 import { Leaderboard } from './pages/league/leaderboard'
 import { Members } from './pages/league/members'
 import { MyTeam } from './pages/league/my-team'
-import { LeagueHome, LeagueLanding } from './pages/league-home'
+import { Auction } from './pages/auction'
+import { AuctionCenter } from './pages/league/auction-center'
+import { LeagueHome, LeagueLanding, SectionGuard } from './pages/league-home'
 import { SystemAdmin } from './pages/system-admin'
 import { TournamentAdmin } from './pages/tournament-admin'
 import { TournamentHome } from './pages/tournament-home'
@@ -74,10 +76,28 @@ function App() {
                 <Route path={ROUTES.league} element={<LeagueHome />}>
                   <Route index element={<LeagueLanding />} />
                   <Route path="details" element={<LeagueDetails />} />
-                  <Route path="team" element={<MyTeam />} />
+                  <Route
+                    path="auction-center"
+                    element={
+                      <SectionGuard section="auction-center">
+                        <AuctionCenter />
+                      </SectionGuard>
+                    }
+                  />
+                  <Route
+                    path="team"
+                    element={
+                      <SectionGuard section="team">
+                        <MyTeam />
+                      </SectionGuard>
+                    }
+                  />
                   <Route path="leaderboard" element={<Leaderboard />} />
                   <Route path="members" element={<Members />} />
                 </Route>
+
+                {/* Outside the league layout: it opens in a tab of its own. */}
+                <Route path={ROUTES.auction} element={<Auction />} />
 
                 <Route
                   path={ROUTES.admin}

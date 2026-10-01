@@ -129,6 +129,23 @@ const dataModel = {
     slots: 6,
     totalBudget: 100,
     maxOverseasPlayersAllowedInXI: 4,
+    /*
+      THE RUNNING ORDER, added in Milestone 4. Copied into each auction
+      league's auctionConfig at creation and frozen there, like the prices.
+      An ARRAY, one of the few in this model: it is read and written whole,
+      and its order is the whole point. The draft is a batch of its own.
+    */
+    batchSequence: [
+      { kind: 'auction', playerCategory: 'marquee', playerRole: 'batsman' },
+      { kind: 'auction', playerCategory: 'marquee', playerRole: 'bowler' },
+      { kind: 'auction', playerCategory: 'marquee', playerRole: 'wicketKeeper' },
+      { kind: 'auction', playerCategory: 'marquee', playerRole: 'allRounder' },
+      { kind: 'auction', playerCategory: 'star', playerRole: 'batsman' },
+      { kind: 'auction', playerCategory: 'star', playerRole: 'bowler' },
+      { kind: 'auction', playerCategory: 'star', playerRole: 'wicketKeeper' },
+      { kind: 'auction', playerCategory: 'star', playerRole: 'allRounder' },
+      { kind: 'draft' },
+    ],
   },
 
   standardFantasyLineupRules: {
@@ -1010,6 +1027,8 @@ const dataModel = {
           // TBD13 RESOLVED: null means NO limit. Consistent with TBD7 — let the
           // data convey absence rather than encoding it as a magic number.
           maxOverseasPlayersAllowedInXI: 4,
+          // Copied from standardAuctionConfig.batchSequence at creation, frozen.
+          batchSequence: [/* same nine batches as the standard */],
         },
         transferWindows: {
           transferWindow001: {
