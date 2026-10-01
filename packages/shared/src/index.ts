@@ -85,6 +85,9 @@ export {
 // The two bidding constants, fixed for Phase 1 and needed on both sides.
 export { BID_INCREMENT, ROUND_SECONDS } from './live-auction.ts'
 
+// Who is not overseas when a tournament names nobody.
+export { DEFAULT_HOME_NATION } from './competition.ts'
+
 // ---------------------------------------------------------------------------
 // The contract between the browser and the service
 // ---------------------------------------------------------------------------

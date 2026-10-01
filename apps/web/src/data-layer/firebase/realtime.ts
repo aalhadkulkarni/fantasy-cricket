@@ -100,6 +100,24 @@ export function listenToValue<T>(
 }
 
 /**
+ * **One read, no listening.** For data wanted on demand rather than kept live —
+ * one player's bidding history, opened from a list. Absent comes back as
+ * `undefined`.
+ */
+export async function readValue<T>(
+  segments: readonly string[],
+): Promise<T | undefined> {
+  const path = rooted(segments)
+  try {
+    const { sdk, database } = await connect()
+    const snapshot = await sdk.get(sdk.ref(database, path))
+    return snapshot.exists() ? (snapshot.val() as T) : undefined
+  } catch (cause) {
+    throw asError(cause, path)
+  }
+}
+
+/**
  * **Each child added under a node, in key order**, including those already
  * there when listening starts. Push keys sort by creation time, so this is
  * arrival order — what a timeline needs.

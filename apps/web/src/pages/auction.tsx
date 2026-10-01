@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Link, Navigate, useParams } from 'react-router'
+import { Navigate, useParams } from 'react-router'
 
+import { AuctionRoom } from '@/components/auction/auction-room'
 import { PageContainer } from '@/components/layout/page-container'
 import { getLeagueSummary } from '@/data-layer'
 import { leaguePath } from '@/routes'
@@ -15,8 +16,8 @@ import type { LeagueId, LeagueSummary } from '@fantasy-cricket/shared'
  *
  * **One page, three renderings** — spectator, bidder, auctioneer — decided by
  * who holds which role at the moment, so a handover is a data change rather
- * than a navigation. None of that exists yet: Phase C builds the page and the
- * way to it, and Phase D fills it.
+ * than a navigation. This page only finds the league; `AuctionRoom` is the
+ * auction itself.
  */
 export function Auction() {
   const { leagueId } = useParams<{ leagueId: string }>()
@@ -78,31 +79,5 @@ export function Auction() {
     return <Navigate to={leaguePath(league.leagueId)} replace />
   }
 
-  return (
-    <main className="py-10 sm:py-14">
-      <PageContainer>
-        <p className="font-mono text-[11px] tracking-[0.14em] text-subtle-foreground uppercase">
-          Live auction
-        </p>
-        <h1 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">
-          {league.leagueName}
-        </h1>
-
-        <section className="floodlit mt-8 rounded-xl border bg-card p-5 text-card-foreground sm:p-7">
-          <h2 className="text-lg font-semibold">The auction room opens here</h2>
-          <p className="mt-2 max-w-prose text-sm text-muted-foreground">
-            Bidding, the timeline and the managers&apos; budgets will appear on
-            this page. Until then, everything you need to prepare is in Auction
-            Center.
-          </p>
-          <Link
-            to={leaguePath(league.leagueId, 'auction-center')}
-            className="mt-4 inline-block text-sm font-medium underline underline-offset-4 hover:text-foreground"
-          >
-            Back to Auction Center
-          </Link>
-        </section>
-      </PageContainer>
-    </main>
-  )
+  return <AuctionRoom league={league} />
 }

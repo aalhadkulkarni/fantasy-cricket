@@ -765,6 +765,13 @@ auction.
 - `onTimelineEvent(leagueId, callback)` — every entry so far, then each new one
 - `onServerTimeOffset(callback)` — this device's clock against the database's,
   for the countdown
+- `onManagerStatusesChanged(leagueId, callback)` — budgets and holdings
+- `onPlayerStatusesChanged(leagueId, callback)` — sold, unsold, pending
+- `onCurrentRoundChanged(leagueId, playerId, callback)` — the current player's
+  accepted round; the page moves to the next player's as they go up
+- `onSubmittedNoBids(leagueId, playerId, callback)` — who has passed
+- `getPlayerBiddingHistory(leagueId, playerId)` — a one-shot read from the
+  database, on drill-down only
 
 > **These are read straight from the database in the browser**, not through
 > the service — the auction changes several times a second for everyone

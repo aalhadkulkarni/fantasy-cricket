@@ -25,9 +25,17 @@ import {
   getFormats,
   updateCompetition,
 } from '@/data-layer'
-import type { Competition, Format, FormatRecord } from '@fantasy-cricket/shared'
+import {
+  DEFAULT_HOME_NATION,
+  type Competition,
+  type Format,
+  type FormatRecord,
+} from '@fantasy-cricket/shared'
 
-/** The select value for "no home nation", since a select cannot hold ''. */
+/**
+ * The select value for "not set", since a select cannot hold ''. Not set
+ * counts as `DEFAULT_HOME_NATION` wherever the home nation is read.
+ */
 const NO_HOME_NATION = '__none__'
 
 /**
@@ -189,7 +197,7 @@ function Body({
             <span className="text-xs text-muted-foreground">
               {formatName(competition.formatId)} ·{' '}
               {competition.homeNation === undefined
-                ? 'No home nation'
+                ? `Home: ${DEFAULT_HOME_NATION} (default)`
                 : `Home: ${competition.homeNation}`}
             </span>
           </button>
@@ -309,7 +317,9 @@ function CompetitionDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={NO_HOME_NATION}>None</SelectItem>
+                <SelectItem value={NO_HOME_NATION}>
+                  Not set — counts as {DEFAULT_HOME_NATION}
+                </SelectItem>
                 {nations.map((country) => (
                   <SelectItem key={country} value={country}>
                     {country}
@@ -318,8 +328,8 @@ function CompetitionDialog({
               </SelectContent>
             </Select>
             <p className="text-xs text-subtle-foreground">
-              Players from anywhere else count as overseas. Leave it as None for
-              an international competition.
+              Players from anywhere else count as overseas. Not set counts as{' '}
+              {DEFAULT_HOME_NATION}.
               {isEditing &&
                 ' A change applies to tournaments created from now on, not ones that already exist.'}
             </p>

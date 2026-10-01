@@ -551,6 +551,11 @@ export interface AuctionSettings {
   /** Absent on a league created before the sequence existed. */
   batchSequence?: AuctionBatch[]
   auctioneer: { userId: UserId; userName: string }
+  /**
+   * The tournament's home nation, **India when none is set**. A player from
+   * anywhere else is overseas.
+   */
+  homeNation: string
 }
 
 // ---------------------------------------------------------------------------

@@ -47,6 +47,36 @@ over — which is why this needs no transactions.
 > does, and how concurrent bids are then serialised, is **not yet decided** —
 > see `docs/10-milestones.md`. Until it is, this section stands.
 
+## Layout
+
+**Phone first, and the round gets the height.** The header is one small line —
+league name and "Live auction" — because the page changes every few seconds.
+Then, top to bottom:
+
+- **Current batch** — "Marquee batsmen · 15 players remaining", or in the draft
+  how many are left to pick from
+- **The player box** — titled "Current player: Kohli (RCB) · Base price 5 cr"
+  ("Next player" while only selected), with one line each for **current leading
+  bid** and who holds it, **next asking bid**, **time remaining for the next
+  bid**, and **managers out of bidding** (everyone who has passed). Between
+  players it carries the headline instead.
+
+Then the viewer's panel — the auctioneer's controls, a manager's bid panel, or
+both for an auctioneer who plays — directly under it where a thumb is. Below
+them, **Timeline · Managers · Players as tabs on a phone**, so the stage stays
+near the top; **as columns on a wide screen**, with the timeline beside the
+stage. Only one arrangement is mounted at a time.
+
+**The auctioneer moves between batches in the order only** — one "Next batch:
+<name>" control stepping through the league's sequence, with no jumping. Within
+a batch they put up a chosen player or a random one.
+
+**A player is selected before bidding opens.** Selecting shows "Current player
+is X"; Start bidding opens the round and starts the clock.
+
+**Before Phase E, every control is "not wired yet"**: it renders in the state
+the data puts it in and says so when clicked.
+
 ## Shared display
 
 **Always visible:**
