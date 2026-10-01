@@ -97,7 +97,10 @@ matches are navigable **for viewing**.
 **Which gameweek is shown:** the current one if a gameweek is running, otherwise
 the next one.
 
-**Also show which round the gameweek belongs to.**
+**The round is not shown beside the gameweek.** It was, and "Game week 1 ·
+Round 1 · 5 matches" read as though the team were for the whole round, when a
+team applies from this gameweek until changed. The gameweek's match count is
+shown instead, and tapping it lists that gameweek's fixtures.
 
 **Navigation:** previous and next gameweek, **up to next gameweek only**.
 

@@ -5,6 +5,7 @@ import {
   ManagerTeamDialog,
   type LockedPeriod,
 } from '@/components/leagues/manager-team-dialog'
+import { matchLabel } from '@/components/leagues/team-data'
 import {
   Select,
   SelectContent,
@@ -176,6 +177,13 @@ export function Leaderboard() {
         : (teams.find((t) => t.teamId === teamId)?.teamShortName ?? 'TBD')
     const fixture = (m: Match | undefined) =>
       m === undefined ? '' : `${short(m.team1Id)} v ${short(m.team2Id)}`
+    const labelsFor = (matchIds: readonly MatchId[]) =>
+      matchIds.map((id) =>
+        matchLabel(
+          matches.find((m) => m.matchId === id),
+          teams,
+        ),
+      )
 
     if (league.isGameWeeksEnabled) {
       return weeks
@@ -185,14 +193,22 @@ export function Leaderboard() {
         .map((w) => ({
           id: w.gameWeek.gameWeekId,
           label: `Game week ${w.gameWeek.gameWeekNumber}`,
+          /*
+            A count rather than the first match's teams: naming one fixture
+            made a several-match gameweek read as a single match.
+          */
+          // No round: beside a match count it read as a team for the whole
+          // round. Same as My Team.
           subline: [
             `Game week ${w.gameWeek.gameWeekNumber}`,
-            w.roundName,
-            fixture(matches.find((m) => m.matchId === w.matchIds[0])),
+            w.matchIds.length === 1
+              ? fixture(matches.find((m) => m.matchId === w.matchIds[0]))
+              : `${w.matchIds.length} matches`,
           ]
             .filter((part) => part !== '')
             .join(' · '),
           matchIds: w.matchIds,
+          matchLabels: labelsFor(w.matchIds),
           ...(w.changeCap === undefined ? {} : { changeCap: w.changeCap }),
         }))
     }
@@ -202,6 +218,7 @@ export function Leaderboard() {
       label: `Match ${m.matchNumber}`,
       subline: `Match ${m.matchNumber} · ${fixture(m)}`,
       matchIds: [m.matchId],
+      matchLabels: labelsFor([m.matchId]),
     }))
   }, [
     matches,
