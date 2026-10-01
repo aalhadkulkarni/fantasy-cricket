@@ -410,8 +410,10 @@ of managers it was out of. It is computed once, ever, at migration.
 - `requestToJoin(leagueId, teamName)` — closed leagues
 
 > **In an auction league, joining as a manager also claims a draft position** —
-> a random one nobody holds yet. How two simultaneous joins are kept from
-> claiming the same position is still open; see `docs/10-milestones.md`.
+> a random one nobody holds yet, **claimed transactionally** like a join code,
+> so two simultaneous joins can never hold the same one. If the membership
+> write then fails, the position is released. No position left means the
+> league is full.
 
 > **A code is a shortcut, not a bypass.** A closed league still requires
 > approval.

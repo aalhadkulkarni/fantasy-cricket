@@ -180,8 +180,19 @@ export interface AuctionDetails {
   auctionConfig: AuctionConfig
   /** Absent when the admin disabled transfers. */
   transferWindows?: Record<TransferWindowId, TransferWindow>
-  /** Empty until the auctioneer generates it, which happens before any bidding. */
-  draftOrder: Record<UserId, number>
+  /**
+   * **Position → manager**, 1 to `maxSlots`. A position is claimed when a
+   * manager joins, at random from those still free, with the same
+   * transactional claim a join code uses — so two simultaneous joins can never
+   * hold one position. Positions nobody holds are absent, and shown as TBA.
+   *
+   * **Absent entirely until someone joins**, since Firebase stores no empty map.
+   *
+   * NOTE: RTDB reads a map with small integer keys back as an **array**, with
+   * holes where positions are free. Anything reading this must accept both
+   * shapes.
+   */
+  draftOrder?: Partial<Record<number, UserId>>
   auctionStartTime: number
 
   /**

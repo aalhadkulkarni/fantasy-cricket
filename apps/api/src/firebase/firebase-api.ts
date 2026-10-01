@@ -44,6 +44,7 @@ import type { Session } from '../auth.ts'
 import type {
   ArchivedLeagueCard,
   ArchivedLeagueIndexEntry,
+  AuctionConfig,
   BannedUser,
   Competition,
   CompetitionConfig,
@@ -85,6 +86,7 @@ import type {
   Round,
   RoundConfig,
   RoundId,
+  StandardAuctionConfig,
   SystemSetup,
   Team,
   TeamConfig,
@@ -125,7 +127,7 @@ import {
   TIMELINE_EVENT_RECORDS,
   USER_ROLES,
 } from '../seed-data.ts'
-import { FirebaseService } from './firebase-service.ts'
+import { FirebaseService, type DbPath } from './firebase-service.ts'
 import { createPaths } from './paths.ts'
 
 /**
@@ -225,6 +227,64 @@ export function createFirebaseApi(
 
   /** The documented default for a regular league, and its ceiling. */
   const OFFICIAL_LEAGUE_SLOTS = 200
+
+  /**
+   * The official auction league's slots. Beyond eight an auction stops being
+   * fun, which is the ceiling; six is the room the standard config is built
+   * around.
+   */
+  const OFFICIAL_AUCTION_LEAGUE_SLOTS = 6
+
+  /**
+   * **What a participant with no standard auction values goes into a league's
+   * pool as.** Players created before values were required have none, and
+   * leaving them out would make them unbuyable for the whole season.
+   */
+  const DEFAULT_AUCTION_DETAIL: LeaguePlayerAuctionDetail = {
+    playerCategory: 'general',
+    playerBasePrice: 2,
+  }
+
+  /**
+   * **The standard auction config, projected onto one tournament** and frozen
+   * into the league. A projection rather than a snapshot: the standard holds
+   * every player in the system, a league needs only its participants. Frozen
+   * because managers bid against these values, so editing the standard later
+   * must not change what an auction ran under.
+   */
+  async function auctionConfigFor(
+    tournament: Tournament,
+    ownerId: UserId,
+  ): Promise<AuctionConfig> {
+    const standard = await service.read<StandardAuctionConfig>(
+      paths.standardAuctionConfig(),
+    )
+    const details = standard?.playerDetails ?? {}
+
+    const playerDetails: Record<string, LeaguePlayerAuctionDetail> = {}
+    for (const playerId of Object.keys(tournament.participatingPlayers ?? {})) {
+      playerDetails[playerId] =
+        details[playerId as PlayerId] ?? DEFAULT_AUCTION_DETAIL
+    }
+
+    const maxOverseas =
+      standard?.maxOverseasPlayersAllowedInXI ??
+      STANDARD_AUCTION_CONFIG.maxOverseasPlayersAllowedInXI
+
+    return {
+      lastUpdatedBy: { user: ownerId, timestamp: Date.now() },
+      playerDetails,
+      totalBudget: standard?.totalBudget ?? STANDARD_AUCTION_CONFIG.totalBudget,
+      minSquadSize:
+        standard?.minSquadSize ?? STANDARD_AUCTION_CONFIG.minSquadSize,
+      maxSquadSize:
+        standard?.maxSquadSize ?? STANDARD_AUCTION_CONFIG.maxSquadSize,
+      // Absent means no cap, and Firebase would drop an undefined anyway.
+      ...(maxOverseas === undefined
+        ? {}
+        : { maxOverseasPlayersAllowedInXI: maxOverseas }),
+    }
+  }
 
   /**
    * One league, as the card both the tournament row and the code lookup render.
@@ -340,6 +400,56 @@ export function createFirebaseApi(
         playerCategory as LeaguePlayerAuctionDetail['playerCategory'],
       playerBasePrice,
     }
+  }
+
+  function draftPositionPath(leagueId: LeagueId, position: number): DbPath {
+    return service.path(
+      'leagues',
+      leagueId,
+      'auctionDetails',
+      'draftOrder',
+      String(position),
+    )
+  }
+
+  /**
+   * **A random free draft position, claimed transactionally**, the same way a
+   * join code is: two managers joining at once can both see position 4 free,
+   * but only one claim on it commits, and the other moves on to the next.
+   *
+   * A manager who already holds a position keeps it. The draft order is read
+   * in either shape RTDB returns — a map, or an array with holes, which is
+   * what small integer keys come back as.
+   */
+  async function claimDraftPosition(
+    league: League,
+    userId: UserId,
+  ): Promise<number | undefined> {
+    const raw = league.isAuctionEnabled
+      ? league.auctionDetails.draftOrder
+      : undefined
+    const held = new Map<number, UserId>()
+    for (const [key, holder] of Object.entries(raw ?? {})) {
+      if (typeof holder === 'string') held.set(Number(key), holder)
+    }
+
+    for (const holder of held.values()) {
+      if (holder === userId) return undefined
+    }
+
+    const free = Array.from({ length: league.maxSlots }, (_, i) => i + 1)
+      .filter((position) => !held.has(position))
+      .sort(() => Math.random() - 0.5)
+
+    for (const position of free) {
+      const won = await service.claim(
+        draftPositionPath(league.leagueId, position),
+        userId,
+      )
+      if (won) return position
+    }
+
+    throw new DataLayerError('leagueFull', 'This league is full.')
   }
 
   /**
@@ -471,7 +581,9 @@ export function createFirebaseApi(
    *
    * The owner is **not a manager**. A manager has a fantasy team name, chosen
    * when joining, so whoever publishes joins their own league the same way
-   * everyone else does.
+   * everyone else does. In an auction league the owner is also the auctioneer,
+   * recorded on the membership and on `auctionDetails` in this same write —
+   * the two copies must never disagree about who holds control.
    */
   async function officialLeague(
     inputs: {
@@ -482,12 +594,18 @@ export function createFirebaseApi(
       offset: number
       joinDeadline: number
     },
-    /** Present for a gameweek league, absent for a match-based one. */
-    roundConfigs: Record<string, RoundConfig> | undefined,
+    kind:
+      | { type: 'match' }
+      | { type: 'gameWeek'; roundConfigs: Record<string, RoundConfig> }
+      | {
+          type: 'auction'
+          roundConfigs: Record<string, RoundConfig>
+          auctionConfig: AuctionConfig
+          auctionStartTime: number
+        },
   ): Promise<Record<string, unknown>> {
-    const { tournament, ownerId, ownerName, rules, offset, joinDeadline } =
-      inputs
-    const gameWeeks = roundConfigs !== undefined
+    const { tournament, ownerId, ownerName, rules, offset } = inputs
+    const isAuction = kind.type === 'auction'
 
     const leagueId = service.generateKey() as LeagueId
     const leagueJoinCode = await claimJoinCode(leagueId)
@@ -497,10 +615,24 @@ export function createFirebaseApi(
     )
 
     const leagueName = `${tournament.tournamentName} — Official ${
-      gameWeeks ? 'Gameweek' : 'Match'
+      kind.type === 'auction'
+        ? 'Auction'
+        : kind.type === 'gameWeek'
+          ? 'Gameweek'
+          : 'Match'
     } League`
 
-    const roles = { leagueOwner: true, leagueAdmin: true } as const
+    const roles = isAuction
+      ? ({
+          leagueOwner: true,
+          leagueAdmin: true,
+          primaryAuctioneer: true,
+        } as const)
+      : ({ leagueOwner: true, leagueAdmin: true } as const)
+
+    const maxSlots = isAuction
+      ? OFFICIAL_AUCTION_LEAGUE_SLOTS
+      : OFFICIAL_LEAGUE_SLOTS
 
     const base = {
       leagueId,
@@ -509,35 +641,63 @@ export function createFirebaseApi(
       leagueJoinCode,
       tournamentId: tournament.tournamentId,
       leagueEntry: 'Open',
-      maxSlots: OFFICIAL_LEAGUE_SLOTS,
+      maxSlots,
       fantasyLineupRules: rules,
       leagueMembers: { [ownerId]: { leagueRoles: roles } },
       fantasyLeagueTeamChangesDeadlineOffset: offset,
-      fantasyLeagueJoinDeadline: joinDeadline,
+      // Nothing to join after bidding begins, so an auction league closes then.
+      fantasyLeagueJoinDeadline:
+        kind.type === 'auction' ? kind.auctionStartTime : inputs.joinDeadline,
       isCustomScoringSystem: false,
-      isAuctionEnabled: false,
+      isAuctionEnabled: isAuction,
+    }
+
+    let league: Record<string, unknown>
+    switch (kind.type) {
+      case 'match':
+        league = {
+          ...base,
+          isGameWeeksEnabled: false,
+          /*
+            **One allowance for the whole league, sized by the tournament.**
+            The same figure serves all three, because they are counted
+            separately against their own allowances rather than sharing one
+            pool. See `changeAllowanceFor`.
+          */
+          totalChangesAllowed: allowance,
+          totalCaptainChangesAllowed: allowance,
+          totalViceCaptainChangesAllowed: allowance,
+        }
+        break
+      case 'gameWeek':
+        league = {
+          ...base,
+          isGameWeeksEnabled: true,
+          roundConfigs: kind.roundConfigs,
+        }
+        break
+      case 'auction':
+        league = {
+          ...base,
+          // Forced: an auction league is always gameweek-based. Its change
+          // allowances are absent, which is unlimited — the squad won at
+          // auction is already the constraint.
+          isGameWeeksEnabled: true,
+          roundConfigs: kind.roundConfigs,
+          auctionDetails: {
+            auctionConfig: kind.auctionConfig,
+            auctionStartTime: kind.auctionStartTime,
+            primaryAuctioneer: ownerId,
+            // No draftOrder: positions are claimed as managers join, and an
+            // empty map is not stored. No transfer windows: not in Phase 1's
+            // official league.
+          },
+        }
+        break
     }
 
     return {
-      [paths.leagues(leagueId)]: gameWeeks
-        ? {
-            ...base,
-            isGameWeeksEnabled: true,
-            roundConfigs,
-          }
-        : {
-            ...base,
-            isGameWeeksEnabled: false,
-            /*
-              **One allowance for the whole league, sized by the tournament.**
-              The same figure serves all three, because they are counted
-              separately against their own allowances rather than sharing one
-              pool. See `changeAllowanceFor`.
-            */
-            totalChangesAllowed: allowance,
-            totalCaptainChangesAllowed: allowance,
-            totalViceCaptainChangesAllowed: allowance,
-          },
+      [paths.leagues(leagueId)]: league,
 
       // The tournament page's list of its leagues. Exactly the fields that row
       // renders, and no more, or it drifts into a second copy of the league.
@@ -548,9 +708,9 @@ export function createFirebaseApi(
         leagueId,
       )]: {
         leagueName,
-        isAuctionEnabled: false,
+        isAuctionEnabled: isAuction,
         leagueEntry: 'Open',
-        maxSlots: OFFICIAL_LEAGUE_SLOTS,
+        maxSlots,
       },
 
       // My Leagues, for the owner.
@@ -558,9 +718,9 @@ export function createFirebaseApi(
         leagueName,
         tournamentId: tournament.tournamentId,
         tournamentName: tournament.tournamentName,
-        isAuctionEnabled: false,
+        isAuctionEnabled: isAuction,
         ownerName,
-        maxSlots: OFFICIAL_LEAGUE_SLOTS,
+        maxSlots,
         membershipStatus: 'Accepted',
         myRoles: roles,
       },
@@ -2110,7 +2270,7 @@ export function createFirebaseApi(
       // Merged, not replaced. Someone joining a league they own keeps owning it.
       const myRoles = { ...(mine?.leagueRoles ?? {}), manager: true as const }
 
-      await service.update({
+      const membership: Record<string, unknown> = {
         /*
           **Leaf paths on the membership, deliberately.** Writing the member
           object whole would erase `leagueOwner` and `leagueAdmin` from anyone
@@ -2138,7 +2298,25 @@ export function createFirebaseApi(
           membershipStatus: 'Accepted',
           myRoles,
         },
-      })
+      }
+
+      // Before the membership, so a league with no position left refuses the
+      // join rather than admitting a manager the draft has no seat for.
+      const claimedPosition = league.isAuctionEnabled
+        ? await claimDraftPosition(league, userId)
+        : undefined
+
+      try {
+        await service.update(membership)
+      } catch (error) {
+        // A failed join must not keep a seat in the draft.
+        if (claimedPosition !== undefined) {
+          await service.update({
+            [draftPositionPath(leagueId, claimedPosition)]: null,
+          })
+        }
+        throw error
+      }
     },
 
     /**
@@ -2671,9 +2849,11 @@ export function createFirebaseApi(
         )
       }
 
+      const auction = officialLeagues?.auction
       const wantsLeague =
         officialLeagues?.matchBased === true ||
-        officialLeagues?.gameWeekBased === true
+        officialLeagues?.gameWeekBased === true ||
+        auction !== undefined
 
       if (
         wantsLeague &&
@@ -2685,12 +2865,47 @@ export function createFirebaseApi(
         )
       }
 
-      // Checked before anything is claimed or written, so a bad length refuses
-      // the publish outright rather than half-way through it.
+      /*
+        Everything below is checked before anything is claimed or written, so
+        a bad input refuses the publish outright rather than half-way through.
+        Each gameweek league gets its own call, so no two leagues share a
+        gameweek id.
+      */
       const roundConfigs =
         officialLeagues?.gameWeekBased === true
           ? gameWeeksFor(tournament, officialLeagues.gameWeekLengths)
           : undefined
+      const auctionRoundConfigs =
+        auction !== undefined
+          ? gameWeeksFor(tournament, officialLeagues?.gameWeekLengths)
+          : undefined
+
+      // Squads are won before teams are picked, so the auction has to finish
+      // before the first ball. Before the first match is the checkable part.
+      const firstMatchStart = Math.min(
+        ...dated.map((match) => match.startTimestamp ?? Number.MAX_VALUE),
+      )
+      if (auction !== undefined) {
+        const start = auction.auctionStartTime
+        if (typeof start !== 'number' || !Number.isFinite(start)) {
+          throw new DataLayerError(
+            'invalidConfig',
+            'Choose when the auction starts.',
+          )
+        }
+        if (start <= Date.now()) {
+          throw new DataLayerError(
+            'invalidConfig',
+            'The auction has to start in the future.',
+          )
+        }
+        if (start >= firstMatchStart) {
+          throw new DataLayerError(
+            'invalidConfig',
+            'The auction has to start before the first match, so squads are won before teams are picked.',
+          )
+        }
+      }
 
       const update: Record<string, unknown> = {}
 
@@ -2713,26 +2928,39 @@ export function createFirebaseApi(
         const offset = deadlineOffset ?? STANDARD_TEAM_CHANGES_DEADLINE_OFFSET
         const rules = lineupRules ?? STANDARD_FANTASY_LINEUP_RULES
 
-        // No later than the first match's deadline, which is its start minus
-        // the offset teams lock by.
-        const firstStart = Math.min(
-          ...dated.map((match) => match.startTimestamp ?? Number.MAX_VALUE),
-        )
-
         const common = {
           tournament,
           ownerId: session.uid as UserId,
           ownerName: owner?.userName ?? 'System admin',
           rules,
           offset,
-          joinDeadline: firstStart - offset,
+          // No later than the first match's deadline, which is its start
+          // minus the offset teams lock by.
+          joinDeadline: firstMatchStart - offset,
         }
 
         if (officialLeagues?.matchBased === true) {
-          Object.assign(update, await officialLeague(common, undefined))
+          Object.assign(update, await officialLeague(common, { type: 'match' }))
         }
         if (roundConfigs !== undefined) {
-          Object.assign(update, await officialLeague(common, roundConfigs))
+          Object.assign(
+            update,
+            await officialLeague(common, { type: 'gameWeek', roundConfigs }),
+          )
+        }
+        if (auction !== undefined && auctionRoundConfigs !== undefined) {
+          Object.assign(
+            update,
+            await officialLeague(common, {
+              type: 'auction',
+              roundConfigs: auctionRoundConfigs,
+              auctionConfig: await auctionConfigFor(
+                tournament,
+                session.uid as UserId,
+              ),
+              auctionStartTime: auction.auctionStartTime,
+            }),
+          )
         }
       }
 

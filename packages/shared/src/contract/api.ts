@@ -117,10 +117,11 @@ export interface CreatePlayersResult {
  *
  * **The publisher owns and administers them but does not play them.** Being a
  * manager means having a fantasy team name, which is chosen when joining, so
- * the admin joins through the same door as everyone else.
+ * the admin joins through the same door as everyone else. In the auction
+ * league the publisher is also the auctioneer.
  *
- * Both are public, use standard points, and hold no auction — the whole point
- * is that anyone can walk in.
+ * All are public and use standard points — the whole point is that anyone can
+ * walk in.
  */
 export interface OfficialLeagues {
   /** Changes counted across the whole tournament. */
@@ -136,6 +137,18 @@ export interface OfficialLeagues {
    * of one has no "during the gameweek", so the impact sub is off there.
    */
   gameWeekLengths?: Partial<Record<RoundId, number>>
+
+  /**
+   * **Present means open an official auction league.** Standard rules, public,
+   * six slots, and joining closes when the auction starts. Gameweek-based, so
+   * it needs `gameWeekLengths` too.
+   *
+   * The start is refused unless it is in the future and before the first
+   * match starts, since squads have to be won before teams can be picked.
+   */
+  auction?: {
+    auctionStartTime: number
+  }
 }
 
 /**

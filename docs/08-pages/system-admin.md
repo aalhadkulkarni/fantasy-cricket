@@ -54,6 +54,13 @@ choice per round serves every gameweek league opened in that publish. A length
 of one match has no "during the gameweek", so the impact sub is off in that
 round.
 
+**The official auction league** is the third option, unticked by default. It
+asks for **when the auction starts**, which must be in the future and before
+the first match. The league is public, has six slots, uses the standard
+auction rules, and closes to joining when the auction starts. The publishing
+admin is its auctioneer. Participants without auction values enter its pool as
+General at 2. It is gameweek-based, so it needs the per-round lengths too.
+
 **Marking a tournament complete** sets `completedAt`. It is prompted when points
 for its last match are entered — but never done automatically, since the admin
 may still need to add matches they forgot.
