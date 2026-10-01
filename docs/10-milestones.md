@@ -356,9 +356,6 @@ together.
 
 ### Phase E must also
 
-- **Remove the auction fixtures** (`apps/web/src/components/auction/auction-fixtures.ts`
-  and the `?fixture=` branch in `auction-room.tsx`). Development-only fake data
-  for building Phase D; production builds already exclude it.
 - **Write the timeline in the typed shape** `TimelineEventData` in
   `packages/shared/src/live-auction.ts` fixes, with a `timestamp`.
 - **Write `auctionState` in its Phase D shape**: `currentBatch` is an
