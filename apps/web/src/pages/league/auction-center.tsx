@@ -1,6 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 
+import {
+  CATEGORY_NAME,
+  ROLE_PLURAL,
+  batchName,
+} from '@/components/auction/labels'
+import { OverseasMark } from '@/components/auction/overseas-mark'
 import { PlayerName } from '@/components/leagues/player-name'
 import { RoleTag } from '@/components/leagues/role-tag'
 import { Button } from '@/components/ui/button'
@@ -166,6 +172,7 @@ export function AuctionCenter() {
       {(overview !== undefined || overviewError !== undefined) && (
         <Pool
           pool={pool}
+          homeNation={overview?.settings.homeNation}
           error={poolError}
           onRetry={() => setPoolToken((n) => n + 1)}
         />
@@ -368,10 +375,13 @@ const ALL = '__all__'
  */
 function Pool({
   pool,
+  homeNation,
   error,
   onRetry,
 }: {
   pool: AuctionPoolPlayer[] | undefined
+  /** Who is not overseas. Absent until the settings load, or if none. */
+  homeNation: string | undefined
   error: string | undefined
   onRetry: () => void
 }) {
@@ -463,6 +473,11 @@ function Pool({
                   className="flex items-center justify-between gap-3 py-2.5"
                 >
                   <span className="flex min-w-0 items-center gap-2.5">
+                    <OverseasMark
+                      player={entry.player}
+                      homeNation={homeNation}
+                      keepSpace
+                    />
                     <PlayerName
                       player={entry.player}
                       className="text-[15px] font-medium"
@@ -532,27 +547,6 @@ function Row({ label, value }: { label: string; value: string }) {
       </span>
     </div>
   )
-}
-
-const CATEGORY_NAME: Record<PlayerCategory, string> = {
-  marquee: 'Marquee',
-  star: 'Star',
-  general: 'General',
-}
-
-const ROLE_PLURAL: Record<PlayerRole, string> = {
-  batsman: 'Batsmen',
-  bowler: 'Bowlers',
-  wicketKeeper: 'Wicket keepers',
-  allRounder: 'All-rounders',
-}
-
-function batchName(batch: AuctionBatch): string {
-  return batch.kind === 'draft'
-    ? 'Draft'
-    : `${CATEGORY_NAME[batch.playerCategory]} ${ROLE_PLURAL[
-        batch.playerRole
-      ].toLowerCase()}`
 }
 
 /**

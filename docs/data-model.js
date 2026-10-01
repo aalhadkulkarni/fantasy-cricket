@@ -404,8 +404,8 @@ const dataModel = {
       formatId: 't20',
       /*
         OPTIONAL. The nation a player must be from NOT to count as overseas in
-        this competition's tournaments. Absent means the competition has no
-        notion of overseas at all — an international series, say.
+        this competition's tournaments. Absent means INDIA (DEFAULT_HOME_NATION
+        in packages/shared), applied where it is read rather than stored.
 
         COPIED onto each tournament at creation (tournaments/{id}/homeNation)
         and frozen there, like participatingPlayers, so editing a competition
@@ -586,8 +586,8 @@ const dataModel = {
       tournamentName: 'IPL 2027',
       competitionId: 'competition001',
       // Copied from competitions/{competitionId}/homeNation at creation, then
-      // frozen. Absent when the competition had none. A player is overseas in
-      // this tournament when their country is not this.
+      // frozen. Absent when the competition had none, which counts as India.
+      // A player is overseas in this tournament when their country is not this.
       homeNation: 'India',
       /*
         AUTHORITATIVE FOR READS, MAINTAINED ON WRITE.
@@ -1818,7 +1818,13 @@ const dataModel = {
       auctionState: {
         // Ids, not display names. Every reference to a reference table in this
         // model is an id; the client renders the label from the table.
+        // One step of the league's batchSequence: { kind: 'auction', category,
+        // role } while bidding, or { kind: 'draft' } for the draft. Absent until
+        // the auctioneer picks the first batch; so is currentPlayerId.
+        // A current player with no round in currentAcceptedBids yet is
+        // "selected, not yet bidding".
         currentBatch: {
+          kind: 'auction',
           playerCategory: 'marquee',
           playerRole: 'batsman',
         },

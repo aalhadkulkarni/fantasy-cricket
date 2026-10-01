@@ -25,6 +25,7 @@ import type {
   TimelineMessageId,
   UserId,
 } from './ids.ts'
+import type { AuctionBatch } from './league.ts'
 import type {
   AuctionPhase,
   PlayerCategory,
@@ -54,26 +55,29 @@ export const ROUND_SECONDS = 30
 // ---------------------------------------------------------------------------
 
 /**
- * The batch currently being auctioned. Ids, not display names — the client
- * renders labels from the reference tables.
- */
-export interface CurrentBatch {
-  playerCategory: PlayerCategory
-  playerRole: PlayerRole
-}
-
-/**
- * Authoritative state, written only by the auctioneer's client.
+ * Authoritative state, written only by the auctioneer.
+ *
+ * **Most of it is absent at first.** The auction opens in `notStarted` with no
+ * batch and no player; a batch is chosen, then a player. A reader must treat
+ * each as optional rather than assume a player is always up.
+ *
+ * **The batch is an `AuctionBatch`**, one step of the league's batch
+ * sequence, so the draft — a batch of its own — is expressible: `kind: 'draft'`
+ * rather than a category and role.
+ *
+ * **A player is selected before bidding opens** ("Current player is X") and
+ * the round exists only once bidding starts. So `betweenPlayers` with a current
+ * player that has no round yet means "selected, not yet bidding".
  *
  * DERIVED: the countdown. Computed client-side against Firebase server time
- * from the deadline in `currentAcceptedBids`, never against the local clock.
+ * from the round's deadline, never against the local clock.
  */
 export interface AuctionState {
-  currentBatch: CurrentBatch
-  currentPlayerId: PlayerId
-  lastPlayerId: PlayerId
-
   phase: AuctionPhase
+
+  currentBatch?: AuctionBatch
+  currentPlayerId?: PlayerId
+  lastPlayerId?: PlayerId
 
   /** Whose turn it is during the draft. Absent outside the draft. */
   currentDraftManagerId?: UserId
@@ -214,11 +218,45 @@ export interface CurrentAcceptedBids {
 // ---------------------------------------------------------------------------
 
 /**
+ * **What each kind of event carries**, keyed by its id. Written from the
+ * catalogue's parameter names in `seed-data.ts`, with types the catalogue
+ * cannot express. The writer (Phase E) and every renderer share this, so the
+ * two cannot disagree about a field.
+ */
+export interface TimelineEventData {
+  auctionStarted: Record<string, never>
+  nextBatch: { playerCategory: PlayerCategory; playerRole: PlayerRole }
+  nextPlayer: { playerId: PlayerId; basePrice: number; timeLimit: number }
+  bid: { playerId: PlayerId; bid: number; managerId: UserId }
+  noBid: { playerId: PlayerId; managerId: UserId }
+  paused: Record<string, never>
+  auctionRestarted: Record<string, never>
+  auctionBeingRecovered: Record<string, never>
+  auctionRecovered: { rewindedRounds: number }
+  auctioneerChanged: { oldAuctioneerId: UserId; newAuctioneerId: UserId }
+  sold: { playerId: PlayerId; winningBid: number; managerId: UserId }
+  unsold: { playerId: PlayerId }
+  draftStarted: Record<string, never>
+  nextDraftManager: { managerId: UserId }
+  draftPick: { managerId: UserId; playerId: PlayerId; basePrice: number }
+  firstCall: { timeRemaining: number }
+  secondCall: { timeRemaining: number }
+  lastCall: { timeRemaining: number }
+  timeUp: Record<string, never>
+  timeIncreased: { timeAdded: number }
+  auctionEnded: Record<string, never>
+}
+
+/**
  * One thing that happened, at `liveAuctions/{leagueId}/timeline`.
  *
  * Stores an event id plus its data rather than a pre-written sentence, which is
  * what lets every client render its own wording and lets the countdown be a
  * live timer instead of a series of "20 seconds left" log lines.
+ *
+ * **A discriminated union on `timelineEventId`**: narrow on the id and the data
+ * is typed. An id this client does not know still arrives — an older page
+ * reading a newer auction — so a renderer must fall back rather than break.
  *
  * **DISPLAY ONLY. The timeline is written to and read for rendering, never
  * dispatched on.** No state change, no data change, no side effect hangs off an
@@ -230,20 +268,16 @@ export interface CurrentAcceptedBids {
  * remain without a `lastCall` entry telling it. Reacting to the entry rather
  * than the deadline puts the reaction out of step with the countdown sitting
  * beside it on screen.
- *
- * DERIVED: the rendered message. Look `timelineEventId` up in `timelineEvents`
- * and fill from `timelineEventData`.
- *
- * NOT MODELLED HERE: the shape of `timelineEventData` per event. The catalogue
- * lists parameter *names* only, so there is nothing to derive a per-event type
- * from. Making this a discriminated union would mean writing those shapes by
- * hand, which is worth doing when something actually renders the timeline.
  */
-export interface TimelineMessage {
-  timelineMessageId: TimelineMessageId
-  timelineEventId: TimelineEventId
-  timelineEventData: Record<string, unknown>
-}
+export type TimelineMessage = {
+  [Id in TimelineEventId]: {
+    timelineMessageId: TimelineMessageId
+    timelineEventId: Id
+    timelineEventData: TimelineEventData[Id]
+    /** When it was written, by the server's clock. Absent on older entries. */
+    timestamp?: number
+  }
+}[TimelineEventId]
 
 // ---------------------------------------------------------------------------
 // The runtime

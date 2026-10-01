@@ -15,6 +15,14 @@ import type { Format } from './reference.ts'
  * JOIN: `formatId` → `formats`, for the display name. The format is inherited
  * by every tournament under this competition rather than set on each one.
  */
+/**
+ * **The home nation when none is set** — on a base tournament, or on a
+ * tournament created before the field existed. India, because nearly every
+ * league this product runs is an Indian one. Applied where the home nation is
+ * read, never written into the data, so setting one later still wins.
+ */
+export const DEFAULT_HOME_NATION = 'India'
+
 export interface Competition {
   competitionId: CompetitionId
   competitionName: string
@@ -25,8 +33,7 @@ export interface Competition {
    * country is anything else counts as overseas in this competition's
    * tournaments.
    *
-   * **Absent means the competition has no notion of overseas**, which is right
-   * for an international series.
+   * **Absent means India** (`DEFAULT_HOME_NATION`), wherever it is read.
    *
    * **Copied onto each tournament at creation**, not read from here, so editing
    * it never changes who is overseas under a tournament already running.

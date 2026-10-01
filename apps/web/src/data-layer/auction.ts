@@ -19,6 +19,7 @@
  */
 
 import type {
+  AcceptedBidsForPlayer,
   AuctionManagerStatus,
   AuctionPoolPlayer,
   AuctionSettings,
@@ -26,15 +27,19 @@ import type {
   DraftOrderEntry,
   LeagueId,
   Player,
+  ManagerAuctionStatus,
   PlayerBiddingHistory,
   PlayerId,
+  PlayerStatus,
   TimelineMessage,
+  UserId,
 } from '@fantasy-cricket/shared'
 import { getApi } from './api'
 import {
   listenToChildrenAdded,
   listenToServerTimeOffset,
   listenToValue,
+  readValue,
 } from './firebase/realtime'
 import { notImplemented } from './not-implemented'
 import type {
@@ -123,11 +128,18 @@ export function getDraftOrder(leagueId: LeagueId): Promise<DraftOrderEntry[]> {
  * **Never fetched with the page.** The full history for every player is the
  * entire auction, so it is read one player at a time, when asked for.
  */
-export function getPlayerBiddingHistory(
+export async function getPlayerBiddingHistory(
   leagueId: LeagueId,
   playerId: PlayerId,
-): Promise<PlayerBiddingHistory> {
-  return notImplemented('getPlayerBiddingHistory', { leagueId, playerId })
+): Promise<PlayerBiddingHistory | undefined> {
+  // Straight from the database, like the rest of the live auction. Absent for
+  // a player nobody has bid on yet.
+  return readValue<PlayerBiddingHistory>([
+    'liveAuctions',
+    leagueId,
+    'playerWiseBiddingHistory',
+    playerId,
+  ])
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +203,75 @@ export function onAuctionStateChanged(
   return listenToValue<AuctionState>(
     ['liveAuctions', leagueId, 'auctionState'],
     callback,
+    onError,
+  )
+}
+
+/**
+ * **Every manager's budget and holdings**, live. Empty until the auction is
+ * started — the page fills the managers table from the league until then.
+ */
+export function onManagerStatusesChanged(
+  leagueId: LeagueId,
+  callback: Subscriber<Partial<Record<UserId, ManagerAuctionStatus>>>,
+  onError?: SubscriptionErrorHandler,
+): Unsubscribe {
+  return listenToValue<Partial<Record<UserId, ManagerAuctionStatus>>>(
+    ['liveAuctions', leagueId, 'managerStatus'],
+    (value) => callback(value ?? {}),
+    onError,
+  )
+}
+
+/**
+ * **What has become of each player** — sold, unsold or pending — live. A
+ * player with no entry has not gone up yet, which counts as remaining.
+ */
+export function onPlayerStatusesChanged(
+  leagueId: LeagueId,
+  callback: Subscriber<Partial<Record<PlayerId, PlayerStatus>>>,
+  onError?: SubscriptionErrorHandler,
+): Unsubscribe {
+  return listenToValue<Partial<Record<PlayerId, PlayerStatus>>>(
+    ['liveAuctions', leagueId, 'playerStatus'],
+    (value) => callback(value ?? {}),
+    onError,
+  )
+}
+
+/**
+ * **The current player's round, as the auctioneer accepted it**: the leading
+ * bid and who holds it, the asking price, the deadline, every accepted bid and
+ * pass. Keyed by player, so a page listens to the one that is up and moves
+ * when the next one goes up.
+ */
+export function onCurrentRoundChanged(
+  leagueId: LeagueId,
+  playerId: PlayerId,
+  callback: Subscriber<AcceptedBidsForPlayer | undefined>,
+  onError?: SubscriptionErrorHandler,
+): Unsubscribe {
+  return listenToValue<AcceptedBidsForPlayer>(
+    ['liveAuctions', leagueId, 'currentAcceptedBids', playerId],
+    callback,
+    onError,
+  )
+}
+
+/**
+ * **Who has passed on the current player**, as written by the managers
+ * themselves. Passing is irreversible for the round, so a manager's own entry
+ * is what tells their panel to say so.
+ */
+export function onSubmittedNoBids(
+  leagueId: LeagueId,
+  playerId: PlayerId,
+  callback: Subscriber<Partial<Record<UserId, true>>>,
+  onError?: SubscriptionErrorHandler,
+): Unsubscribe {
+  return listenToValue<Partial<Record<UserId, true>>>(
+    ['liveAuctions', leagueId, 'currentSubmittedBids', playerId, 'noBids'],
+    (value) => callback(value ?? {}),
     onError,
   )
 }

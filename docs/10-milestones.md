@@ -273,7 +273,7 @@ the whole app clicked through with the rules denying clients.
 
 ## Milestone 4 — the auction
 
-**Status: in progress.** Phases A (#74) and B (#75) merged. Phase C under way.
+**Status: in progress.** Phases A–C merged (#74, #75, #78), plus live reads (#79). Phase D under way.
 
 **Goal:** a live auction for an **official auction league**, end to end — from
 publishing the tournament that opens the league to managers picking an XI from
@@ -309,7 +309,8 @@ Recorded in the documents they belong to; listed here so a planner sees them
 together.
 
 - **Overseas** is a player's country not matching the tournament's
-  `homeNation`, copied from the competition at tournament creation. It replaced
+  `homeNation`, copied from the competition at tournament creation. **No home
+  nation counts as India.** It replaced
   a hardcoded India, which would have made the BBL unplayable.
 - **The draft order is assigned as managers join**, at random from the
   positions still free; unclaimed positions show as TBA. There is no "generate
@@ -352,6 +353,19 @@ together.
   standard auction rules, join deadline equal to the auction start. The start
   must be in the future and before the first match. The publisher owns it and
   is its auctioneer, but does not play unless they join.
+
+### Phase E must also
+
+- **Remove the auction fixtures** (`apps/web/src/components/auction/auction-fixtures.ts`
+  and the `?fixture=` branch in `auction-room.tsx`). Development-only fake data
+  for building Phase D; production builds already exclude it.
+- **Write the timeline in the typed shape** `TimelineEventData` in
+  `packages/shared/src/live-auction.ts` fixes, with a `timestamp`.
+- **Write `auctionState` in its Phase D shape**: `currentBatch` is an
+  `AuctionBatch` (`kind: 'draft'` for the draft); a selected player has no
+  round until bidding starts.
+- **Decide where a submitted draft pick lives.** The panel's Accept pick has no
+  data behind it yet.
 
 ### Open
 

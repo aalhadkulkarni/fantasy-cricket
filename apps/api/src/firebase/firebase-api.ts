@@ -111,6 +111,7 @@ import type {
 import {
   BID_INCREMENT,
   DataLayerError,
+  DEFAULT_HOME_NATION,
   FORMATS,
   PLAYER_CATEGORIES,
   PLAYER_ROLES,
@@ -4035,9 +4036,19 @@ export function createFirebaseApi(
         )
       }
 
-      const auctioneerName = await service.read<string>(
-        service.path('users', auctioneerId, 'userName'),
-      )
+      const [auctioneerName, tournamentId] = await Promise.all([
+        service.read<string>(service.path('users', auctioneerId, 'userName')),
+        service.read<TournamentId>(
+          service.path('leagues', leagueId, 'tournamentId'),
+        ),
+      ])
+      // India when the tournament names nobody — see DEFAULT_HOME_NATION.
+      const homeNation =
+        (tournamentId === undefined
+          ? undefined
+          : await service.read<string>(
+              service.path('tournaments', tournamentId, 'homeNation'),
+            )) ?? DEFAULT_HOME_NATION
 
       return {
         auctionStartTime,
@@ -4050,6 +4061,7 @@ export function createFirebaseApi(
           userId: auctioneerId,
           userName: auctioneerName ?? 'Unknown',
         },
+        homeNation,
         ...omitUndefined({
           maxOverseasPlayersAllowedInXI: maxOverseas,
           batchSequence,

@@ -27,8 +27,7 @@ Create and edit: **name, format, and an optional home nation.**
 **The home nation decides who is overseas** — IPL → India, BBL → Australia. A
 player whose country is not the home nation counts as overseas in that base
 tournament's tournaments, which matters for the auction league's overseas cap.
-**Leave it empty for an international competition**, where overseas means
-nothing.
+**Left empty, it counts as India.** There is no "no overseas" setting.
 
 > **It is copied onto each tournament when the tournament is created, and frozen
 > there.** Changing it later affects tournaments created afterwards, never one

@@ -355,8 +355,10 @@ tournament's `homeNation`.** There is no stored overseas flag.
 (IPL → India, BBL → Australia). It is **copied onto each tournament at
 creation and frozen there**, like its participants, so editing a competition
 never changes who is overseas in a tournament already running. **A tournament
-with no `homeNation` has no notion of overseas**, which is right for an
-international series.
+with no `homeNation` counts it as India** (`DEFAULT_HOME_NATION`, applied where
+it is read, never written). So there is no way to say "no overseas at all"; the
+user chose India as the default since nearly every league here is an Indian
+one.
 
 The overseas cap lives only in `auctionConfig`, as
 `maxOverseasPlayersAllowedInXI`. Regular leagues have no cap — that is

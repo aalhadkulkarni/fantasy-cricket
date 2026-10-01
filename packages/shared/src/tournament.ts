@@ -122,8 +122,8 @@ export interface Tournament {
   /**
    * Copied from the competition when the tournament is created, then frozen, so
    * editing the competition never shifts who is overseas mid-tournament.
-   * **Absent means no notion of overseas** — either the competition had none,
-   * or the tournament predates the field.
+   * **Absent means India** (`DEFAULT_HOME_NATION`) — either the competition had
+   * none, or the tournament predates the field.
    */
   homeNation?: string
 
