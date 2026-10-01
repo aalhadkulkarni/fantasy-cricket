@@ -41,6 +41,7 @@ import type {
   MatchConfig,
   MatchId,
   MatchLineup,
+  MatchPlayerPoints,
   MatchPlayers,
   OfficialLeagues,
   PeriodLeaderboard,
@@ -331,6 +332,15 @@ export function createHttpApi(
         leagueId,
         matchId,
       ]) as Promise<PlayerPoints>
+    },
+
+    getPlayerPointsForMatches(
+      leagueId: LeagueId,
+      matchIds: readonly MatchId[],
+    ): Promise<MatchPlayerPoints[]> {
+      return call('getPlayerPointsForMatches', [leagueId, matchIds]) as Promise<
+        MatchPlayerPoints[]
+      >
     },
 
     getPointsForMatch(

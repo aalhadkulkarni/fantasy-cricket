@@ -35,6 +35,7 @@ import type {
   Api,
   CreatePlayersResult,
   SamplePlayersResult,
+  MatchPlayerPoints,
   OfficialLeagues,
   SystemSetupResult,
 } from '@fantasy-cricket/shared'
@@ -234,6 +235,35 @@ export function createFirebaseApi(
    * around.
    */
   const OFFICIAL_AUCTION_LEAGUE_SLOTS = 6
+
+  /** A generous ceiling on one points read. See `getPlayerPointsForMatches`. */
+  const MAX_MATCHES_PER_POINTS_READ = 100
+
+  /**
+   * **Where this league's points for a match live**, decided once by its
+   * scoring flag. A custom-scoring league reads only its own store and never
+   * falls back to the standard one, per match or otherwise.
+   */
+  async function pointsPathFor(
+    leagueId: LeagueId,
+  ): Promise<(matchId: MatchId) => DbPath> {
+    const [isCustom, tournamentId] = await Promise.all([
+      service.read<boolean>(
+        service.path('leagues', leagueId, 'isCustomScoringSystem'),
+      ),
+      service.read<TournamentId>(
+        service.path('leagues', leagueId, 'tournamentId'),
+      ),
+    ])
+
+    if (isCustom === true) {
+      return (matchId) => paths.customPointsByMatch(leagueId, matchId)
+    }
+    if (tournamentId === undefined) {
+      throw new DataLayerError('notFound', 'That league no longer exists.')
+    }
+    return (matchId) => paths.standardPointsByMatch(tournamentId, matchId)
+  }
 
   /**
    * **What a participant with no standard auction values goes into a league's
@@ -3314,36 +3344,56 @@ export function createFirebaseApi(
      * caller reads as zero — the model treats zero and absent as the same
      * thing, and does not record why a player scored nothing.
      */
+    /**
+     * **One request, one decision about the store, then one read per match in
+     * parallel.** The league's scoring flag and tournament are read once
+     * rather than once per match.
+     *
+     * Read, open to any signed-in caller, like the single call: points are
+     * public, and nothing here says who fielded whom.
+     */
+    async getPlayerPointsForMatches(
+      leagueId: LeagueId,
+      matchIds: readonly MatchId[],
+    ): Promise<MatchPlayerPoints[]> {
+      // Validated as unknown: the arguments come off the wire, and the
+      // declared type is a hope rather than a guarantee.
+      const raw: unknown = matchIds
+      if (
+        !Array.isArray(raw) ||
+        raw.some((id: unknown) => typeof id !== 'string' || id === '')
+      ) {
+        throw new DataLayerError('invalid', 'Ask for a list of match ids.')
+      }
+      const ids = raw as MatchId[]
+
+      // A tournament is at most a few dozen matches. Anything far larger is a
+      // mistake, and would otherwise be a fan-out of reads on one request.
+      if (ids.length > MAX_MATCHES_PER_POINTS_READ) {
+        throw new DataLayerError(
+          'invalid',
+          `Ask for at most ${MAX_MATCHES_PER_POINTS_READ} matches at once.`,
+        )
+      }
+      if (ids.length === 0) return []
+
+      const pathFor = await pointsPathFor(leagueId)
+      const perMatch = await Promise.all(
+        ids.map((matchId) => service.read<PlayerPoints>(pathFor(matchId))),
+      )
+
+      return ids.map((matchId, i) => ({
+        matchId,
+        points: perMatch[i] ?? {},
+      }))
+    },
+
     async getPlayerPointsForMatch(
       leagueId: LeagueId,
       matchId: MatchId,
     ): Promise<PlayerPoints> {
-      const [isCustom, tournamentId] = await Promise.all([
-        service.read<boolean>(
-          service.path('leagues', leagueId, 'isCustomScoringSystem'),
-        ),
-        service.read<TournamentId>(
-          service.path('leagues', leagueId, 'tournamentId'),
-        ),
-      ])
-
-      if (isCustom === true) {
-        return (
-          (await service.read<PlayerPoints>(
-            paths.customPointsByMatch(leagueId, matchId),
-          )) ?? {}
-        )
-      }
-
-      if (tournamentId === undefined) {
-        throw new DataLayerError('notFound', 'That league no longer exists.')
-      }
-
-      return (
-        (await service.read<PlayerPoints>(
-          paths.standardPointsByMatch(tournamentId, matchId),
-        )) ?? {}
-      )
+      const pathFor = await pointsPathFor(leagueId)
+      return (await service.read<PlayerPoints>(pathFor(matchId))) ?? {}
     },
 
     /**

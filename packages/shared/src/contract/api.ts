@@ -112,6 +112,12 @@ export interface CreatePlayersResult {
   skipped: readonly string[]
 }
 
+/** One match's points, as `getPlayerPointsForMatches` returns them. */
+export interface MatchPlayerPoints {
+  matchId: MatchId
+  points: PlayerPoints
+}
+
 /**
  * Which official leagues to open alongside publishing a tournament.
  *
@@ -498,6 +504,22 @@ export interface Api {
     leagueId: LeagueId,
     matchId: MatchId,
   ): Promise<PlayerPoints>
+
+  /**
+   * **The same, for several matches in one call** — a gameweek's, typically.
+   * One entry per match asked for, **in the order asked**, so a gameweek's
+   * fixtures come back in fixture order. A match with no points has an empty
+   * map rather than no entry.
+   *
+   * Exists because a gameweek's total was being built from one request per
+   * match: five round trips for a five-match gameweek, and twelve for an IPL
+   * one. Resolution is the same as the single call — the league's scoring flag
+   * decides the store, once, for every match.
+   */
+  getPlayerPointsForMatches(
+    leagueId: LeagueId,
+    matchIds: readonly MatchId[],
+  ): Promise<MatchPlayerPoints[]>
 
   /**
    * **One manager's score for one match**: their eleven for it, each player's

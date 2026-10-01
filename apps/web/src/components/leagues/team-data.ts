@@ -4,7 +4,7 @@
  */
 
 import type { SavedTeam } from '@/components/leagues/changes-summary'
-import { getPlayerPointsForMatch } from '@/data-layer'
+import { getPlayerPointsForMatches } from '@/data-layer'
 import type {
   GameWeekLineup,
   LeagueId,
@@ -12,6 +12,7 @@ import type {
   Match,
   MatchId,
   MatchLineup,
+  MatchPlayerPoints,
   PlayerId,
   PlayerPoints,
   Team,
@@ -49,7 +50,7 @@ export function toSaved(
 export interface PeriodPoints {
   total: PlayerPoints
   /** In the order the matches were asked for, which is fixture order. */
-  byMatch: { matchId: MatchId; points: PlayerPoints }[]
+  byMatch: MatchPlayerPoints[]
 }
 
 /**
@@ -61,29 +62,23 @@ export interface PeriodPoints {
  * table cannot fit a phone without a scroll. The breakdown costs no extra
  * reads: the per-match figures are what the total is summed from. A
  * match-based league passes one match and gets it back unchanged.
+ *
+ * **One request for the whole period**, however many matches it holds.
  */
 export async function gameWeekPoints(
   leagueId: LeagueId,
   matchIds: readonly MatchId[],
 ): Promise<PeriodPoints> {
-  const perMatch = await Promise.all(
-    matchIds.map((matchId) => getPlayerPointsForMatch(leagueId, matchId)),
-  )
+  const byMatch = await getPlayerPointsForMatches(leagueId, matchIds)
 
   const total: PlayerPoints = {}
-  for (const scores of perMatch) {
-    for (const [playerId, value] of Object.entries(scores)) {
+  for (const { points } of byMatch) {
+    for (const [playerId, value] of Object.entries(points)) {
       total[playerId as PlayerId] = (total[playerId as PlayerId] ?? 0) + value
     }
   }
 
-  return {
-    total,
-    byMatch: matchIds.map((matchId, i) => ({
-      matchId,
-      points: perMatch[i] ?? {},
-    })),
-  }
+  return { total, byMatch }
 }
 
 /** "M2 · IND v AUS", the label a match goes by in a breakdown. */
