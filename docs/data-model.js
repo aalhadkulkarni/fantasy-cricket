@@ -1020,18 +1020,26 @@ const dataModel = {
         },
         draftOrder: {
           /*
-            ASSIGNED ON JOIN, not generated at the auction's start: each manager
-            takes a random position nobody holds yet as they join, so the order
-            is known before any bidding. Positions nobody holds are shown as
-            TBA. How two simultaneous joins are kept from taking the same
-            position is still open — see docs/10-milestones.md.
+            POSITION → MANAGER, and ASSIGNED ON JOIN rather than generated at
+            the auction's start: each manager takes a random position nobody
+            holds yet as they join, so the order is known before any bidding.
+            Positions nobody holds are absent and shown as TBA.
+
+            RESOLVED (Milestone 4): each position is CLAIMED TRANSACTIONALLY,
+            the same way a join code is, so two simultaneous joins can never
+            hold one position — the loser's claim does not commit and it tries
+            the next free one. Keyed by position precisely so that there is a
+            single path to claim.
+
+            Beware: RTDB returns a map with small integer keys as an ARRAY,
+            with holes where positions are free. Readers accept both shapes.
           */
-          user003: 1,
-          user004: 5,
-          user005: 3,
-          user006: 2,
-          user007: 6,
-          user008: 4,
+          1: 'user003',
+          2: 'user006',
+          3: 'user005',
+          // 4 not yet claimed — shown as TBA
+          5: 'user004',
+          6: 'user007',
         },
         auctionStartTime: 1806345000000,
         /*

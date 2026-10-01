@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { EditorCard } from '@/components/admin/editor-card'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -36,6 +37,10 @@ export function TournamentPublish({
 
   const [matchBased, setMatchBased] = useState(!published)
   const [gameWeekBased, setGameWeekBased] = useState(!published)
+  // Unticked by default: an auction is an explicit opt-in, not a baseline.
+  const [auction, setAuction] = useState(false)
+  /* As the input holds it, "2026-12-20T19:30", in the admin's own time zone. */
+  const [auctionStart, setAuctionStart] = useState('')
   /* No preselection: a length is a decision about the league, and "the whole
      round" was the accidental default this replaced. */
   const [lengths, setLengths] = useState<Partial<Record<RoundId, number>>>({})
@@ -49,12 +54,17 @@ export function TournamentPublish({
 
   const existing = Object.keys(tournament.leagues ?? {}).length
 
-  const wantsLeague = matchBased || gameWeekBased
+  const wantsLeague = matchBased || gameWeekBased || auction
 
+  // An auction league is gameweek-based too, so it needs the same lengths.
+  const needsLengths = gameWeekBased || auction
   const rounds = roundSpans(tournament)
   const lengthsMissing =
-    gameWeekBased &&
-    rounds.some((round) => lengths[round.roundId] === undefined)
+    needsLengths && rounds.some((round) => lengths[round.roundId] === undefined)
+
+  const auctionStartTime =
+    auctionStart === '' ? undefined : new Date(auctionStart).getTime()
+  const startMissing = auction && auctionStartTime === undefined
 
   // The gate is enforced in the data layer. Disabling here is convenience, and
   // saying why is the part that matters. Once published there is nothing left
@@ -63,7 +73,8 @@ export function TournamentPublish({
     dated > 0 &&
     status !== 'saving' &&
     (!published || wantsLeague) &&
-    !lengthsMissing
+    !lengthsMissing &&
+    !startMissing
 
   async function publish() {
     setStatus('saving')
@@ -72,7 +83,10 @@ export function TournamentPublish({
       await publishTournament(tournament.tournamentId, {
         matchBased,
         gameWeekBased,
-        ...(gameWeekBased ? { gameWeekLengths: lengths } : {}),
+        ...(needsLengths ? { gameWeekLengths: lengths } : {}),
+        ...(auction && auctionStartTime !== undefined
+          ? { auction: { auctionStartTime } }
+          : {}),
       })
       onPublished()
     } catch (e) {
@@ -115,12 +129,42 @@ export function TournamentPublish({
           Official game week based league
         </label>
 
+        <label className="flex items-center gap-2.5 text-sm">
+          <Checkbox
+            checked={auction}
+            onCheckedChange={(checked) => setAuction(checked === true)}
+          />
+          Official auction league
+        </label>
+
+        {/*
+          Checked in the service too: in the future, and before the first
+          match, since squads have to be won before teams can be picked.
+        */}
+        {auction && (
+          <div className="grid gap-2 rounded-md border p-3">
+            <Label htmlFor="auction-start">Auction starts</Label>
+            <Input
+              id="auction-start"
+              type="datetime-local"
+              value={auctionStart}
+              onChange={(e) => setAuctionStart(e.target.value)}
+              className="w-full sm:w-64"
+            />
+            <p className="text-xs text-subtle-foreground">
+              Six managers, standard auction rules, and joining closes when the
+              auction starts. You run it as the auctioneer. Players without
+              auction values go in as General at 2.
+            </p>
+          </div>
+        )}
+
         {/*
           One choice per round, serving every gameweek league this publish
           opens. Only divisors are offered, since gameweeks are equal length
           within a round; the service refuses anything else regardless.
         */}
-        {gameWeekBased && (
+        {needsLengths && (
           <div className="mt-1 grid gap-3 rounded-md border p-3">
             <p className="text-xs text-muted-foreground">
               Matches per gameweek, for each round. A one-match gameweek has no
@@ -177,9 +221,9 @@ export function TournamentPublish({
         */}
         {wantsLeague && (
           <p className="text-xs text-subtle-foreground">
-            Public, standard points, no auction, up to 200 managers. You own and
-            administer them but do not play them — join like anyone else to pick
-            a team.
+            Public and standard points. The match and gameweek leagues take up
+            to 200 managers. You own and administer every league but do not play
+            — join like anyone else to pick a team.
           </p>
         )}
       </fieldset>
@@ -196,6 +240,11 @@ export function TournamentPublish({
         {dated === 0 && (
           <span className="text-sm text-subtle-foreground">
             At least the first match needs a start time.
+          </span>
+        )}
+        {dated > 0 && startMissing && (
+          <span className="text-sm text-subtle-foreground">
+            Choose when the auction starts.
           </span>
         )}
         {dated > 0 && lengthsMissing && (
