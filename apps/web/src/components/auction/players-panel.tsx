@@ -185,15 +185,12 @@ function HistoryDialog({
   teamName: (userId: string) => string
   onClose: () => void
 }) {
-  const fixture = useAuction((s) => s.fixture)
   const [history, setHistory] = useState<
     PlayerBiddingHistory | null | undefined
   >(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
 
   useEffect(() => {
-    // Fake data has no history behind it to read.
-    if (fixture !== undefined) return
     let cancelled = false
     void (async () => {
       try {
@@ -209,7 +206,7 @@ function HistoryDialog({
     return () => {
       cancelled = true
     }
-  }, [leagueId, entry.player.playerId, fixture])
+  }, [leagueId, entry.player.playerId])
 
   const bids = Object.values(history?.bids ?? {}).sort(
     (a, b) => a.bidNumber - b.bidNumber,
@@ -226,11 +223,7 @@ function HistoryDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {fixture !== undefined ? (
-          <p className="text-sm text-subtle-foreground">
-            Bid history isn&apos;t available with fake data.
-          </p>
-        ) : error !== undefined ? (
+        {error !== undefined ? (
           <div className="text-sm">
             <p className="font-semibold text-destructive">
               Could not load the bidding

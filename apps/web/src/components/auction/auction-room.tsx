@@ -1,5 +1,4 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { useSearchParams } from 'react-router'
 
 import { useAuth } from '@/auth/auth-context'
 import { PageTab, PageTabsList } from '@/components/page-tabs'
@@ -41,18 +40,12 @@ import { TimelinePanel } from './timeline-panel'
  * current auctioneer also gets the control panel, and a manager the bid panel
  * — both, for an auctioneer who also plays. Decided by who holds the role now,
  * so a handover changes what renders.
- *
- * In development, `?fixture=<scenario>&as=<viewer>` shows fake data instead of
- * listening. See `auction-fixtures.ts`.
  */
 export function AuctionRoom({ league }: { league: LeagueSummary }) {
   const [store] = useState(createAuctionStore)
   const auth = useAuth()
   const userId =
     auth.state.status === 'signedIn' ? auth.state.userId : undefined
-  const [params] = useSearchParams()
-  const fixture = params.get('fixture')
-  const as = params.get('as') ?? 'spectator'
 
   const [loadToken, setLoadToken] = useState(0)
 
@@ -73,17 +66,6 @@ export function AuctionRoom({ league }: { league: LeagueSummary }) {
         if (cancelled) return
         const data = { league, settings, pool, members, draftOrder, rules }
 
-        // Dead code in a production build: the fixture module never ships.
-        if (import.meta.env.DEV && fixture !== null) {
-          const { buildFixture, isFixtureScenario } =
-            await import('./auction-fixtures')
-          if (cancelled) return
-          if (isFixtureScenario(fixture)) {
-            store.setState(buildFixture(fixture, as, data))
-            return
-          }
-        }
-
         store.setState({ static: data, viewer: viewerFor(data, userId) })
         stop = startLiveFeed(store, league.leagueId)
       } catch (e) {
@@ -99,7 +81,7 @@ export function AuctionRoom({ league }: { league: LeagueSummary }) {
       cancelled = true
       stop?.()
     }
-  }, [store, league, userId, fixture, as, loadToken])
+  }, [store, league, userId, loadToken])
 
   return (
     <AuctionStoreContext.Provider value={store}>
@@ -157,7 +139,6 @@ function Room({
  */
 function Header({ league }: { league: LeagueSummary }) {
   const liveError = useAuction((s) => s.liveError)
-  const fixture = useAuction((s) => s.fixture)
 
   return (
     <header>
@@ -168,11 +149,6 @@ function Header({ league }: { league: LeagueSummary }) {
         </span>
       </h1>
 
-      {fixture !== undefined && (
-        <p className="mt-2 rounded-md border border-dashed px-3 py-1.5 font-mono text-xs text-muted-foreground">
-          Fake data: {fixture}
-        </p>
-      )}
       {liveError !== undefined && (
         <p
           role="alert"

@@ -12,7 +12,7 @@
  * select the stored value and derive with `useMemo`.
  *
  * Fed from outside React: the live subscriptions write into it directly (see
- * `startLiveFeed`), as does the dev-only fixture loader.
+ * `startLiveFeed`).
  */
 
 import { createContext, useContext } from 'react'
@@ -83,8 +83,6 @@ export interface AuctionStoreState {
 
   /** A live listener failed. The page says updates have stopped. */
   liveError: string | undefined
-  /** Set while showing fake data, so the page can say so. */
-  fixture: string | undefined
 }
 
 export type AuctionStore = StoreApi<AuctionStoreState>
@@ -102,7 +100,6 @@ export function createAuctionStore(): AuctionStore {
     timeline: [],
     serverOffset: 0,
     liveError: undefined,
-    fixture: undefined,
   }))
 }
 
