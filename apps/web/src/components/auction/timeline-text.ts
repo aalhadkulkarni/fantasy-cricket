@@ -61,9 +61,11 @@ export function timelineText(
       return 'The auctioneer has changed'
     case 'sold': {
       const { playerId, managerId, winningBid } = message.timelineEventData
-      return `${words.playerName(playerId)} sold to ${
-        managerId === words.viewerId ? 'you' : words.teamName(managerId)
-      } for ${price(winningBid)}`
+      // Always the team name, even for the buyer: their row is highlighted
+      // instead, which reads better than "sold to you".
+      return `${words.playerName(playerId)} sold to ${words.teamName(
+        managerId,
+      )} for ${price(winningBid)}`
     }
     case 'unsold':
       return `${words.playerName(message.timelineEventData.playerId)} unsold`
@@ -96,4 +98,16 @@ export function timelineText(
       // rather than break the list.
       return 'Something happened in the auction'
   }
+}
+
+/** A sale to the viewer, which the timeline highlights. */
+export function isViewersPurchase(
+  message: TimelineMessage,
+  viewerId: UserId | undefined,
+): boolean {
+  return (
+    viewerId !== undefined &&
+    message.timelineEventId === 'sold' &&
+    message.timelineEventData.managerId === viewerId
+  )
 }

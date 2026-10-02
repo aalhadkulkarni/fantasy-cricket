@@ -3,49 +3,38 @@
  *
  * **Only the current auctioneer may call any of it**, and control is derived
  * from who holds the role at that moment, so a handover is a data change rather
- * than a navigation problem. Enforced here; the control panel not rendering is
- * convenience.
+ * than a navigation problem. Checked in the service; the control panel not
+ * rendering is convenience.
  *
- * Separated from `auction.ts` because the read/write split is what makes the
- * auction safe without transactions. Bidders write only their own bid; the
- * auctioneer's client is the sole writer of everything below.
+ * **The auctioneer's browser is the sole processor of the auction**: it
+ * listens to what managers submit, judges each bid against the round it holds
+ * in memory, and accepts it through here, one at a time. Every write still
+ * goes through the service, which checks again.
  */
 
 import type {
+  AuctionCall,
   LeagueId,
-  PlayerCategory,
-  PlayerRole,
   PlayerId,
   UserId,
 } from '@fantasy-cricket/shared'
+
+import { getApi } from './api'
 import { notImplemented } from './not-implemented'
-import type {
-  Subscriber,
-  SubscriptionErrorHandler,
-  Unsubscribe,
-} from '@fantasy-cricket/shared'
 
 // ---------------------------------------------------------------------------
 // Opening and closing
 // ---------------------------------------------------------------------------
 
 /**
- * **The only thing that creates `liveAuctions/{leagueId}`.** Before this the
- * node does not exist, and its absence is the normal pre-auction state.
+ * **The only thing that creates `liveAuctions/{leagueId}`.** Every manager
+ * starts on the full budget, and joining closes.
  *
- * The phase it opens in is `notStarted`, which means the room is open and the
- * first player is not yet up — not "scheduled for next week".
+ * It opens in `notStarted`: the room is open and no player is up yet — not
+ * "scheduled for next week".
  */
 export function startAuction(leagueId: LeagueId): Promise<void> {
-  return notImplemented('startAuction', { leagueId })
-}
-
-/**
- * Randomly generated, and **done before any bidding** because a manager's
- * strategy depends on where they sit in the draft.
- */
-export function generateDraftOrder(leagueId: LeagueId): Promise<void> {
-  return notImplemented('generateDraftOrder', { leagueId })
+  return getApi().startAuction(leagueId)
 }
 
 /**
@@ -59,24 +48,27 @@ export function endAuction(leagueId: LeagueId): Promise<void> {
 // Choosing what is up
 // ---------------------------------------------------------------------------
 
-/** **Ids, not display names**, matching how the current batch is stored. */
-export function selectBatch(
-  leagueId: LeagueId,
-  playerCategory: PlayerCategory,
-  playerRole: PlayerRole,
-): Promise<void> {
-  return notImplemented('selectBatch', { leagueId, playerCategory, playerRole })
+/** The next batch in the league's sequence. **In order only**, so no choice. */
+export function nextBatch(leagueId: LeagueId): Promise<void> {
+  return getApi().nextBatch(leagueId)
 }
 
-export function selectPlayer(
+/** A player from the current batch, before bidding opens. */
+export function putUpPlayer(
   leagueId: LeagueId,
   playerId: PlayerId,
 ): Promise<void> {
-  return notImplemented('selectPlayer', { leagueId, playerId })
+  return getApi().putUpPlayer(leagueId, playerId)
 }
 
-export function selectRandomPlayerFromBatch(leagueId: LeagueId): Promise<void> {
-  return notImplemented('selectRandomPlayerFromBatch', { leagueId })
+/** The same, drawn at random from those left in the batch. */
+export function putUpRandomPlayer(leagueId: LeagueId): Promise<void> {
+  return getApi().putUpRandomPlayer(leagueId)
+}
+
+/** Opens bidding at base price, with the thirty-second clock running. */
+export function startBidding(leagueId: LeagueId): Promise<void> {
+  return getApi().startBidding(leagueId)
 }
 
 // ---------------------------------------------------------------------------
@@ -84,8 +76,8 @@ export function selectRandomPlayerFromBatch(leagueId: LeagueId): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * The auctioneer validates an incoming bid against the current asking price and
- * the deadline, then accepts it or ignores it.
+ * Accepts one submitted bid. The browser has already judged it against the
+ * asking price and the deadline; the service checks again before writing.
  *
  * **Rejection is silence.** There is no reject call — an invalid bid is simply
  * not accepted.
@@ -96,12 +88,7 @@ export function acceptBid(
   managerId: UserId,
   amount: number,
 ): Promise<void> {
-  return notImplemented('acceptBid', {
-    leagueId,
-    playerId,
-    managerId,
-    amount,
-  })
+  return getApi().acceptBid(leagueId, playerId, managerId, amount)
 }
 
 export function acceptNoBid(
@@ -109,39 +96,60 @@ export function acceptNoBid(
   playerId: PlayerId,
   managerId: UserId,
 ): Promise<void> {
-  return notImplemented('acceptNoBid', { leagueId, playerId, managerId })
+  return getApi().acceptNoBid(leagueId, playerId, managerId)
+}
+
+/** A first, second or last call onto the timeline. Changes no state. */
+export function announceCall(
+  leagueId: LeagueId,
+  call: AuctionCall,
+): Promise<void> {
+  return getApi().announceCall(leagueId, call)
+}
+
+/** Closes bidding once the clock has run out. Selling stays manual. */
+export function markTimeUp(leagueId: LeagueId): Promise<void> {
+  return getApi().markTimeUp(leagueId)
 }
 
 /**
  * **Manual, deliberately.** The system does not auto-resolve on timeout, so the
  * auctioneer can make allowances for someone with connection trouble.
  *
- * **One atomic write** across bid history, the buyer's squad and their budget.
- * The squad is written here, on every sale, rather than materialised when the
- * auction ends — which is what makes squads correct at every point during it.
+ * Sells to the leader at the leading bid, both read by the service. **One
+ * atomic write** across bid history, the buyer's budget and their squad for
+ * every match — written on every sale, so squads are right throughout.
  *
  * **The auction does not prevent an illegal squad.** A manager may buy ten
  * batsmen. The consequence lands later, when they cannot field a legal XI.
  */
-export function sellPlayer(
+export function sellPlayer(leagueId: LeagueId): Promise<void> {
+  return getApi().sellPlayer(leagueId)
+}
+
+/**
+ * **A last resort**, for when something has broken: sell to a chosen manager at
+ * a chosen price. The bidding so far is kept.
+ */
+export function sellPlayerManually(
   leagueId: LeagueId,
-  playerId: PlayerId,
   managerId: UserId,
   amount: number,
 ): Promise<void> {
-  return notImplemented('sellPlayer', {
-    leagueId,
-    playerId,
-    managerId,
-    amount,
-  })
+  return getApi().sellPlayerManually(leagueId, managerId, amount)
 }
 
-export function markPlayerUnsold(
-  leagueId: LeagueId,
-  playerId: PlayerId,
-): Promise<void> {
-  return notImplemented('markPlayerUnsold', { leagueId, playerId })
+export function markPlayerUnsold(leagueId: LeagueId): Promise<void> {
+  return getApi().markPlayerUnsold(leagueId)
+}
+
+/**
+ * **Back to before Start auction**, for testing. The live auction, the squads
+ * and anything built on them go; members and the draft order stay. Refused in
+ * production.
+ */
+export function resetAuction(leagueId: LeagueId): Promise<void> {
+  return getApi().resetAuction(leagueId)
 }
 
 /** Freezes the timer. It resets on resume rather than continuing. */
@@ -162,13 +170,8 @@ export function addTimeToCurrentRound(
 }
 
 /**
- * Undoes a sale or an unsold result, restoring budgets and squad membership and
- * rewriting that player's bid subtree entirely.
- *
- * **Gated behind the `recovering` phase**, which the auctioneer enters
- * deliberately, so a rewind cannot fire mid-round by accident. What enters and
- * leaves that phase, how far back a rewind may go, and who may do either are
- * **deferred to implementation** and not settled here.
+ * Undoes the last round's result, restoring budgets and squad membership.
+ * **Only inside recovery**, which the auctioneer starts and ends deliberately.
  */
 export function rewindLastRound(leagueId: LeagueId): Promise<void> {
   return notImplemented('rewindLastRound', { leagueId })
@@ -203,54 +206,15 @@ export function acceptDraftPick(
 // ---------------------------------------------------------------------------
 
 /**
- * Takes effect immediately and revokes the previous auctioneer's control. The
- * owner may also reassign at any time, including mid-auction.
+ * Always to the backup, and takes effect immediately. **One atomic write**
+ * covering the auctioneer roles on the membership records and
+ * `primaryAuctioneer` on the auction config — the two must never disagree.
  *
- * **One atomic multi-path write** covering both the auctioneer roles on the
- * membership records and `primaryAuctioneer` on the auction config. That
- * duplication is deliberate, so showing who the auctioneer is costs one field
- * read rather than a scan of every member's roles — and the two must never be
- * written separately.
- *
- * Presence detection and automatic failover are Phase 2. For now, if an
- * auctioneer goes silent, an admin reassigns manually.
+ * Not in Milestone 4: the official league has no backup.
  */
 export function handOffAuctioneerRole(
   leagueId: LeagueId,
   targetUserId: UserId,
 ): Promise<void> {
   return notImplemented('handOffAuctioneerRole', { leagueId, targetUserId })
-}
-
-// ---------------------------------------------------------------------------
-// Subscriptions
-// ---------------------------------------------------------------------------
-
-/** The auctioneer's client validates each of these, then accepts or ignores it. */
-export function onBidSubmitted(
-  leagueId: LeagueId,
-  callback: Subscriber<{
-    playerId: PlayerId
-    managerId: UserId
-    amount: number
-  }>,
-  onError?: SubscriptionErrorHandler,
-): Unsubscribe {
-  return notImplemented('onBidSubmitted', { leagueId, callback, onError })
-}
-
-export function onNoBidSubmitted(
-  leagueId: LeagueId,
-  callback: Subscriber<{ playerId: PlayerId; managerId: UserId }>,
-  onError?: SubscriptionErrorHandler,
-): Unsubscribe {
-  return notImplemented('onNoBidSubmitted', { leagueId, callback, onError })
-}
-
-export function onDraftPickSubmitted(
-  leagueId: LeagueId,
-  callback: Subscriber<{ playerId: PlayerId; managerId: UserId }>,
-  onError?: SubscriptionErrorHandler,
-): Unsubscribe {
-  return notImplemented('onDraftPickSubmitted', { leagueId, callback, onError })
 }

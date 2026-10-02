@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 
 import { useAuction, useAuctionStatic } from './auction-store'
-import { timelineText } from './timeline-text'
+import { isViewersPurchase, timelineText } from './timeline-text'
 
 /**
  * **What has happened, newest first.** Each entry is worded for the reader —
@@ -48,7 +48,11 @@ export function TimelinePanel() {
       {newestFirst.map((message) => (
         <li
           key={message.timelineMessageId}
-          className="flex items-baseline justify-between gap-3 py-2"
+          className={
+            isViewersPurchase(message, viewerId)
+              ? '-mx-2 flex items-baseline justify-between gap-3 rounded-sm bg-primary/10 px-2 py-2'
+              : 'flex items-baseline justify-between gap-3 py-2'
+          }
         >
           <span className="text-sm">{timelineText(message, words)}</span>
           {message.timestamp !== undefined && (

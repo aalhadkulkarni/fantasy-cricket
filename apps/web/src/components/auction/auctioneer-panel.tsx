@@ -10,6 +10,17 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { resolveEnvironment } from '@/config/environments'
+import {
+  markPlayerUnsold,
+  nextBatch as moveToNextBatch,
+  putUpPlayer,
+  putUpRandomPlayer,
+  resetAuction,
+  sellPlayer,
+  sellPlayerManually,
+  startAuction,
+  startBidding,
+} from '@/data-layer'
 import type { AuctionBatch, PlayerId, UserId } from '@fantasy-cricket/shared'
 
 import {
@@ -31,8 +42,12 @@ import { OverseasMark } from './overseas-mark'
  * while bidding; the draft's controls in the draft; rewind only inside
  * recovery. Batches step through the league's sequence **in order only**.
  *
- * NOT WIRED YET. Phase E onwards makes each one act; until then a click says
- * so and changes nothing.
+ * **Live from Phase E**: start, the next batch, putting a player up, opening
+ * bidding, selling and unsold, and the testing-only reset. Pause, extra time,
+ * the draft, recovery and ending come in later phases and say so when clicked.
+ *
+ * Bids are not accepted here by hand: the bid processor running in this same
+ * browser does that, one at a time. Its refusals from the service show below.
  */
 export function AuctioneerPanel() {
   const data = useAuctionStatic()
@@ -41,9 +56,32 @@ export function AuctioneerPanel() {
   const statuses = useAuction((s) => s.players)
   const managerStatuses = useAuction((s) => s.managers)
 
+  const leagueId = data.league.leagueId
+  const processorError = useAuction((s) => s.processorError)
+
   const [note, setNote] = useState<string | undefined>(undefined)
   const tried = (what: string) => () =>
-    setNote(`${what} isn't wired yet — it comes with the auction actions.`)
+    setNote(`${what} comes in a later phase.`)
+
+  /*
+    One action at a time from this panel: the button pressed shows it is
+    working, every control waits, and a refusal from the service is shown
+    rather than swallowed.
+  */
+  const [busy, setBusy] = useState<string | undefined>(undefined)
+  const [failure, setFailure] = useState<string | undefined>(undefined)
+  const act = (label: string, run: () => Promise<void>) => () => {
+    setBusy(label)
+    setFailure(undefined)
+    setNote(undefined)
+    void run()
+      .catch((e: unknown) =>
+        setFailure(e instanceof Error ? e.message : String(e)),
+      )
+      .finally(() => setBusy(undefined))
+  }
+  const working = busy !== undefined
+  const [resetArmed, setResetArmed] = useState(false)
 
   const pool = useMemo(() => indexPool(data.pool), [data.pool])
   const lists = useMemo(
@@ -99,7 +137,12 @@ export function AuctioneerPanel() {
       <div className="mt-4 grid gap-3">
         {moment === 'notStarted' && (
           <Actions>
-            <Button onClick={tried('Start auction')}>Start auction</Button>
+            <Button
+              onClick={act('start', () => startAuction(leagueId))}
+              disabled={working}
+            >
+              {busy === 'start' ? 'Starting…' : 'Start auction'}
+            </Button>
           </Actions>
         )}
 
@@ -109,14 +152,17 @@ export function AuctioneerPanel() {
           <>
             {batch !== undefined && batch.kind === 'auction' && (
               <PickPlayer
+                disabled={working}
+                onSelect={(playerId) =>
+                  act('put up', () => putUpPlayer(leagueId, playerId))()
+                }
+                onRandom={act('random', () => putUpRandomPlayer(leagueId))}
                 homeNation={data.settings.homeNation}
                 players={inBatch.map((entry) => ({
                   id: entry.player.playerId,
                   country: entry.player.country,
                   label: `${entry.player.playerName} · ${price(entry.playerBasePrice)}`,
                 }))}
-                onSelect={tried('Selecting a player')}
-                onRandom={tried('Picking at random')}
               />
             )}
             <Actions>
@@ -127,9 +173,23 @@ export function AuctioneerPanel() {
                     : 'Every batch in the order has been reached.'}
                 </p>
               ) : (
-                <Button variant="outline" onClick={tried('Next batch')}>
-                  Next batch: {batchName(nextBatch)}
-                </Button>
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={act('batch', () => moveToNextBatch(leagueId))}
+                    disabled={working || inBatch.length > 0}
+                  >
+                    Next batch: {batchName(nextBatch)}
+                  </Button>
+                  {/* Every player in a batch goes up before the next one. */}
+                  {inBatch.length > 0 && (
+                    <p className="self-center text-xs text-subtle-foreground">
+                      {inBatch.length}{' '}
+                      {inBatch.length === 1 ? 'player' : 'players'} left in this
+                      batch
+                    </p>
+                  )}
+                </>
               )}
             </Actions>
           </>
@@ -137,7 +197,12 @@ export function AuctioneerPanel() {
 
         {moment === 'selected' && (
           <Actions>
-            <Button onClick={tried('Start bidding')}>Start bidding</Button>
+            <Button
+              onClick={act('bidding', () => startBidding(leagueId))}
+              disabled={working}
+            >
+              {busy === 'bidding' ? 'Opening…' : 'Start bidding'}
+            </Button>
           </Actions>
         )}
 
@@ -145,14 +210,18 @@ export function AuctioneerPanel() {
           <>
             <Actions>
               <Button
-                onClick={tried('Selling')}
-                disabled={round?.currentLeadingBid === undefined}
+                onClick={act('sell', () => sellPlayer(leagueId))}
+                disabled={working || round?.currentLeadingBid === undefined}
               >
                 {round?.currentLeadingBid === undefined
                   ? 'Sell (no bids yet)'
                   : `Sell to ${leaderName} for ${price(round.currentLeadingBid)}`}
               </Button>
-              <Button variant="outline" onClick={tried('Marking unsold')}>
+              <Button
+                variant="outline"
+                onClick={act('unsold', () => markPlayerUnsold(leagueId))}
+                disabled={working}
+              >
                 Mark unsold
               </Button>
               {moment === 'bidding' && (
@@ -171,7 +240,12 @@ export function AuctioneerPanel() {
                 id: m.userId,
                 label: m.teamName,
               }))}
-              onSell={tried('Manual sell')}
+              disabled={working}
+              onSell={(managerId, amount) =>
+                act('manual', () =>
+                  sellPlayerManually(leagueId, managerId, amount),
+                )()
+              }
             />
           </>
         )}
@@ -231,13 +305,57 @@ export function AuctioneerPanel() {
               <Button variant="outline" onClick={tried('Ending the auction')}>
                 End auction
               </Button>
-              {canReset && (
-                <Button
-                  variant="destructive"
-                  onClick={tried('Resetting the auction')}
-                >
-                  Reset auction (testing only)
-                </Button>
+            </div>
+          </details>
+        )}
+
+        {/*
+          Testing only, and in any phase once the auction exists — including
+          recovery and after it has ended, which is when a fresh start is most
+          wanted. Two taps, since it deletes the whole auction.
+        */}
+        {canReset && moment !== 'notStarted' && (
+          <details className="rounded-md border border-destructive/40 px-3 py-2 text-sm">
+            <summary className="cursor-pointer font-medium text-muted-foreground">
+              Testing
+            </summary>
+            <div className="mt-3 grid gap-2.5">
+              {resetArmed ? (
+                <>
+                  <p className="text-sm text-destructive">
+                    Deletes this auction, every squad it filled and any lineups
+                    built on them. Managers and the draft order stay.
+                  </p>
+                  <div className="flex flex-wrap gap-2.5">
+                    <Button
+                      variant="destructive"
+                      onClick={act('reset', async () => {
+                        setResetArmed(false)
+                        await resetAuction(leagueId)
+                      })}
+                      disabled={working}
+                    >
+                      {busy === 'reset' ? 'Resetting…' : 'Reset now'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => setResetArmed(false)}
+                      disabled={working}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <Button
+                    variant="destructive"
+                    onClick={() => setResetArmed(true)}
+                    disabled={working}
+                  >
+                    Reset auction
+                  </Button>
+                </div>
               )}
             </div>
           </details>
@@ -245,6 +363,16 @@ export function AuctioneerPanel() {
 
         {note !== undefined && (
           <p className="text-xs text-subtle-foreground">{note}</p>
+        )}
+        {failure !== undefined && (
+          <p role="alert" className="text-sm text-destructive">
+            {failure}
+          </p>
+        )}
+        {processorError !== undefined && (
+          <p className="text-xs text-muted-foreground">
+            Last bid not accepted: {processorError}
+          </p>
         )}
       </div>
     </section>
@@ -259,12 +387,14 @@ function Actions({ children }: { children: ReactNode }) {
 function PickPlayer({
   players,
   homeNation,
+  disabled,
   onSelect,
   onRandom,
 }: {
   players: { id: PlayerId; country: string; label: string }[]
   homeNation: string | undefined
-  onSelect: () => void
+  disabled: boolean
+  onSelect: (playerId: PlayerId) => void
   onRandom: () => void
 }) {
   const [chosen, setChosen] = useState<string>('')
@@ -296,10 +426,13 @@ function PickPlayer({
           ))}
         </SelectContent>
       </Select>
-      <Button onClick={onSelect} disabled={chosen === ''}>
+      <Button
+        onClick={() => onSelect(chosen as PlayerId)}
+        disabled={disabled || chosen === ''}
+      >
         Put up
       </Button>
-      <Button variant="outline" onClick={onRandom}>
+      <Button variant="outline" onClick={onRandom} disabled={disabled}>
         Random
       </Button>
     </div>
@@ -313,10 +446,12 @@ function PickPlayer({
  */
 function ManualSell({
   managers,
+  disabled,
   onSell,
 }: {
   managers: { id: UserId; label: string }[]
-  onSell: () => void
+  disabled: boolean
+  onSell: (managerId: UserId, amount: number) => void
 }) {
   const [manager, setManager] = useState<string>('')
   const [amount, setAmount] = useState('')
@@ -356,8 +491,8 @@ function ManualSell({
         />
         <Button
           variant="outline"
-          onClick={onSell}
-          disabled={manager === '' || amount === ''}
+          onClick={() => onSell(manager as UserId, Number(amount))}
+          disabled={disabled || manager === '' || amount === ''}
         >
           Sell
         </Button>

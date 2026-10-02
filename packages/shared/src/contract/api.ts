@@ -29,6 +29,7 @@
 
 import type {
   ArchivedLeagueCard,
+  AuctionCall,
   AuctionPoolPlayer,
   AuctionSettings,
   Competition,
@@ -654,6 +655,106 @@ export interface Api {
    * then role, then name. The slow read on Auction Center, so it is its own.
    */
   getAuctionPlayerPool(leagueId: LeagueId): Promise<AuctionPoolPlayer[]>
+
+  // -- the auction, running: the auctioneer --------------------------------
+  //
+  // **Every one of these is the current auctioneer's alone**
+  // (`auctionDetails/primaryAuctioneer`), checked here; the panel showing them
+  // is convenience. Each writes authoritative state and its timeline entry in
+  // one atomic update.
+
+  /** **Creates the live auction**, with every manager on the full budget. */
+  startAuction(leagueId: LeagueId): Promise<void>
+
+  /**
+   * The next batch in the league's sequence — **in order only**, so it takes
+   * nothing to choose. Refused mid-round, and after the last batch.
+   */
+  nextBatch(leagueId: LeagueId): Promise<void>
+
+  /**
+   * Puts a player from the current batch up: "Current player is X", before
+   * bidding opens. Clears the previous player's round.
+   */
+  putUpPlayer(leagueId: LeagueId, playerId: PlayerId): Promise<void>
+
+  /** The same, for a player drawn at random from those left in the batch. */
+  putUpRandomPlayer(leagueId: LeagueId): Promise<void>
+
+  /** Opens bidding on the player up, at base price, with the clock running. */
+  startBidding(leagueId: LeagueId): Promise<void>
+
+  /**
+   * **Accepts one submitted bid**, after checking it again here: it must be
+   * the bid the manager actually submitted, at exactly the asking price, before
+   * the deadline by this service's clock, from someone who has not passed and
+   * can afford it. Moves the price up 0.5 and restarts the clock.
+   */
+  acceptBid(
+    leagueId: LeagueId,
+    playerId: PlayerId,
+    managerId: UserId,
+    amount: number,
+  ): Promise<void>
+
+  /** Records a manager's pass, which they submitted. Irreversible. */
+  acceptNoBid(
+    leagueId: LeagueId,
+    playerId: PlayerId,
+    managerId: UserId,
+  ): Promise<void>
+
+  /** A first, second or last call, onto the timeline. Changes no state. */
+  announceCall(leagueId: LeagueId, call: AuctionCall): Promise<void>
+
+  /** Closes bidding once the deadline has passed by this service's clock. */
+  markTimeUp(leagueId: LeagueId): Promise<void>
+
+  /**
+   * **Sells the player up to the leader at the leading bid**, both read here
+   * rather than passed in. One atomic write across status, budget, bid
+   * history and the buyer's squad for every match.
+   */
+  sellPlayer(leagueId: LeagueId): Promise<void>
+
+  /**
+   * **The last-resort sale**, to a chosen manager at a chosen price, for when
+   * something has broken. Keeps the bidding and adds the sale as the final bid.
+   */
+  sellPlayerManually(
+    leagueId: LeagueId,
+    managerId: UserId,
+    amount: number,
+  ): Promise<void>
+
+  markPlayerUnsold(leagueId: LeagueId): Promise<void>
+
+  /**
+   * **Puts the league back to before Start auction**, for testing: the live
+   * auction, the squads it filled, and anything built on them — lineups and
+   * leaderboards — are deleted. Members and the draft order stay; they come
+   * from joining, not from the auction.
+   *
+   * **Refused in production.** The auctioneer only, in any phase.
+   */
+  resetAuction(leagueId: LeagueId): Promise<void>
+
+  // -- the auction, running: a manager -------------------------------------
+
+  /**
+   * **A bid, written to the bidder's own field only** — the manager is the
+   * caller, never an argument. Refused for a player not up, after passing,
+   * when leading, over budget or with a full squad. Whether it is accepted is
+   * the auctioneer's to decide; an invalid one is silently ignored.
+   */
+  submitBid(
+    leagueId: LeagueId,
+    playerId: PlayerId,
+    amount: number,
+  ): Promise<void>
+
+  /** A pass on the player up. **Irreversible for the round.** */
+  submitNoBid(leagueId: LeagueId, playerId: PlayerId): Promise<void>
 
   /**
    * Sets `finishedAt`. Owner and admins only, and refused until the league's

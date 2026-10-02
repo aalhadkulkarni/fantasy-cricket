@@ -24,6 +24,7 @@ import {
   viewerFor,
 } from './auction-store'
 import { AuctioneerPanel } from './auctioneer-panel'
+import { startBidProcessor } from './bid-processor'
 import { BatchBox } from './batch-box'
 import { BidderPanel } from './bidder-panel'
 import { ManagersPanel } from './managers-panel'
@@ -66,8 +67,18 @@ export function AuctionRoom({ league }: { league: LeagueSummary }) {
         if (cancelled) return
         const data = { league, settings, pool, members, draftOrder, rules }
 
-        store.setState({ static: data, viewer: viewerFor(data, userId) })
-        stop = startLiveFeed(store, league.leagueId)
+        const viewer = viewerFor(data, userId)
+        store.setState({ static: data, viewer })
+        const stopFeed = startLiveFeed(store, league.leagueId)
+        // **Only the auctioneer's browser processes the auction**: judging
+        // bids, accepting them one at a time, running the clock and calls.
+        const stopProcessor = viewer.isAuctioneer
+          ? startBidProcessor(store, league.leagueId)
+          : undefined
+        stop = () => {
+          stopProcessor?.()
+          stopFeed()
+        }
       } catch (e) {
         if (!cancelled) {
           store.setState({
@@ -193,18 +204,19 @@ function Body() {
           <BatchBox />
           <Stage />
           {panels}
-          <div className="grid grid-cols-2 gap-5">
-            <Card title="Managers">
-              <ManagersPanel />
-            </Card>
-            <Card title="Players">
-              <PlayersPanel />
-            </Card>
-          </div>
+          {/* The full width, so its three tabs and long rows fit. */}
+          <Card title="Players">
+            <PlayersPanel />
+          </Card>
         </div>
-        <Card title="Timeline" className="max-h-[80vh] overflow-y-auto">
-          <TimelinePanel />
-        </Card>
+        <div className="grid content-start gap-4">
+          <Card title="Timeline" className="max-h-[40vh] overflow-y-auto">
+            <TimelinePanel />
+          </Card>
+          <Card title="Managers">
+            <ManagersPanel />
+          </Card>
+        </div>
       </div>
     )
   }

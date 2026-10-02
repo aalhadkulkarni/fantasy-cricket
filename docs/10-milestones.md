@@ -273,7 +273,7 @@ the whole app clicked through with the rules denying clients.
 
 ## Milestone 4 — the auction
 
-**Status: in progress.** Phases A–C merged (#74, #75, #78), plus live reads (#79). Phase D under way.
+**Status: in progress.** Phases A–C merged (#74, #75, #78), plus live reads (#79). Phase D merged (#80). Phase E under way.
 
 **Goal:** a live auction for an **official auction league**, end to end — from
 publishing the tournament that opens the league to managers picking an XI from
@@ -338,6 +338,8 @@ together.
 - **A draft position is claimed transactionally on join**, like a join code, so
   two simultaneous joins cannot share one. `draftOrder` is keyed position →
   manager for that reason.
+- **Joining closes when the auction starts**, even before the scheduled time —
+  a manager arriving mid-auction would have no budget or draft seat.
 - **Bids are processed in the auctioneer's browser**, the original design: it
   listens to submitted bids, accepts them through the service one at a time
   against the round it keeps in memory, and owns the timer and the calls. If
@@ -352,6 +354,8 @@ together.
 - **The batch sequence** lives in `standardAuctionConfig.batchSequence` and is
   copied into each auction league: Marquee batsmen, bowlers, keepers,
   all-rounders, then the same for Star, then the draft as a batch of its own.
+  **A batch is finished before the next begins**: Next batch is refused while
+  any of its players has not gone up.
 - **My Team stays in an auction league's sidebar** and says "Team submission
   will open after the auction" until the auction is ended. An auction league
   lands on Auction Center.

@@ -8,7 +8,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { PLAYER_ROLES } from '@fantasy-cricket/shared'
+import { submitBid, submitNoBid } from '@/data-layer'
+import { PLAYER_ROLES, type PlayerId } from '@fantasy-cricket/shared'
 
 import {
   composition,
@@ -32,7 +33,10 @@ import { OverseasMark } from './overseas-mark'
  * **The auction does not stop an illegal squad**, so this shows the rules and
  * the squad's makeup beside the button and lets the manager decide.
  *
- * NOT WIRED YET. Bid, pass and the draft pick act from Phase E.
+ * **Bid and pass are live.** A bid goes to the manager's own field; the
+ * auctioneer's browser decides whether it is accepted, and a bid at a price
+ * that has already moved is silently ignored — so "sent" is said until the
+ * round moves. The draft pick comes in a later phase.
  */
 export function BidderPanel() {
   const data = useAuctionStatic()
@@ -45,7 +49,25 @@ export function BidderPanel() {
 
   const [note, setNote] = useState<string | undefined>(undefined)
   const tried = (what: string) => () =>
-    setNote(`${what} isn't wired yet — it comes with the auction actions.`)
+    setNote(`${what} comes in a later phase.`)
+
+  const [sending, setSending] = useState<'bid' | 'pass' | undefined>()
+  /** The asking price a bid was sent at, until the round moves past it. */
+  const [sentAt, setSentAt] = useState<number | undefined>()
+  const [failure, setFailure] = useState<string | undefined>()
+
+  function send(kind: 'bid' | 'pass', run: () => Promise<void>, at?: number) {
+    setSending(kind)
+    setFailure(undefined)
+    void run()
+      .then(() => {
+        if (at !== undefined) setSentAt(at)
+      })
+      .catch((e: unknown) =>
+        setFailure(e instanceof Error ? e.message : String(e)),
+      )
+      .finally(() => setSending(undefined))
+  }
 
   const pool = useMemo(() => indexPool(data.pool), [data.pool])
   const me = useMemo(
@@ -64,6 +86,8 @@ export function BidderPanel() {
 
   const moment = momentOf(state, round)
   const { settings, rules } = data
+  // The player up. Present whenever a round is, which is when it is read.
+  const current = state?.currentPlayerId as PlayerId
   const squadFull = me.squad.length >= settings.maxSquadSize
 
   // Why a bid cannot be made now, if it cannot. First reason wins.
@@ -95,16 +119,28 @@ export function BidderPanel() {
             <div className="flex flex-wrap gap-2.5">
               <Button
                 size="lg"
-                onClick={tried('Bidding')}
-                disabled={blocked !== undefined}
+                onClick={() => {
+                  const asking = round.minNextBid
+                  send(
+                    'bid',
+                    () => submitBid(data.league.leagueId, current, asking),
+                    asking,
+                  )
+                }}
+                disabled={blocked !== undefined || sending !== undefined}
               >
-                Bid {price(round.minNextBid)}
+                {sending === 'bid'
+                  ? 'Sending…'
+                  : `Bid ${price(round.minNextBid)}`}
               </Button>
               <Button
                 size="lg"
                 variant="outline"
-                onClick={tried('Passing')}
+                onClick={() =>
+                  send('pass', () => submitNoBid(data.league.leagueId, current))
+                }
                 disabled={
+                  sending !== undefined ||
                   noBids[me.userId] === true ||
                   round.currentLeadingManager === me.userId
                 }
@@ -112,8 +148,19 @@ export function BidderPanel() {
                 Pass
               </Button>
             </div>
-            {blocked !== undefined && (
+            {blocked !== undefined ? (
               <p className="mt-2 text-sm text-muted-foreground">{blocked}</p>
+            ) : sentAt === round.minNextBid ? (
+              // Sent, and the price has not moved: the auctioneer has not
+              // reached it yet. Once it moves, someone's bid was accepted.
+              <p className="mt-2 text-sm text-muted-foreground">
+                Bid of {price(sentAt)} sent — waiting for the auctioneer.
+              </p>
+            ) : null}
+            {failure !== undefined && (
+              <p role="alert" className="mt-2 text-sm text-destructive">
+                {failure}
+              </p>
             )}
           </div>
         ) : moment === 'draft' ? (

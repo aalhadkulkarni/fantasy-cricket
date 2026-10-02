@@ -29,6 +29,11 @@ export function Stage() {
     const member = data.members.find((m) => m.userId === userId)
     return member?.fantasyTeamName ?? member?.userName ?? 'a manager'
   }
+  /** The team's name even when it is the viewer's, as a sale reads. */
+  const buyerName = (userId: string) => {
+    const member = data.members.find((m) => m.userId === userId)
+    return member?.fantasyTeamName ?? member?.userName ?? 'a manager'
+  }
 
   const moment = momentOf(state, round)
   const current =
@@ -95,7 +100,7 @@ export function Stage() {
       {moment === 'betweenPlayers' &&
         (last !== undefined && lastStatus?.status === 'Sold' ? (
           <Headline
-            title={`${last.player.playerName} sold to ${teamName(
+            title={`${last.player.playerName} sold to ${buyerName(
               lastStatus.managerId,
             )} for ${crore(lastStatus.winningBid)}`}
             detail="Waiting for the next player."

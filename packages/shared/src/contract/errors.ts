@@ -21,6 +21,8 @@ export type ErrorCode =
   | 'notLeagueAdmin'
   /** In the league, but not playing in it. Owning is not playing. */
   | 'notAManager'
+  /** Only the league's current auctioneer may run the auction. */
+  | 'notAuctioneer'
   /** Barred from the league. Deliberately distinct from `notAManager`. */
   | 'banned'
   /** Refused by the database rules themselves, rather than by a check here. */
@@ -38,6 +40,12 @@ export type ErrorCode =
   | 'deadlinePassed'
   /** Standings asked for before the period's deadline, so nothing is final. */
   | 'periodNotLocked'
+  /**
+   * The auction is not at a point where that can happen — bidding is closed,
+   * the player is not the one up, the round has not started. Ordinary in a
+   * live auction, where the moment moves under a slow tap.
+   */
+  | 'auctionState'
 
   // -- what was submitted --------------------------------------------------
   /** More changes than the allowance or the cap permits. */
@@ -75,6 +83,7 @@ export function httpStatusFor(code: ErrorCode): number {
     case 'notSystemAdmin':
     case 'notLeagueAdmin':
     case 'notAManager':
+    case 'notAuctioneer':
     case 'banned':
     case 'forbidden':
       return 403
@@ -86,6 +95,7 @@ export function httpStatusFor(code: ErrorCode): number {
     case 'closedLeague':
     case 'deadlinePassed':
     case 'periodNotLocked':
+    case 'auctionState':
     case 'allowanceExceeded':
     case 'invalidConfig':
       return 409

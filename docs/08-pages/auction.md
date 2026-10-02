@@ -82,7 +82,9 @@ stage. Only one arrangement is mounted at a time.
 
 **The auctioneer moves between batches in the order only** — one "Next batch:
 <name>" control stepping through the league's sequence, with no jumping. Within
-a batch they put up a chosen player or a random one.
+a batch they put up a chosen player or a random one. **Next batch stays
+disabled until every player in the current batch has gone up**, sold or
+unsold, and the service refuses it until then.
 
 **A player is selected before bidding opens.** Selecting shows "Current player
 is X"; Start bidding opens the round and starts the clock.

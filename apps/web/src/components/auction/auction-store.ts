@@ -83,6 +83,11 @@ export interface AuctionStoreState {
 
   /** A live listener failed. The page says updates have stopped. */
   liveError: string | undefined
+  /**
+   * The bid processor's last refusal from the service, shown to the
+   * auctioneer. The auction carries on regardless.
+   */
+  processorError: string | undefined
 }
 
 export type AuctionStore = StoreApi<AuctionStoreState>
@@ -100,6 +105,7 @@ export function createAuctionStore(): AuctionStore {
     timeline: [],
     serverOffset: 0,
     liveError: undefined,
+    processorError: undefined,
   }))
 }
 
@@ -163,7 +169,11 @@ export function startLiveFeed(
     onAuctionStateChanged(
       leagueId,
       (state) => {
-        store.setState({ state })
+        // Gone means reset. The timeline only hears additions, so its old
+        // messages are cleared here rather than left on screen.
+        store.setState(
+          state === undefined ? { state, timeline: [] } : { state },
+        )
         follow(state?.currentPlayerId)
       },
       fail,

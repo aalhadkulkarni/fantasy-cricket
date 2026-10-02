@@ -50,6 +50,20 @@ export const BID_INCREMENT = 0.5
  */
 export const ROUND_SECONDS = 30
 
+/**
+ * **The three calls**, written to the timeline at 20, 10 and 5 seconds left by
+ * whoever runs the round's clock — the auctioneer's browser.
+ */
+export const AUCTION_CALLS = ['firstCall', 'secondCall', 'lastCall'] as const
+export type AuctionCall = (typeof AUCTION_CALLS)[number]
+
+/** Seconds left at which each call is made. */
+export const CALL_AT_SECONDS: Readonly<Record<AuctionCall, number>> = {
+  firstCall: 20,
+  secondCall: 10,
+  lastCall: 5,
+}
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -175,9 +189,11 @@ export interface AcceptedBidsForPlayer {
   /** Last accepted bid plus thirty seconds. Bids after this are ignored. */
   deadline: number
 
-  bids: Record<BidId, Bid>
-  lastAcceptedBid: BidId
-  noBids: Record<NoBidId, NoBid>
+  /** Absent until the first bid — Firebase stores no empty map. */
+  bids?: Record<BidId, Bid>
+  lastAcceptedBid?: BidId
+  /** Absent until someone passes. */
+  noBids?: Record<NoBidId, NoBid>
 }
 
 /**
