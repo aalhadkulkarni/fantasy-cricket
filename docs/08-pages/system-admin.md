@@ -139,6 +139,50 @@ circulation without destroying anything that references it:
 > **This screen is deliberately not user-friendly.** Its only user is the person
 > who built it, so a slightly awkward workaround beats a destructive button.
 
+### The exception: Populate seed data, outside production
+
+**A testing tool, not a delete.** It resets a whole environment to known data
+rather than removing one record, so nothing is left dangling. **Not shown in
+production, and the service refuses it there** regardless of who asks.
+
+Two taps: the first arms it and says what will go, the second runs it. **One
+atomic update**, so a failure changes nothing.
+
+- **Deletes:** every player, team, tournament and league, and everything that
+  hangs off them — lineups, squads, join requests, bans, transfers, live
+  auctions, leaderboards, standard and custom points, the standard auction
+  values, and every user's league lists.
+- **Keeps:** user records, base tournaments, the reference tables and the
+  standards.
+- **Loads:**
+  - **the ten IPL franchises**, in the IPL base tournament;
+  - **thirteen national teams**, each in every international base tournament;
+  - **the 250 players of the IPL 2026 pool** (`apps/api/src/seed-ipl-2026.ts`),
+    each in their franchise and, for each format they currently play, their
+    national team: T20 is T20 Series and World T20, ODI is ODI Series and ODI
+    World Cup, Test is Test Series.
+- **Category and base price come from a player's place in the list:** 1–12
+  Marquee at 6, 13–24 Marquee at 5, 25–36 Star at 4, 37–48 Star at 3, and the
+  rest General at 2.
+- **Base tournaments are matched by name.** One not found is reported, and no
+  one is put in it.
+
+### Create sample IPL 2027, outside production
+
+**Test data, for testing publish and everything after it** without entering a
+tournament by hand. Same production rule as above. Needs Populate seed data
+first, since it finds the IPL teams by short name.
+
+- **IPL 2027, unpublished**, in the IPL base tournament.
+- **Every IPL team, and every player** with an IPL team.
+- **The 2026 schedule moved to 2027:** the 70 league fixtures on the same
+  calendar dates, IST start times and venues (cities); weekdays shift. **The
+  four playoffs are dated but TBA vs TBA**, with no venue.
+- **Three rounds:** League stage (1–70), Playoffs (71–73), Final (74).
+- **Refused if an IPL 2027 already exists.** It is built from the editor's own
+  calls, so a failure part way can leave one behind; Populate seed data clears
+  it.
+
 ## Everything else
 
 Publish gates, on-the-fly team and player creation, adding a system admin, and

@@ -177,6 +177,32 @@ export interface SamplePlayersResult {
   competitionName: string
 }
 
+/**
+ * What resetting an environment to the IPL 2026 test data did.
+ *
+ * **Base tournaments are matched by name**, so one renamed or never created is
+ * listed in `missingCompetitions` rather than failing the reset. The teams and
+ * players that would have joined it are written without that membership.
+ */
+export interface SeedDataResult {
+  environment: string
+  teamsCreated: number
+  playersCreated: number
+  /** Users whose league lists were cleared, so their home screen starts empty. */
+  usersCleared: number
+  missingCompetitions: readonly string[]
+}
+
+/** What creating the sample IPL tournament did. */
+export interface SampleTournamentResult {
+  tournamentId: TournamentId
+  tournamentName: string
+  matches: number
+  teams: number
+  players: number
+  rounds: readonly string[]
+}
+
 /** What seeding an environment did, so a caller can say more than "done". */
 export interface SystemSetupResult {
   status: 'seeded' | 'alreadyDone'
@@ -743,4 +769,25 @@ export interface Api {
    * already in the catalogue.
    */
   createSamplePlayers(): Promise<SamplePlayersResult>
+
+  /**
+   * **Wipes the environment and loads the IPL 2026 test data.** Every player,
+   * team, tournament and league goes, with everything hanging off them; user
+   * records, base tournaments and the standards stay.
+   *
+   * **Refused in production.** One atomic update, so a failure leaves the
+   * environment as it was.
+   */
+  populateSeedData(): Promise<SeedDataResult>
+
+  /**
+   * **An unpublished IPL 2027 on the 2026 schedule**, so testing publish and
+   * everything after it does not start with entering 74 matches by hand.
+   *
+   * Every IPL team and every player in one, the 70 league fixtures with their
+   * dates and venues, the four playoffs dated but TBA vs TBA, and three rounds:
+   * League stage, Playoffs, Final. **Refused in production, and refused if an
+   * IPL 2027 already exists.**
+   */
+  createSampleIplTournament(): Promise<SampleTournamentResult>
 }

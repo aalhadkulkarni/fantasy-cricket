@@ -100,6 +100,7 @@ export const COUNTRIES = [
   'West Indies',
   'Sri Lanka',
   'Bangladesh',
+  'Afghanistan',
   'Zimbabwe',
   'Ireland',
   'Netherlands',
