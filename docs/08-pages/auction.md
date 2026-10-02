@@ -42,10 +42,23 @@ over — which is why this needs no transactions.
 > A wrote first. **This is accepted. It is not a defect and must not be
 > "fixed".**
 
-> **Under review in Milestone 4.** With a server now in place, accepting bids
-> can run on the service rather than in the auctioneer's browser. Whether it
-> does, and how concurrent bids are then serialised, is **not yet decided** —
-> see `docs/10-milestones.md`. Until it is, this section stands.
+> **Settled for Milestone 4: bids are processed in the auctioneer's browser**,
+> as above. With a server in place, every write still goes through it:
+>
+> - A bidder calls `submitBid`; the service checks they are a manager who has
+>   not passed and can afford it, and writes only their own field.
+> - The auctioneer's browser listens to the submitted bids, checks each against
+>   the asking price and the deadline, and accepts it by calling the service,
+>   which checks the auctioneer role and the bid again before writing.
+> - **It processes bids one at a time**: the live round kept in memory, each
+>   check-and-accept finished before the next starts, so two bids at the same
+>   price arriving together cannot both be accepted — the second meets a price
+>   that has already moved.
+> - **It owns the round timer**, writing the first, second and last calls and
+>   time up at 20, 10, 5 and 0 seconds.
+>
+> **Accepted cost:** if the auctioneer's browser disconnects or sleeps, the
+> auction stalls. Selling is manual, so a missing auctioneer stalls it anyway.
 
 ## Layout
 

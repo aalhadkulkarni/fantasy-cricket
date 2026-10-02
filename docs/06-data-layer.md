@@ -859,9 +859,13 @@ auction.
 > bid is late is decided by the server's clock at the moment it processes the
 > bid; bids carry no timestamp of their own.
 
-> **Under review in Milestone 4:** whether bid acceptance moves from the
-> auctioneer's client to the service, and if so how concurrent bids are
-> serialised. See `docs/10-milestones.md`.
+> **Bids are processed in the auctioneer's browser** (settled for Milestone 4).
+> It listens to submitted bids and accepts each through the service, **one at a
+> time**, against the live round it keeps in memory, so two bids at one price
+> cannot both be accepted. It also writes the calls and time up. A bidder's
+> `submitBid(leagueId, playerId, amount)` takes **no manager id**: the service
+> takes it from the token and writes only that manager's field. If the
+> auctioneer's browser drops, the auction stalls; that is accepted.
 
 > `sellPlayer` is one atomic write across bid history, squad and budget.
 

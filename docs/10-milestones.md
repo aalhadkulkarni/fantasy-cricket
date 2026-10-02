@@ -338,6 +338,12 @@ together.
 - **A draft position is claimed transactionally on join**, like a join code, so
   two simultaneous joins cannot share one. `draftOrder` is keyed position →
   manager for that reason.
+- **Bids are processed in the auctioneer's browser**, the original design: it
+  listens to submitted bids, accepts them through the service one at a time
+  against the round it keeps in memory, and owns the timer and the calls. If
+  it disconnects the auction stalls, which is accepted — selling is manual, so
+  a missing auctioneer stalls it anyway. Bidders' `submitBid` takes no manager
+  id; the service uses the token.
 - **Live auction reads come straight from the database in the browser**, per
   league, through a read-only rule set in the console
   (`$env/liveAuctions/$leagueId`, signed-in only; `/liveAuctions` itself stays
@@ -368,8 +374,6 @@ together.
 
 | Item                                                   | State                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Where bids are accepted**                            | Proposed: on the service rather than the auctioneer's browser. That removes the single writer the design relied on, so two concurrent bids could both read the same asking price and one overwrite the other — a lost bid, not the accepted ordering race. Needs a serialisation choice (a transaction on the current round, or one writer per league) and a reworded race row in `CLAUDE.md`. Settle before E. |
-| **Who writes the three calls and time up**             | The service runs only while handling a request, so nothing on it ticks at 20, 10 and 5 seconds. Settle before E.                                                                                                                                                                                                                                                                                                |
 | **Scheduled start passed, auction not started**        | What the league shows. Decided at implementation.                                                                                                                                                                                                                                                                                                                                                               |
 
 ---
@@ -417,6 +421,12 @@ together.
 ## Backlog
 
 Small items logged instead of fixed. None blocks anything.
+
+- **A dedicated bid processor**, if the auctioneer's browser proves fragile: one
+  always-on Cloud Run instance (exactly one, CPU always allocated), separate
+  from the API, holding the listeners and the timer. Tens of dollars a month
+  if left running; never deploy it mid-auction, or add a database lock so only
+  one copy processes.
 
 - **Every API request pays a CORS preflight.** The site and the service are on
   different origins and requests carry `Authorization`, so the browser sends an
