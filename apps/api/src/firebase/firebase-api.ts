@@ -35,6 +35,8 @@ import type {
   Api,
   CreatePlayersResult,
   SamplePlayersResult,
+  SampleTournamentResult,
+  SeedDataResult,
   MatchPlayerPoints,
   OfficialLeagues,
   SystemSetupResult,
@@ -136,6 +138,19 @@ import {
   TIMELINE_EVENT_RECORDS,
   USER_ROLES,
 } from '../seed-data.ts'
+import {
+  auctionValueAt,
+  FORMAT_COMPETITIONS,
+  IPL_2026_PLAYERS,
+  IPL_COMPETITION,
+  IPL_ROUNDS,
+  IPL_TEAMS,
+  iplScheduleIn,
+  NATIONAL_TEAMS,
+  ROLE_OF,
+  shortNames,
+  type IntlFormat,
+} from '../seed-ipl-2026.ts'
 import { FirebaseService, type DbPath } from './firebase-service.ts'
 import { createPaths } from './paths.ts'
 
@@ -4628,6 +4643,269 @@ export function createFirebaseApi(
         skipped: result.skipped,
         teamsCreated,
         competitionName: competition.competitionName,
+      }
+    },
+
+    /**
+     * **Test data, and destructive.** Every player, team, tournament and
+     * league goes, with everything that points at them, and the IPL 2026 pool
+     * replaces them. User records, base tournaments, reference tables and the
+     * standards stay.
+     *
+     * **Refused in production**, whoever asks.
+     *
+     * **One atomic update.** The wiped nodes are set to null and the replaced
+     * ones written whole — `players`, `teams` and the standard auction details
+     * — because an update may not name a node and something beneath it
+     * together. Either the environment is reset and loaded, or untouched.
+     */
+    async populateSeedData(): Promise<SeedDataResult> {
+      await assertSystemAdmin()
+
+      if (service.environment === 'prod') {
+        throw new DataLayerError(
+          'forbidden',
+          'Seed data cannot be loaded into production.',
+        )
+      }
+
+      const [competitions, users] = await Promise.all([
+        api.getCompetitions(),
+        service.read<Record<string, unknown>>(paths.users()),
+      ])
+      const competitionIdOf = new Map(
+        competitions.map((c) => [c.competitionName, c.competitionId]),
+      )
+      const missing = new Set<string>()
+      const resolve = (names: readonly string[]): CompetitionId[] =>
+        names.flatMap((name) => {
+          const id = competitionIdOf.get(name)
+          if (id === undefined) missing.add(name)
+          return id === undefined ? [] : [id]
+        })
+
+      const iplCompetition = resolve([IPL_COMPETITION])
+      const intlCompetitions = resolve(
+        Object.values(FORMAT_COMPETITIONS).flat(),
+      )
+
+      // Teams, keyed so the players below can find them.
+      const teams: Record<string, Team & { teamId: TeamId }> = {}
+      const franchiseId = new Map<string, TeamId>()
+      const nationId = new Map<string, TeamId>()
+      const addTeam = (
+        teamName: string,
+        teamShortName: string,
+        competitionIds: readonly CompetitionId[],
+      ): TeamId => {
+        const teamId = service.generateKey() as TeamId
+        teams[teamId] = {
+          teamId,
+          teamName,
+          teamShortName,
+          competitionIds: Object.fromEntries(
+            competitionIds.map((id) => [id, true]),
+          ),
+          playerIds: {},
+        }
+        return teamId
+      }
+      for (const [code, name] of Object.entries(IPL_TEAMS)) {
+        franchiseId.set(code, addTeam(name, code, iplCompetition))
+      }
+      for (const [nation, code] of Object.entries(NATIONAL_TEAMS)) {
+        nationId.set(nation, addTeam(nation, code, intlCompetitions))
+      }
+
+      const players: Record<string, Player> = {}
+      const auctionDetails: Record<string, LeaguePlayerAuctionDetail> = {}
+      const shortNameList = shortNames(IPL_2026_PLAYERS.map(([name]) => name))
+
+      IPL_2026_PLAYERS.forEach(
+        ([playerName, franchise, country, role, formats], index) => {
+          const playerId = service.generateKey() as PlayerId
+          const currentTeams: Partial<Record<CompetitionId, TeamId>> = {}
+
+          const memberships: [readonly CompetitionId[], TeamId | undefined][] =
+            [[iplCompetition, franchiseId.get(franchise)]]
+          for (const format of formats.split(' ').filter(Boolean)) {
+            memberships.push([
+              resolve(FORMAT_COMPETITIONS[format as IntlFormat]),
+              nationId.get(country),
+            ])
+          }
+          for (const [competitionIds, teamId] of memberships) {
+            if (teamId === undefined) continue
+            for (const competitionId of competitionIds) {
+              currentTeams[competitionId] = teamId
+              const roster = (teams[teamId]!.playerIds[competitionId] ??= {})
+              roster[playerId] = true
+            }
+          }
+
+          players[playerId] = {
+            playerId,
+            playerName,
+            playerShortName: shortNameList[index]!,
+            country,
+            playerRole: ROLE_OF[role],
+            isRetired: false,
+            currentTeams,
+          }
+          auctionDetails[playerId] = auctionValueAt(index + 1)
+        },
+      )
+
+      const update: Record<string, unknown> = {
+        [paths.players()]: players,
+        [paths.teams()]: teams,
+        [paths.standardPlayerAuctionDetails()]: auctionDetails,
+      }
+      for (const node of [
+        paths.tournaments(),
+        paths.leagues(),
+        paths.leagueCodeToLeagueMapping(),
+        paths.matchBasedLineups(),
+        paths.gameWeekBasedLineups(),
+        paths.squads(),
+        paths.joinRequests(),
+        paths.bannedUsers(),
+        paths.transferProposals(),
+        paths.transferProposalsByManager(),
+        paths.liveAuctions(),
+        paths.leaderboards(),
+        paths.customPointsByMatch(),
+        paths.customPointsByPlayer(),
+        paths.standardPointsByMatch(),
+        paths.standardPointsByPlayer(),
+        paths.standardPointsUpdatedAt(),
+      ]) {
+        update[node] = null
+      }
+      const userIds = Object.keys(users ?? {})
+      for (const userId of userIds) {
+        update[service.path('users', userId, 'leagues')] = null
+        update[service.path('users', userId, 'archivedLeagues')] = null
+      }
+
+      await service.update(update)
+
+      return {
+        environment: service.root,
+        teamsCreated: Object.keys(teams).length,
+        playersCreated: Object.keys(players).length,
+        usersCleared: userIds.length,
+        missingCompetitions: [...missing],
+      }
+    },
+
+    /**
+     * **Test data: an unpublished IPL 2027 on the 2026 schedule.** Built from
+     * the same calls the tournament editor makes — create, participants,
+     * matches, rounds — so it is checked exactly as a hand-built one would be.
+     *
+     * **Not atomic across those calls.** A failure part way leaves an
+     * unpublished IPL 2027 behind, which Populate seed data clears.
+     *
+     * Needs the IPL teams by short name, so it follows Populate seed data.
+     */
+    async createSampleIplTournament(): Promise<SampleTournamentResult> {
+      await assertSystemAdmin()
+
+      if (service.environment === 'prod') {
+        throw new DataLayerError(
+          'forbidden',
+          'A sample tournament cannot be created in production.',
+        )
+      }
+
+      const tournamentName = 'IPL 2027'
+      const competition = (await api.getCompetitions()).find(
+        (c) => c.competitionName === IPL_COMPETITION,
+      )
+      if (competition === undefined) {
+        throw new DataLayerError(
+          'invalidConfig',
+          `There is no ${IPL_COMPETITION} base tournament. Press Set up basic system first.`,
+        )
+      }
+      const competitionId = competition.competitionId
+
+      const [existing, teams, players] = await Promise.all([
+        api.getTournaments({ competitionId, includeUnpublished: true }),
+        api.getTeams({ competitionId }),
+        api.getPlayers({ competitionId }),
+      ])
+
+      if (existing.some((t) => t.tournamentName === tournamentName)) {
+        throw new DataLayerError(
+          'invalidConfig',
+          `${tournamentName} already exists. Populate seed data clears it.`,
+        )
+      }
+
+      const teamIdOf = new Map(teams.map((t) => [t.teamShortName, t.teamId]))
+      const missing = Object.keys(IPL_TEAMS).filter((c) => !teamIdOf.has(c))
+      if (missing.length > 0) {
+        throw new DataLayerError(
+          'invalidConfig',
+          `No ${missing.join(', ')} in ${IPL_COMPETITION}. Press Populate seed data first.`,
+        )
+      }
+
+      const participants: Partial<Record<PlayerId, TeamId>> = {}
+      for (const player of players) {
+        const teamId = player.currentTeams?.[competitionId]
+        if (teamId !== undefined) participants[player.playerId] = teamId
+      }
+
+      const schedule = iplScheduleIn(2027)
+      const tournamentId = await api.createTournament({
+        tournamentName,
+        competitionId,
+        matchCount: schedule.length,
+      })
+
+      await api.updateTournamentParticipants(tournamentId, participants)
+
+      const created = await api.getTournament(tournamentId)
+      const matchIdOf = new Map(
+        Object.values(created.matches).map((m) => [m.matchNumber, m.matchId]),
+      )
+      await api.updateMatches(
+        tournamentId,
+        schedule.map(({ matchNumber, startTimestamp, fixture }) => {
+          const matchId = matchIdOf.get(matchNumber)
+          if (matchId === undefined) {
+            throw new DataLayerError(
+              'internal',
+              `The new tournament has no match ${matchNumber}.`,
+            )
+          }
+          // A playoff gets its date and nothing else: TBA vs TBA.
+          return {
+            matchId,
+            startTimestamp,
+            ...(fixture === undefined
+              ? {}
+              : {
+                  team1Id: teamIdOf.get(fixture.team1),
+                  team2Id: teamIdOf.get(fixture.team2),
+                  venue: fixture.venue,
+                }),
+          }
+        }),
+      )
+
+      await api.setRounds(tournamentId, IPL_ROUNDS)
+
+      return {
+        tournamentId,
+        tournamentName,
+        matches: schedule.length,
+        teams: new Set(Object.values(participants)).size,
+        players: Object.keys(participants).length,
+        rounds: IPL_ROUNDS.map((r) => r.roundName),
       }
     },
 

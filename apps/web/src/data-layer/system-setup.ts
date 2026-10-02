@@ -14,11 +14,18 @@
 
 import type {
   SamplePlayersResult,
+  SampleTournamentResult,
+  SeedDataResult,
   SystemSetupResult,
 } from '@fantasy-cricket/shared'
 import { getApi } from './api'
 
-export type { SamplePlayersResult, SystemSetupResult }
+export type {
+  SamplePlayersResult,
+  SampleTournamentResult,
+  SeedDataResult,
+  SystemSetupResult,
+}
 
 export function setUpBasicSystem(): Promise<SystemSetupResult> {
   return getApi().setUpBasicSystem()
@@ -36,4 +43,20 @@ export function setUpBasicSystem(): Promise<SystemSetupResult> {
  */
 export function createSamplePlayers(): Promise<SamplePlayersResult> {
   return getApi().createSamplePlayers()
+}
+
+/**
+ * **Wipes this environment and loads the IPL 2026 test data**: the ten
+ * franchises, thirteen national teams and 250 players. Refused in production.
+ */
+export function populateSeedData(): Promise<SeedDataResult> {
+  return getApi().populateSeedData()
+}
+
+/**
+ * **An unpublished IPL 2027 on the 2026 schedule**, with every IPL team and
+ * player in it. Publishing is left to the admin. Refused in production.
+ */
+export function createSampleIplTournament(): Promise<SampleTournamentResult> {
+  return getApi().createSampleIplTournament()
 }

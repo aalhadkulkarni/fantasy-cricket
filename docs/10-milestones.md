@@ -360,6 +360,10 @@ together.
   must be in the future and before the first match. The publisher owns it and
   is its auctioneer, but does not play unless they join.
 
+- **Testing runs on the IPL 2026 pool**, loaded by the admin panel's Populate
+  seed data, which resets a non-production environment and replaces the old
+  sample data. See `08-pages/system-admin.md`.
+
 ### Phase E must also
 
 - **Write the timeline in the typed shape** `TimelineEventData` in

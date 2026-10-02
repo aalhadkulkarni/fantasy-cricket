@@ -56,7 +56,9 @@ import type {
   PlayerRoleRecord,
   Round,
   SamplePlayersResult,
+  SampleTournamentResult,
   ScoringWatermark,
+  SeedDataResult,
   SignInOutcome,
   SignedInIdentity,
   Subscriber,
@@ -564,6 +566,17 @@ export function createHttpApi(
 
     createSamplePlayers(): Promise<SamplePlayersResult> {
       return call('createSamplePlayers', []) as Promise<SamplePlayersResult>
+    },
+
+    populateSeedData(): Promise<SeedDataResult> {
+      return call('populateSeedData', []) as Promise<SeedDataResult>
+    },
+
+    createSampleIplTournament(): Promise<SampleTournamentResult> {
+      return call(
+        'createSampleIplTournament',
+        [],
+      ) as Promise<SampleTournamentResult>
     },
   }
 }
