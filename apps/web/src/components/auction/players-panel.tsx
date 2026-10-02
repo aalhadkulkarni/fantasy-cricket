@@ -40,6 +40,10 @@ export function PlayersPanel() {
   )
   const teamName = (userId: string) => {
     if (userId === viewerId) return 'You'
+    return buyerName(userId)
+  }
+  /** The team's name even when it is the viewer's, as a sale reads. */
+  const buyerName = (userId: string) => {
     const member = data.members.find((m) => m.userId === userId)
     return member?.fantasyTeamName ?? member?.userName ?? 'A manager'
   }
@@ -76,7 +80,8 @@ export function PlayersPanel() {
             empty="Nobody has been sold yet."
             rows={lists.sold.map(({ entry, managerId, winningBid }) => ({
               entry,
-              trailing: `${teamName(managerId)} · ${price(winningBid)}`,
+              trailing: `${buyerName(managerId)} · ${price(winningBid)}`,
+              highlight: managerId === viewerId,
               onOpen: () => setHistory(entry),
             }))}
           />
@@ -115,6 +120,8 @@ function List({
   rows: {
     entry: AuctionPoolPlayer
     trailing?: string
+    /** The viewer's own purchase. */
+    highlight?: boolean
     onOpen?: () => void
   }[]
   empty: string
@@ -127,7 +134,7 @@ function List({
   return (
     // Capped and scrolling inside, so a long list never lengthens the page.
     <ul className="mt-2 max-h-80 divide-y overflow-y-auto border-b">
-      {rows.map(({ entry, trailing, onOpen }) => {
+      {rows.map(({ entry, trailing, highlight, onOpen }) => {
         const content = (
           <>
             <span className="flex min-w-0 items-center gap-2.5">
@@ -149,16 +156,19 @@ function List({
           </>
         )
         return (
-          <li key={entry.player.playerId}>
+          <li
+            key={entry.player.playerId}
+            className={highlight === true ? 'bg-primary/10' : undefined}
+          >
             {onOpen === undefined ? (
-              <div className="flex items-center justify-between gap-3 py-2.5">
+              <div className="flex items-center justify-between gap-3 px-2 py-2.5">
                 {content}
               </div>
             ) : (
               <button
                 type="button"
                 onClick={onOpen}
-                className="flex w-full items-center justify-between gap-3 py-2.5 text-left hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                className="flex w-full items-center justify-between gap-3 px-2 py-2.5 text-left hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
                 {content}
               </button>
@@ -208,8 +218,10 @@ function HistoryDialog({
     }
   }, [leagueId, entry.player.playerId])
 
+  // Newest first, so the winning bid is the first thing read. The numbers
+  // still say the order.
   const bids = Object.values(history?.bids ?? {}).sort(
-    (a, b) => a.bidNumber - b.bidNumber,
+    (a, b) => b.bidNumber - a.bidNumber,
   )
 
   return (

@@ -154,15 +154,16 @@ export async function getPlayerBiddingHistory(
  * regardless of the player's value. Neither the increment nor the thirty-second
  * round timer is configurable in Phase 1.
  *
- * **Rejected** if the bidder has already passed on this player, or if the bid
- * would overdraw their budget.
+ * **Refused** for a player not up, after passing, when leading, over budget or
+ * with a full squad. Whether it is accepted — the price, the clock — is the
+ * auctioneer's to judge, and an invalid bid is silently ignored.
  */
 export function submitBid(
   leagueId: LeagueId,
   playerId: PlayerId,
   amount: number,
 ): Promise<void> {
-  return notImplemented('submitBid', { leagueId, playerId, amount })
+  return getApi().submitBid(leagueId, playerId, amount)
 }
 
 /**
@@ -178,7 +179,7 @@ export function submitNoBid(
   leagueId: LeagueId,
   playerId: PlayerId,
 ): Promise<void> {
-  return notImplemented('submitNoBid', { leagueId, playerId })
+  return getApi().submitNoBid(leagueId, playerId)
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +255,24 @@ export function onCurrentRoundChanged(
   return listenToValue<AcceptedBidsForPlayer>(
     ['liveAuctions', leagueId, 'currentAcceptedBids', playerId],
     callback,
+    onError,
+  )
+}
+
+/**
+ * **What every manager has bid on the current player**, as they wrote it —
+ * keyed by manager, so a manager's newer bid replaces their older one. The
+ * auctioneer's browser reads this and decides what to accept.
+ */
+export function onSubmittedBids(
+  leagueId: LeagueId,
+  playerId: PlayerId,
+  callback: Subscriber<Partial<Record<UserId, number>>>,
+  onError?: SubscriptionErrorHandler,
+): Unsubscribe {
+  return listenToValue<Partial<Record<UserId, number>>>(
+    ['liveAuctions', leagueId, 'currentSubmittedBids', playerId, 'bids'],
+    (value) => callback(value ?? {}),
     onError,
   )
 }

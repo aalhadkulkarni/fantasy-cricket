@@ -788,18 +788,20 @@ auction.
 
 ## Auction — bidder
 
-**Writes**
+**Writes** — manager role, checked by the service; the manager is the caller,
+never an argument.
 
-- `submitBid(leagueId, playerId, amount)`
-- `submitNoBid(leagueId, playerId)`
+- `submitBid(leagueId, playerId, amount)` — refused for a player not up, after
+  passing, when leading, off the 0.5 grid, over budget or with a full squad
+- `submitNoBid(leagueId, playerId)` — refused when leading
 
-> These write **only** to the bidder's own path. That is the entire reason the
-> auction is safe without transactions — see `docs/05-data-model.md`.
+> These write **only** to the bidder's own path,
+> `currentSubmittedBids/<playerId>/bids|noBids/<uid>`. Whether a bid is
+> accepted — the price, the clock — is the auctioneer's to judge.
 
-> **Passing is irreversible for that round.** The layer rejects a bid from
-> someone who has already passed on the current player.
+> **Passing is irreversible for that round.**
 
-> **A bid that would take the budget below zero is rejected**, and so is any
+> **A bid that would take the budget below zero is refused**, and so is any
 > bid from a manager whose squad is at the maximum size. There is no reserve
 > for filling the minimum squad.
 
@@ -807,67 +809,79 @@ auction.
 
 ## Auction — auctioneer
 
-**Writes**
+**Writes** — **the current auctioneer only** (`auctionDetails/primaryAuctioneer`,
+read per request so a handover takes effect at once). Each is one atomic update
+with its timeline entry.
 
-- `startAuction(leagueId)`
-- `selectBatch(leagueId, category, role)` — **ids, not display names**, matching
-  how `currentBatch` stores them
-- `selectPlayer(leagueId, playerId)`
-- `selectRandomPlayerFromBatch(leagueId)`
-- `acceptBid(leagueId, playerId, managerId, amount)`
+- `startAuction(leagueId)` — **creates `liveAuctions/<leagueId>`**, every
+  manager on the full budget. Joining closes from here.
+- `nextBatch(leagueId)` — the next batch in the sequence, **in order only**, so
+  it takes no choice. Refused mid-round and after the last batch.
+- `putUpPlayer(leagueId, playerId)` / `putUpRandomPlayer(leagueId)` — a player
+  from the current batch, before bidding opens. Clears the previous player's
+  round.
+- `startBidding(leagueId)` — the round at base price, the clock running
+- `acceptBid(leagueId, playerId, managerId, amount)` — **checked again here**:
+  the bid the manager actually submitted, at exactly the asking price, before
+  the deadline by this service's clock, not passed, affordable. Raises the
+  price 0.5 and restarts the clock. Writes the bid history too.
 - `acceptNoBid(leagueId, playerId, managerId)`
-- `sellPlayer(leagueId, playerId, managerId, amount)` — updates bid history,
-  writes the player into that manager's squad, decrements their budget. **The
-  squad is written here, on every sale, not materialised when the auction
-  ends**, so squads are correct at every point during the auction.
-- **Manual sell, a last resort** — to a chosen manager at a chosen price, for
-  when something has broken. Keeps the bid history and appends the sale as the
-  final bid if it is not already there.
-- `markPlayerUnsold(leagueId, playerId)`
-- `pauseAuction(leagueId)`
-- `resumeAuction(leagueId)`
-- `addTimeToCurrentRound(leagueId, seconds)`
+- `announceCall(leagueId, 'firstCall' | 'secondCall' | 'lastCall')` — timeline
+  only
+- `markTimeUp(leagueId)` — refused while time is left, by this service's clock
+  with a second's tolerance
+- `sellPlayer(leagueId)` — to the stored leader at the stored leading bid, so
+  nothing passed in can disagree. **One atomic write** across the player's
+  status, the buyer's budget and holdings, the bid history and **the buyer's
+  squad for every match** — written on every sale, densely, not when the
+  auction ends, so squads are correct throughout.
+- `sellPlayerManually(leagueId, managerId, amount)` — **a last resort**, for
+  when something has broken. Same writes; keeps the bid history and appends
+  the sale as the final bid if it is not already the last one.
+- `markPlayerUnsold(leagueId)`
+- `pauseAuction(leagueId)` / `resumeAuction(leagueId)` *(Phase G)*
+- `addTimeToCurrentRound(leagueId, seconds)` *(Phase G)*
 - `startRecovery(leagueId)` / `endRecovery(leagueId)` — enter and leave the
-  `Recovering` phase
+  `Recovering` phase *(Phase G)*
 - `rewindLastRound(leagueId)` — **refused outside recovery.** Undoes the last
   sale or unsold result, restoring budgets and squad membership; the round
   before it then becomes the last, so repeated rewinds walk back to the start.
   Appends timeline entries rather than removing any. Does not undo individual
-  bids.
-- `resetAuction(leagueId)` — **refused in production.** A testing fallback.
-- `startDraft(leagueId)`
-- `nextDraftManager(leagueId)` — **skips any manager who can no longer pick**
-- `acceptDraftPick(leagueId, playerId, managerId)`
-- `endAuction(leagueId)`
-- `handOffAuctioneerRole(leagueId)` — **always to the backup.** **One atomic multi-path
-  write** covering both the auctioneer roles on the membership records and the
-  `primaryAuctioneer` field on the auction config. The duplication is
-  deliberate, so that showing who the auctioneer is costs one field read rather
-  than a scan of every member's roles; the two must never be written separately.
+  bids. *(Phase G)*
+- `resetAuction(leagueId)` — **refused in production.** A testing fallback:
+  puts the league back to before Start auction by deleting the live auction,
+  the league's squads, and the lineups and leaderboard built on them, in one
+  update. Members and the draft order stay. The auctioneer only, in any phase
+  once the auction exists. *(Built early, in Phase E, for testing.)*
+- `startDraft(leagueId)`, `nextDraftManager(leagueId)` — **skips any manager
+  who can no longer pick** — and `acceptDraftPick(leagueId, playerId,
+  managerId)` *(Phase F)*
+- `endAuction(leagueId)` *(Phase G)*
+- `handOffAuctioneerRole(leagueId)` — **always to the backup.** **One atomic
+  multi-path write** covering both the auctioneer roles on the membership
+  records and the `primaryAuctioneer` field on the auction config. *(Not in
+  Milestone 4.)*
 
-**Subscriptions**
+**Subscriptions** — read straight from the database, in the auctioneer's
+browser only
 
-- `onBidSubmitted(leagueId, callback)` — the auctioneer validates against the
-  asking price and deadline, then accepts or ignores
-- `onNoBidSubmitted(leagueId, callback)`
-- `onDraftPickSubmitted(leagueId, callback)`
+- `onSubmittedBids(leagueId, playerId, callback)` — what each manager has bid
+- `onSubmittedNoBids(leagueId, playerId, callback)` — who has passed
+
+> **Bids are processed in the auctioneer's browser** (settled for Milestone 4),
+> by `components/auction/bid-processor.ts`. It judges each submitted bid against
+> the round it keeps in memory — one step ahead of the database, so a second
+> bid at a price that has just moved is ignored — and accepts the valid ones
+> through the service **one at a time**. It also runs the clock: the calls at
+> 20, 10 and 5 seconds left, and time up at zero. If the auctioneer's browser
+> drops, the auction stalls; that is accepted.
 
 > **Rejection is silence.** There is no explicit reject call — an invalid bid is
 > simply not accepted.
 
-> **The timer restarts from each accepted bid**, thirty seconds on. Whether a
-> bid is late is decided by the server's clock at the moment it processes the
-> bid; bids carry no timestamp of their own.
-
-> **Bids are processed in the auctioneer's browser** (settled for Milestone 4).
-> It listens to submitted bids and accepts each through the service, **one at a
-> time**, against the live round it keeps in memory, so two bids at one price
-> cannot both be accepted. It also writes the calls and time up. A bidder's
-> `submitBid(leagueId, playerId, amount)` takes **no manager id**: the service
-> takes it from the token and writes only that manager's field. If the
-> auctioneer's browser drops, the auction stalls; that is accepted.
-
-> `sellPlayer` is one atomic write across bid history, squad and budget.
+> **The timer restarts from each accepted bid**, thirty seconds on. Lateness is
+> decided by the service's clock when it accepts the bid; bids carry no
+> timestamp of their own.
 
 ---
 

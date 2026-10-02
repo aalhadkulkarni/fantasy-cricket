@@ -18,6 +18,7 @@
 
 import type {
   Api,
+  AuctionCall,
   AuctionPoolPlayer,
   AuctionSettings,
   DraftOrderEntry,
@@ -450,6 +451,96 @@ export function createHttpApi(
       return call('getAuctionPlayerPool', [leagueId]) as Promise<
         AuctionPoolPlayer[]
       >
+    },
+
+    startAuction(leagueId: LeagueId): Promise<void> {
+      return call('startAuction', [leagueId]) as Promise<void>
+    },
+
+    nextBatch(leagueId: LeagueId): Promise<void> {
+      return call('nextBatch', [leagueId]) as Promise<void>
+    },
+
+    putUpPlayer(leagueId: LeagueId, playerId: PlayerId): Promise<void> {
+      return call('putUpPlayer', [leagueId, playerId]) as Promise<void>
+    },
+
+    putUpRandomPlayer(leagueId: LeagueId): Promise<void> {
+      return call('putUpRandomPlayer', [leagueId]) as Promise<void>
+    },
+
+    startBidding(leagueId: LeagueId): Promise<void> {
+      return call('startBidding', [leagueId]) as Promise<void>
+    },
+
+    acceptBid(
+      leagueId: LeagueId,
+      playerId: PlayerId,
+      managerId: UserId,
+      amount: number,
+    ): Promise<void> {
+      return call('acceptBid', [
+        leagueId,
+        playerId,
+        managerId,
+        amount,
+      ]) as Promise<void>
+    },
+
+    acceptNoBid(
+      leagueId: LeagueId,
+      playerId: PlayerId,
+      managerId: UserId,
+    ): Promise<void> {
+      return call('acceptNoBid', [
+        leagueId,
+        playerId,
+        managerId,
+      ]) as Promise<void>
+    },
+
+    announceCall(leagueId: LeagueId, which: AuctionCall): Promise<void> {
+      return call('announceCall', [leagueId, which]) as Promise<void>
+    },
+
+    markTimeUp(leagueId: LeagueId): Promise<void> {
+      return call('markTimeUp', [leagueId]) as Promise<void>
+    },
+
+    sellPlayer(leagueId: LeagueId): Promise<void> {
+      return call('sellPlayer', [leagueId]) as Promise<void>
+    },
+
+    sellPlayerManually(
+      leagueId: LeagueId,
+      managerId: UserId,
+      amount: number,
+    ): Promise<void> {
+      return call('sellPlayerManually', [
+        leagueId,
+        managerId,
+        amount,
+      ]) as Promise<void>
+    },
+
+    markPlayerUnsold(leagueId: LeagueId): Promise<void> {
+      return call('markPlayerUnsold', [leagueId]) as Promise<void>
+    },
+
+    resetAuction(leagueId: LeagueId): Promise<void> {
+      return call('resetAuction', [leagueId]) as Promise<void>
+    },
+
+    submitBid(
+      leagueId: LeagueId,
+      playerId: PlayerId,
+      amount: number,
+    ): Promise<void> {
+      return call('submitBid', [leagueId, playerId, amount]) as Promise<void>
+    },
+
+    submitNoBid(leagueId: LeagueId, playerId: PlayerId): Promise<void> {
+      return call('submitNoBid', [leagueId, playerId]) as Promise<void>
     },
 
     markLeagueFinished(leagueId: LeagueId): Promise<void> {

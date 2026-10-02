@@ -45,13 +45,18 @@ import type { Environment } from '@fantasy-cricket/shared'
 
 import type { Session } from '../auth.ts'
 import type {
+  AcceptedBidsForPlayer,
   ArchivedLeagueCard,
   ArchivedLeagueIndexEntry,
   AuctionBatch,
+  AuctionCall,
   AuctionConfig,
   AuctionPhase,
   AuctionPoolPlayer,
   AuctionSettings,
+  AuctionState,
+  Bid,
+  BidId,
   BannedUser,
   Competition,
   CompetitionConfig,
@@ -73,6 +78,7 @@ import type {
   LeagueSummary,
   LineupRules,
   LineupSubmission,
+  ManagerAuctionStatus,
   Match,
   MatchConfig,
   MatchId,
@@ -91,6 +97,8 @@ import type {
   PlayerId,
   PlayerPoints,
   PlayerRoleRecord,
+  PlayerStatus,
+  NoBidId,
   Round,
   RoundConfig,
   RoundId,
@@ -106,12 +114,16 @@ import type {
   TournamentId,
   TournamentLeagueIndexEntry,
   TournamentRoundConfig,
+  TimelineEventData,
+  TimelineEventId,
   User,
   UserId,
 } from '@fantasy-cricket/shared'
 
 import {
+  AUCTION_CALLS,
   BID_INCREMENT,
+  CALL_AT_SECONDS,
   DataLayerError,
   DEFAULT_HOME_NATION,
   FORMATS,
@@ -955,6 +967,305 @@ export function createFirebaseApi(
     return service.read<AuctionPhase>(
       service.path('liveAuctions', leagueId, 'auctionState', 'phase'),
     )
+  }
+
+  // -------------------------------------------------------------------------
+  // The live auction: helpers for the writes
+  // -------------------------------------------------------------------------
+
+  /** A path under a league's live auction. */
+  function livePath(leagueId: LeagueId, ...rest: string[]): DbPath {
+    return service.path('liveAuctions', leagueId, ...rest)
+  }
+
+  /**
+   * **Only the current auctioneer runs the auction.** Read per request from
+   * `auctionDetails/primaryAuctioneer`, so a handover takes effect on the next
+   * call with nothing cached to go stale.
+   */
+  async function assertAuctioneer(leagueId: LeagueId): Promise<void> {
+    await assertAuctionLeague(leagueId)
+    const session = requireSession()
+    const auctioneer = await service.read<UserId>(
+      auctionDetailsPath(leagueId, 'primaryAuctioneer'),
+    )
+    if (auctioneer !== session.uid) {
+      throw new DataLayerError(
+        'notAuctioneer',
+        'Only the auctioneer can run the auction.',
+      )
+    }
+  }
+
+  /** The live state, refusing an auction that has not been started. */
+  async function liveState(leagueId: LeagueId): Promise<AuctionState> {
+    const state = await service.read<AuctionState>(
+      livePath(leagueId, 'auctionState'),
+    )
+    if (state === undefined) {
+      throw new DataLayerError('auctionState', 'The auction has not started.')
+    }
+    return state
+  }
+
+  /**
+   * **Between rounds**: nothing is being bid on, so the batch may move and a
+   * player may go up. A round in progress has to be sold or marked unsold
+   * first.
+   */
+  const BETWEEN_ROUNDS: readonly AuctionPhase[] = [
+    'notStarted',
+    'betweenPlayers',
+    'sold',
+    'unsold',
+  ]
+
+  function assertPhase(
+    state: AuctionState,
+    allowed: readonly AuctionPhase[],
+    message: string,
+  ): void {
+    if (!allowed.includes(state.phase)) {
+      throw new DataLayerError('auctionState', message)
+    }
+  }
+
+  /** The player up, refusing when it is not the one named. */
+  function assertCurrent(state: AuctionState, playerId: PlayerId): void {
+    if (state.currentPlayerId !== playerId) {
+      throw new DataLayerError(
+        'auctionState',
+        'That player is not the one up right now.',
+      )
+    }
+  }
+
+  /**
+   * **One timeline entry, as paths.** Id plus data, never a sentence, stamped
+   * with this service's clock. Display only: nothing reads it to decide
+   * anything.
+   */
+  function timelineEntry<Id extends TimelineEventId>(
+    leagueId: LeagueId,
+    timelineEventId: Id,
+    timelineEventData: TimelineEventData[Id],
+  ): Record<string, unknown> {
+    const key = service.generateKey()
+    return {
+      [livePath(leagueId, 'timeline', key)]: {
+        timelineMessageId: key,
+        timelineEventId,
+        timelineEventData,
+        timestamp: Date.now(),
+      },
+    }
+  }
+
+  /** Prices move in steps of 0.5, so a bid must sit on that grid. */
+  function assertPriceGrid(amount: unknown): asserts amount is number {
+    if (
+      typeof amount !== 'number' ||
+      !Number.isFinite(amount) ||
+      amount <= 0 ||
+      !Number.isInteger(amount * 2)
+    ) {
+      throw new DataLayerError(
+        'invalid',
+        'A price is above zero, in steps of 0.5.',
+      )
+    }
+  }
+
+  /**
+   * **Whether this manager may take a player at this price**: still a manager,
+   * the budget covers it (it may not go below zero), and the squad has room.
+   * The squad's makeup is deliberately not checked — an illegal squad is the
+   * manager's to choose.
+   */
+  async function assertCanBuy(
+    leagueId: LeagueId,
+    managerId: UserId,
+    amount: number,
+  ): Promise<void> {
+    const [roles, status, maxSquadSize] = await Promise.all([
+      service.read<LeagueMember['leagueRoles']>(
+        service.path(
+          'leagues',
+          leagueId,
+          'leagueMembers',
+          managerId,
+          'leagueRoles',
+        ),
+      ),
+      service.read<ManagerAuctionStatus>(
+        livePath(leagueId, 'managerStatus', managerId),
+      ),
+      service.read<number>(
+        auctionDetailsPath(leagueId, 'auctionConfig', 'maxSquadSize'),
+      ),
+    ])
+    if (roles?.manager !== true) {
+      throw new DataLayerError('notAManager', 'That person is not bidding.')
+    }
+    if ((status?.budget ?? 0) < amount) {
+      throw new DataLayerError('auctionState', 'Not enough budget for that.')
+    }
+    if (
+      maxSquadSize !== undefined &&
+      Object.keys(status?.playerList ?? {}).length >= maxSquadSize
+    ) {
+      throw new DataLayerError('auctionState', 'That squad is already full.')
+    }
+  }
+
+  /** Whether a manager has passed on this round, by either record. */
+  function hasPassed(
+    round: AcceptedBidsForPlayer | undefined,
+    submittedNoBids: Partial<Record<string, true>> | undefined,
+    managerId: UserId,
+  ): boolean {
+    return (
+      submittedNoBids?.[managerId] === true ||
+      Object.values(round?.noBids ?? {}).some((p) => p.managerId === managerId)
+    )
+  }
+
+  /**
+   * **A sale, as paths — the whole of it in one atomic update.** The player's
+   * status, the buyer's budget and holdings, the bid history with the winning
+   * bid marked, the round closed, the timeline — and **the buyer's squad for
+   * every match**, written now rather than when the auction ends, so squads
+   * are right at every point during it. Stored densely: the same list in every
+   * match until a transfer changes it.
+   */
+  async function saleUpdate(
+    leagueId: LeagueId,
+    playerId: PlayerId,
+    managerId: UserId,
+    amount: number,
+    winningBid: Bid,
+  ): Promise<Record<string, unknown>> {
+    const tournamentId = await service.read<TournamentId>(
+      service.path('leagues', leagueId, 'tournamentId'),
+    )
+    if (tournamentId === undefined) {
+      throw new DataLayerError('notFound', 'That league no longer exists.')
+    }
+    const [budget, matches, squads] = await Promise.all([
+      service.read<number>(
+        livePath(leagueId, 'managerStatus', managerId, 'budget'),
+      ),
+      service.read<Record<string, Match>>(
+        paths.tournamentMatches(tournamentId),
+      ),
+      service.read<Record<string, PlayerId[]>>(
+        service.path('squads', leagueId, managerId),
+      ),
+    ])
+
+    const update: Record<string, unknown> = {
+      [livePath(leagueId, 'playerStatus', playerId)]: {
+        playerId,
+        status: 'Sold',
+        managerId,
+        winningBid: amount,
+      },
+      [livePath(leagueId, 'managerStatus', managerId, 'budget')]:
+        (budget ?? 0) - amount,
+      [livePath(leagueId, 'managerStatus', managerId, 'playerList', playerId)]:
+        amount,
+      [livePath(leagueId, 'playerWiseBiddingHistory', playerId, 'status')]:
+        'Sold',
+      [livePath(
+        leagueId,
+        'playerWiseBiddingHistory',
+        playerId,
+        'bids',
+        winningBid.bidId,
+      )]: { ...winningBid, sold: true },
+      [livePath(leagueId, 'auctionState', 'phase')]: 'sold',
+      [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: false,
+      [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: false,
+      ...timelineEntry(leagueId, 'sold', {
+        playerId,
+        winningBid: amount,
+        managerId,
+      }),
+    }
+
+    for (const matchId of Object.keys(matches ?? {})) {
+      const squad = squads?.[matchId] ?? []
+      if (!squad.includes(playerId)) {
+        update[service.path('squads', leagueId, managerId, matchId)] = [
+          ...squad,
+          playerId,
+        ]
+      }
+    }
+
+    return update
+  }
+
+  /**
+   * **Who in the current batch may still go up**: matching its category and
+   * role, and neither sold nor marked unsold. Refuses outside a bidding batch
+   * and mid-round.
+   */
+  async function eligibleInBatch(
+    leagueId: LeagueId,
+    state: AuctionState,
+  ): Promise<PlayerId[]> {
+    assertPhase(state, BETWEEN_ROUNDS, 'Finish this round first.')
+    const batch = state.currentBatch
+    if (batch === undefined || batch.kind !== 'auction') {
+      throw new DataLayerError('auctionState', 'Choose a bidding batch first.')
+    }
+    const [details, statuses, players] = await Promise.all([
+      service.read<Record<string, LeaguePlayerAuctionDetail>>(
+        auctionDetailsPath(leagueId, 'auctionConfig', 'playerDetails'),
+      ),
+      service.read<Partial<Record<string, PlayerStatus>>>(
+        livePath(leagueId, 'playerStatus'),
+      ),
+      service.read<Record<string, Player>>(paths.players()),
+    ])
+    return Object.entries(details ?? {})
+      .filter(
+        ([playerId, detail]) =>
+          detail.playerCategory === batch.playerCategory &&
+          players?.[playerId]?.playerRole === batch.playerRole &&
+          statuses?.[playerId]?.status !== 'Sold' &&
+          statuses?.[playerId]?.status !== 'Unsold',
+      )
+      .map(([playerId]) => playerId as PlayerId)
+  }
+
+  /**
+   * **Puts a player up**, before bidding opens. The previous player's round
+   * is cleared — keyed per player, so nothing of it can leak into the next —
+   * and kept only as the last player, for the headline.
+   */
+  async function putUp(
+    leagueId: LeagueId,
+    state: AuctionState,
+    playerId: PlayerId,
+  ): Promise<void> {
+    const previous = state.currentPlayerId
+    await service.update({
+      ...(previous === undefined || previous === playerId
+        ? {}
+        : {
+            [livePath(leagueId, 'currentSubmittedBids', previous)]: null,
+            [livePath(leagueId, 'currentAcceptedBids', previous)]: null,
+            [livePath(leagueId, 'auctionState', 'lastPlayerId')]: previous,
+          }),
+      [livePath(leagueId, 'auctionState', 'currentPlayerId')]: playerId,
+      [livePath(leagueId, 'auctionState', 'phase')]: 'betweenPlayers',
+      [livePath(leagueId, 'currentSubmittedBids', 'currentPlayer')]: playerId,
+      [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: false,
+      [livePath(leagueId, 'currentAcceptedBids', 'currentPlayer')]: playerId,
+      [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: false,
+    })
   }
 
   /** A path under a league's auction details. Never read the node whole. */
@@ -2310,6 +2621,21 @@ export function createFirebaseApi(
         throw new DataLayerError(
           'alreadyMember',
           'The deadline to join this league has passed.',
+        )
+      }
+
+      /*
+        **Joining closes when the auction starts**, even before the scheduled
+        time. A manager arriving mid-auction would have no budget and no draft
+        seat, and would be bidding against squads already half built.
+      */
+      if (
+        league.isAuctionEnabled &&
+        (await liveAuctionPhase(leagueId)) !== undefined
+      ) {
+        throw new DataLayerError(
+          'joinDeadlinePassed',
+          'The auction has started, so joining has closed.',
         )
       }
 
@@ -4184,6 +4510,601 @@ export function createFirebaseApi(
             PLAYER_ROLES.indexOf(b.player.playerRole) ||
           a.player.playerName.localeCompare(b.player.playerName),
       )
+    },
+
+    // -----------------------------------------------------------------------
+    // The live auction: the auctioneer's writes
+    // -----------------------------------------------------------------------
+
+    /**
+     * **Creates the live auction** — the only thing that does. Every manager
+     * starts on the full budget, and from here the league is in its auction
+     * until the auctioneer ends it. Joining closes now.
+     */
+    async startAuction(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+
+      const [existing, members, totalBudget] = await Promise.all([
+        service.read<AuctionState>(livePath(leagueId, 'auctionState')),
+        service.read<Partial<Record<string, LeagueMember>>>(
+          paths.leagueMembers(leagueId),
+        ),
+        service.read<number>(
+          auctionDetailsPath(leagueId, 'auctionConfig', 'totalBudget'),
+        ),
+      ])
+      if (existing !== undefined) {
+        throw new DataLayerError(
+          'auctionState',
+          'The auction has already started.',
+        )
+      }
+      if (totalBudget === undefined) {
+        throw new DataLayerError('internal', 'This auction has no budget set.')
+      }
+
+      const update: Record<string, unknown> = {
+        [livePath(leagueId, 'auctionState')]: { phase: 'notStarted' },
+        ...timelineEntry(leagueId, 'auctionStarted', {}),
+      }
+      for (const [userId, member] of Object.entries(members ?? {})) {
+        if (member?.leagueRoles?.manager !== true) continue
+        update[livePath(leagueId, 'managerStatus', userId, 'budget')] =
+          totalBudget
+      }
+      await service.update(update)
+    },
+
+    /**
+     * **The next batch in the sequence, in order only.** No argument, so no
+     * batch can be skipped or revisited. Clears the player up; the previous
+     * one is kept as the last, for the headline.
+     */
+    async nextBatch(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const [state, sequence] = await Promise.all([
+        liveState(leagueId),
+        service.read<AuctionBatch[]>(
+          auctionDetailsPath(leagueId, 'auctionConfig', 'batchSequence'),
+        ),
+      ])
+      assertPhase(state, BETWEEN_ROUNDS, 'Finish this round before moving on.')
+
+      const order = sequence ?? []
+      const at =
+        state.currentBatch === undefined
+          ? -1
+          : order.findIndex((batch) =>
+              state.currentBatch?.kind === 'draft'
+                ? batch.kind === 'draft'
+                : batch.kind === 'auction' &&
+                  state.currentBatch?.kind === 'auction' &&
+                  batch.playerCategory === state.currentBatch.playerCategory &&
+                  batch.playerRole === state.currentBatch.playerRole,
+            )
+      const next = order[at + 1]
+      if (next === undefined) {
+        throw new DataLayerError(
+          'auctionState',
+          'Every batch in the order has been reached.',
+        )
+      }
+
+      // Every player in a bidding batch goes up, sold or unsold, before the
+      // next batch begins.
+      if (state.currentBatch?.kind === 'auction') {
+        const left = (await eligibleInBatch(leagueId, state)).length
+        if (left > 0) {
+          throw new DataLayerError(
+            'auctionState',
+            `${left} ${left === 1 ? 'player is' : 'players are'} still to go up in this batch.`,
+          )
+        }
+      }
+
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'currentBatch')]: next,
+        [livePath(leagueId, 'auctionState', 'currentPlayerId')]: null,
+        ...(state.currentPlayerId === undefined
+          ? {}
+          : {
+              [livePath(leagueId, 'auctionState', 'lastPlayerId')]:
+                state.currentPlayerId,
+            }),
+        [livePath(leagueId, 'auctionState', 'phase')]: 'betweenPlayers',
+        // The draft is announced when it starts, which is the next phase's.
+        ...(next.kind === 'auction'
+          ? timelineEntry(leagueId, 'nextBatch', {
+              playerCategory: next.playerCategory,
+              playerRole: next.playerRole,
+            })
+          : {}),
+      })
+    },
+
+    async putUpPlayer(leagueId: LeagueId, playerId: PlayerId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      const eligible = await eligibleInBatch(leagueId, state)
+      if (!eligible.includes(playerId)) {
+        throw new DataLayerError(
+          'auctionState',
+          'That player is not in this batch, or has already gone up.',
+        )
+      }
+      await putUp(leagueId, state, playerId)
+    },
+
+    async putUpRandomPlayer(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      const eligible = await eligibleInBatch(leagueId, state)
+      const pick = eligible[Math.floor(Math.random() * eligible.length)]
+      if (pick === undefined) {
+        throw new DataLayerError(
+          'auctionState',
+          'Nobody is left in this batch. Move to the next one.',
+        )
+      }
+      await putUp(leagueId, state, pick)
+    },
+
+    /** Opens bidding on the player up, at base price, with the clock running. */
+    async startBidding(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      const playerId = state.currentPlayerId
+      if (state.phase !== 'betweenPlayers' || playerId === undefined) {
+        throw new DataLayerError('auctionState', 'Put a player up first.')
+      }
+      const [round, basePrice] = await Promise.all([
+        service.read<AcceptedBidsForPlayer>(
+          livePath(leagueId, 'currentAcceptedBids', playerId),
+        ),
+        service.read<number>(
+          auctionDetailsPath(
+            leagueId,
+            'auctionConfig',
+            'playerDetails',
+            playerId,
+            'playerBasePrice',
+          ),
+        ),
+      ])
+      if (round !== undefined) {
+        throw new DataLayerError('auctionState', 'Bidding has already started.')
+      }
+      if (basePrice === undefined) {
+        throw new DataLayerError(
+          'notFound',
+          'That player is not in this auction.',
+        )
+      }
+
+      await service.update({
+        [livePath(leagueId, 'currentAcceptedBids', playerId)]: {
+          basePrice,
+          minNextBid: basePrice,
+          deadline: Date.now() + ROUND_SECONDS * 1000,
+        },
+        [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: true,
+        [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: true,
+        [livePath(leagueId, 'playerWiseBiddingHistory', playerId, 'status')]:
+          'Pending',
+        [livePath(leagueId, 'auctionState', 'phase')]: 'bidding',
+        ...timelineEntry(leagueId, 'nextPlayer', {
+          playerId,
+          basePrice,
+          timeLimit: ROUND_SECONDS,
+        }),
+      })
+    },
+
+    /**
+     * **Accepts one submitted bid, checked again here.** The auctioneer's
+     * browser has already judged it against the round it holds in memory; this
+     * is the guard. The bid must be the one the manager actually submitted, at
+     * exactly the asking price, before the deadline by this service's clock.
+     */
+    async acceptBid(
+      leagueId: LeagueId,
+      playerId: PlayerId,
+      managerId: UserId,
+      amount: number,
+    ): Promise<void> {
+      await assertAuctioneer(leagueId)
+      assertPriceGrid(amount)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding'], 'Bidding is not open.')
+      assertCurrent(state, playerId)
+
+      const [round, submitted, submittedNoBids] = await Promise.all([
+        service.read<AcceptedBidsForPlayer>(
+          livePath(leagueId, 'currentAcceptedBids', playerId),
+        ),
+        service.read<number>(
+          livePath(
+            leagueId,
+            'currentSubmittedBids',
+            playerId,
+            'bids',
+            managerId,
+          ),
+        ),
+        service.read<Partial<Record<string, true>>>(
+          livePath(leagueId, 'currentSubmittedBids', playerId, 'noBids'),
+        ),
+      ])
+      const now = Date.now()
+      if (round === undefined) {
+        throw new DataLayerError('auctionState', 'Bidding has not started.')
+      }
+      if (submitted !== amount) {
+        throw new DataLayerError(
+          'auctionState',
+          'That is not the bid this manager submitted.',
+        )
+      }
+      if (amount !== round.minNextBid) {
+        throw new DataLayerError(
+          'auctionState',
+          'That bid is not at the asking price.',
+        )
+      }
+      if (now > round.deadline) {
+        throw new DataLayerError('auctionState', 'That bid came in after time.')
+      }
+      if (round.currentLeadingManager === managerId) {
+        throw new DataLayerError(
+          'auctionState',
+          'That manager is already leading.',
+        )
+      }
+      if (hasPassed(round, submittedNoBids, managerId)) {
+        throw new DataLayerError('auctionState', 'That manager has passed.')
+      }
+      await assertCanBuy(leagueId, managerId, amount)
+
+      const bidId = service.generateKey() as BidId
+      const bid: Bid = {
+        bidId,
+        bidNumber: Object.keys(round.bids ?? {}).length + 1,
+        bid: amount,
+        managerId,
+        timestamp: now,
+      }
+      const at = (field: string) =>
+        livePath(leagueId, 'currentAcceptedBids', playerId, field)
+
+      await service.update({
+        [livePath(leagueId, 'currentAcceptedBids', playerId, 'bids', bidId)]:
+          bid,
+        [at('currentLeadingBid')]: amount,
+        [at('currentLeadingManager')]: managerId,
+        [at('minNextBid')]: amount + BID_INCREMENT,
+        // Every accepted bid restarts the clock.
+        [at('deadline')]: now + ROUND_SECONDS * 1000,
+        [at('lastAcceptedBid')]: bidId,
+        [livePath(
+          leagueId,
+          'playerWiseBiddingHistory',
+          playerId,
+          'bids',
+          bidId,
+        )]: bid,
+        ...timelineEntry(leagueId, 'bid', { playerId, bid: amount, managerId }),
+      })
+    },
+
+    /** Records a pass the manager submitted. Irreversible for the round. */
+    async acceptNoBid(
+      leagueId: LeagueId,
+      playerId: PlayerId,
+      managerId: UserId,
+    ): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding', 'timeUp'], 'Bidding is not open.')
+      assertCurrent(state, playerId)
+
+      const [round, submitted] = await Promise.all([
+        service.read<AcceptedBidsForPlayer>(
+          livePath(leagueId, 'currentAcceptedBids', playerId),
+        ),
+        service.read<boolean>(
+          livePath(
+            leagueId,
+            'currentSubmittedBids',
+            playerId,
+            'noBids',
+            managerId,
+          ),
+        ),
+      ])
+      if (submitted !== true) {
+        throw new DataLayerError('auctionState', 'That manager has not passed.')
+      }
+      if (hasPassed(round, undefined, managerId)) return // already recorded
+
+      const noBidId = service.generateKey() as NoBidId
+      await service.update({
+        [livePath(
+          leagueId,
+          'currentAcceptedBids',
+          playerId,
+          'noBids',
+          noBidId,
+        )]: {
+          noBidNumber: Object.keys(round?.noBids ?? {}).length + 1,
+          managerId,
+          timestamp: Date.now(),
+        },
+        ...timelineEntry(leagueId, 'noBid', { playerId, managerId }),
+      })
+    },
+
+    /** A call onto the timeline. Changes no state; the clock already says it. */
+    async announceCall(leagueId: LeagueId, call: AuctionCall): Promise<void> {
+      await assertAuctioneer(leagueId)
+      if (!(AUCTION_CALLS as readonly unknown[]).includes(call)) {
+        throw new DataLayerError('invalid', 'Not a call.')
+      }
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding'], 'Bidding is not open.')
+      await service.update(
+        timelineEntry(leagueId, call, { timeRemaining: CALL_AT_SECONDS[call] }),
+      )
+    },
+
+    /**
+     * **Closes bidding once the deadline has passed by this service's clock**,
+     * allowing a second's difference between it and the auctioneer's. Selling
+     * stays manual.
+     */
+    async markTimeUp(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding'], 'Bidding is not open.')
+      const playerId = state.currentPlayerId
+      if (playerId === undefined) {
+        throw new DataLayerError('auctionState', 'Nobody is up.')
+      }
+      const deadline = await service.read<number>(
+        livePath(leagueId, 'currentAcceptedBids', playerId, 'deadline'),
+      )
+      if (deadline !== undefined && Date.now() < deadline - 1000) {
+        throw new DataLayerError('auctionState', 'There is still time left.')
+      }
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'phase')]: 'timeUp',
+        [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: false,
+        [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: false,
+        ...timelineEntry(leagueId, 'timeUp', {}),
+      })
+    },
+
+    /**
+     * **Sells the player up to the leader at the leading bid**, both read here
+     * rather than passed in. Manual, deliberately: allowed while bidding or
+     * after time up, at the auctioneer's judgement.
+     */
+    async sellPlayer(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding', 'timeUp'], 'Nothing is being sold.')
+      const playerId = state.currentPlayerId
+      if (playerId === undefined) {
+        throw new DataLayerError('auctionState', 'Nobody is up.')
+      }
+      const round = await service.read<AcceptedBidsForPlayer>(
+        livePath(leagueId, 'currentAcceptedBids', playerId),
+      )
+      const leader = round?.currentLeadingManager
+      const amount = round?.currentLeadingBid
+      const winning =
+        round?.lastAcceptedBid === undefined
+          ? undefined
+          : round.bids?.[round.lastAcceptedBid]
+      if (
+        leader === undefined ||
+        amount === undefined ||
+        winning === undefined
+      ) {
+        throw new DataLayerError(
+          'auctionState',
+          'Nobody has bid. Mark the player unsold instead.',
+        )
+      }
+      await assertCanBuy(leagueId, leader, amount)
+      await service.update(
+        await saleUpdate(leagueId, playerId, leader, amount, winning),
+      )
+    },
+
+    /**
+     * **The last-resort sale**, to a chosen manager at a chosen price. The
+     * bidding so far is kept; the sale becomes the final bid unless it already
+     * is the last one accepted.
+     */
+    async sellPlayerManually(
+      leagueId: LeagueId,
+      managerId: UserId,
+      amount: number,
+    ): Promise<void> {
+      await assertAuctioneer(leagueId)
+      assertPriceGrid(amount)
+      const state = await liveState(leagueId)
+      const playerId = state.currentPlayerId
+      if (
+        playerId === undefined ||
+        !(['betweenPlayers', 'bidding', 'paused', 'timeUp'] as const).includes(
+          state.phase as 'betweenPlayers',
+        )
+      ) {
+        throw new DataLayerError('auctionState', 'Nobody is up to sell.')
+      }
+      const status = await service.read<PlayerStatus>(
+        livePath(leagueId, 'playerStatus', playerId),
+      )
+      if (status?.status === 'Sold' || status?.status === 'Unsold') {
+        throw new DataLayerError(
+          'auctionState',
+          'That player is already decided.',
+        )
+      }
+      await assertCanBuy(leagueId, managerId, amount)
+
+      const round = await service.read<AcceptedBidsForPlayer>(
+        livePath(leagueId, 'currentAcceptedBids', playerId),
+      )
+      const last =
+        round?.lastAcceptedBid === undefined
+          ? undefined
+          : round.bids?.[round.lastAcceptedBid]
+      const winning: Bid =
+        last !== undefined &&
+        last.managerId === managerId &&
+        last.bid === amount
+          ? last
+          : {
+              bidId: service.generateKey() as BidId,
+              bidNumber: Object.keys(round?.bids ?? {}).length + 1,
+              bid: amount,
+              managerId,
+              timestamp: Date.now(),
+            }
+      await service.update(
+        await saleUpdate(leagueId, playerId, managerId, amount, winning),
+      )
+    },
+
+    async markPlayerUnsold(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding', 'timeUp'], 'Nothing is being sold.')
+      const playerId = state.currentPlayerId
+      if (playerId === undefined) {
+        throw new DataLayerError('auctionState', 'Nobody is up.')
+      }
+      await service.update({
+        [livePath(leagueId, 'playerStatus', playerId)]: {
+          playerId,
+          status: 'Unsold',
+        },
+        [livePath(leagueId, 'playerWiseBiddingHistory', playerId, 'status')]:
+          'Unsold',
+        [livePath(leagueId, 'auctionState', 'phase')]: 'unsold',
+        [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: false,
+        [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: false,
+        ...timelineEntry(leagueId, 'unsold', { playerId }),
+      })
+    },
+
+    /**
+     * **Back to before Start auction**, for testing. The auction writes the
+     * live node and, on each sale, the league's squads; lineups and the
+     * leaderboard cache are built on those squads, so they go too. Members and
+     * the draft order come from joining and stay.
+     *
+     * One atomic update. Refused in production whoever asks.
+     */
+    async resetAuction(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+
+      if (service.environment === 'prod') {
+        throw new DataLayerError(
+          'forbidden',
+          'An auction cannot be reset in production.',
+        )
+      }
+
+      await service.update({
+        [paths.liveAuctions(leagueId)]: null,
+        [paths.squads(leagueId)]: null,
+        [paths.matchBasedLineups(leagueId)]: null,
+        [paths.gameWeekBasedLineups(leagueId)]: null,
+        [paths.leaderboards(leagueId)]: null,
+      })
+    },
+
+    // -----------------------------------------------------------------------
+    // The live auction: a manager's writes
+    // -----------------------------------------------------------------------
+
+    /**
+     * **Writes only the bidder's own field.** The manager is the caller, never
+     * an argument. Whether the bid is accepted — the price, the clock — is the
+     * auctioneer's to judge; this refuses only what could never be valid.
+     */
+    async submitBid(
+      leagueId: LeagueId,
+      playerId: PlayerId,
+      amount: number,
+    ): Promise<void> {
+      await assertAuctionLeague(leagueId)
+      await assertManager(leagueId)
+      const uid = requireSession().uid as UserId
+      assertPriceGrid(amount)
+
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding'], 'Bidding is not open.')
+      assertCurrent(state, playerId)
+
+      const [round, submittedNoBids] = await Promise.all([
+        service.read<AcceptedBidsForPlayer>(
+          livePath(leagueId, 'currentAcceptedBids', playerId),
+        ),
+        service.read<Partial<Record<string, true>>>(
+          livePath(leagueId, 'currentSubmittedBids', playerId, 'noBids'),
+        ),
+      ])
+      if (round?.currentLeadingManager === uid) {
+        throw new DataLayerError(
+          'auctionState',
+          "You're already the highest bidder.",
+        )
+      }
+      if (hasPassed(round, submittedNoBids, uid)) {
+        throw new DataLayerError('auctionState', 'You passed on this player.')
+      }
+      await assertCanBuy(leagueId, uid, amount)
+
+      await service.update({
+        [livePath(leagueId, 'currentSubmittedBids', playerId, 'bids', uid)]:
+          amount,
+      })
+    },
+
+    /** A pass, written to the passer's own field. **Irreversible.** */
+    async submitNoBid(leagueId: LeagueId, playerId: PlayerId): Promise<void> {
+      await assertAuctionLeague(leagueId)
+      await assertManager(leagueId)
+      const uid = requireSession().uid as UserId
+
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding', 'timeUp'], 'Bidding is not open.')
+      assertCurrent(state, playerId)
+
+      const [round, submittedNoBids] = await Promise.all([
+        service.read<AcceptedBidsForPlayer>(
+          livePath(leagueId, 'currentAcceptedBids', playerId),
+        ),
+        service.read<Partial<Record<string, true>>>(
+          livePath(leagueId, 'currentSubmittedBids', playerId, 'noBids'),
+        ),
+      ])
+      if (round?.currentLeadingManager === uid) {
+        throw new DataLayerError(
+          'auctionState',
+          "You're the highest bidder, so you can't pass.",
+        )
+      }
+      if (hasPassed(round, submittedNoBids, uid)) return // already out
+
+      await service.update({
+        [livePath(leagueId, 'currentSubmittedBids', playerId, 'noBids', uid)]:
+          true,
+      })
     },
 
     async getMembers(leagueId: LeagueId): Promise<LeagueMemberSummary[]> {
