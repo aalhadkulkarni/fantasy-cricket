@@ -3,8 +3,17 @@ import { useState } from 'react'
 import { EditorCard } from '@/components/admin/editor-card'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { publishTournament } from '@/data-layer'
-import type { Tournament } from '@fantasy-cricket/shared'
+import type { MatchId, RoundId, Tournament } from '@fantasy-cricket/shared'
 
 /**
  * Publishing, and the official leagues that open with it.
@@ -28,6 +37,13 @@ export function TournamentPublish({
 
   const [matchBased, setMatchBased] = useState(!published)
   const [gameWeekBased, setGameWeekBased] = useState(!published)
+  // Unticked by default: an auction is an explicit opt-in, not a baseline.
+  const [auction, setAuction] = useState(false)
+  /* As the input holds it, "2026-12-20T19:30", in the admin's own time zone. */
+  const [auctionStart, setAuctionStart] = useState('')
+  /* No preselection: a length is a decision about the league, and "the whole
+     round" was the accidental default this replaced. */
+  const [lengths, setLengths] = useState<Partial<Record<RoundId, number>>>({})
   const [status, setStatus] = useState<'idle' | 'saving' | 'failed'>('idle')
   const [message, setMessage] = useState<string | undefined>(undefined)
 
@@ -38,13 +54,27 @@ export function TournamentPublish({
 
   const existing = Object.keys(tournament.leagues ?? {}).length
 
-  const wantsLeague = matchBased || gameWeekBased
+  const wantsLeague = matchBased || gameWeekBased || auction
+
+  // An auction league is gameweek-based too, so it needs the same lengths.
+  const needsLengths = gameWeekBased || auction
+  const rounds = roundSpans(tournament)
+  const lengthsMissing =
+    needsLengths && rounds.some((round) => lengths[round.roundId] === undefined)
+
+  const auctionStartTime =
+    auctionStart === '' ? undefined : new Date(auctionStart).getTime()
+  const startMissing = auction && auctionStartTime === undefined
 
   // The gate is enforced in the data layer. Disabling here is convenience, and
   // saying why is the part that matters. Once published there is nothing left
   // to do unless a league is being asked for.
   const canPublish =
-    dated > 0 && status !== 'saving' && (!published || wantsLeague)
+    dated > 0 &&
+    status !== 'saving' &&
+    (!published || wantsLeague) &&
+    !lengthsMissing &&
+    !startMissing
 
   async function publish() {
     setStatus('saving')
@@ -53,6 +83,10 @@ export function TournamentPublish({
       await publishTournament(tournament.tournamentId, {
         matchBased,
         gameWeekBased,
+        ...(needsLengths ? { gameWeekLengths: lengths } : {}),
+        ...(auction && auctionStartTime !== undefined
+          ? { auction: { auctionStartTime } }
+          : {}),
       })
       onPublished()
     } catch (e) {
@@ -95,6 +129,91 @@ export function TournamentPublish({
           Official game week based league
         </label>
 
+        <label className="flex items-center gap-2.5 text-sm">
+          <Checkbox
+            checked={auction}
+            onCheckedChange={(checked) => setAuction(checked === true)}
+          />
+          Official auction league
+        </label>
+
+        {/*
+          Checked in the service too: in the future, and before the first
+          match, since squads have to be won before teams can be picked.
+        */}
+        {auction && (
+          <div className="grid gap-2 rounded-md border p-3">
+            <Label htmlFor="auction-start">Auction starts</Label>
+            <Input
+              id="auction-start"
+              type="datetime-local"
+              value={auctionStart}
+              onChange={(e) => setAuctionStart(e.target.value)}
+              className="w-full sm:w-64"
+            />
+            <p className="text-xs text-subtle-foreground">
+              Six managers, standard auction rules, and joining closes when the
+              auction starts. You run it as the auctioneer. Players without
+              auction values go in as General at 2.
+            </p>
+          </div>
+        )}
+
+        {/*
+          One choice per round, serving every gameweek league this publish
+          opens. Only divisors are offered, since gameweeks are equal length
+          within a round; the service refuses anything else regardless.
+        */}
+        {needsLengths && (
+          <div className="mt-1 grid gap-3 rounded-md border p-3">
+            <p className="text-xs text-muted-foreground">
+              Matches per gameweek, for each round. A one-match gameweek has no
+              impact sub.
+            </p>
+            {rounds.map((round) => (
+              <div
+                key={round.roundId}
+                className="flex flex-wrap items-center justify-between gap-2"
+              >
+                <Label htmlFor={`length-${round.roundId}`} className="min-w-0">
+                  <span className="truncate">{round.roundName}</span>
+                  <span className="font-normal text-subtle-foreground">
+                    {round.span} {round.span === 1 ? 'match' : 'matches'}
+                  </span>
+                </Label>
+                <Select
+                  value={
+                    lengths[round.roundId] === undefined
+                      ? ''
+                      : String(lengths[round.roundId])
+                  }
+                  onValueChange={(value) =>
+                    setLengths((current) => ({
+                      ...current,
+                      [round.roundId]: Number(value),
+                    }))
+                  }
+                >
+                  <SelectTrigger
+                    id={`length-${round.roundId}`}
+                    className="w-44"
+                  >
+                    <SelectValue placeholder="Choose length" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {divisorsOf(round.span).map((length) => (
+                      <SelectItem key={length} value={String(length)}>
+                        {length} per gameweek · {round.span / length}{' '}
+                        {round.span / length === 1 ? 'gameweek' : 'gameweeks'}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/*
           Worth stating rather than discovering. Whoever publishes owns and
           administers these leagues but is not a manager in them — a manager has
@@ -102,9 +221,9 @@ export function TournamentPublish({
         */}
         {wantsLeague && (
           <p className="text-xs text-subtle-foreground">
-            Public, standard points, no auction, up to 200 managers. You own and
-            administer them but do not play them — join like anyone else to pick
-            a team. The gameweek league gets one gameweek per round.
+            Public and standard points. The match and gameweek leagues take up
+            to 200 managers. You own and administer every league but do not play
+            — join like anyone else to pick a team.
           </p>
         )}
       </fieldset>
@@ -123,6 +242,16 @@ export function TournamentPublish({
             At least the first match needs a start time.
           </span>
         )}
+        {dated > 0 && startMissing && (
+          <span className="text-sm text-subtle-foreground">
+            Choose when the auction starts.
+          </span>
+        )}
+        {dated > 0 && lengthsMissing && (
+          <span className="text-sm text-subtle-foreground">
+            Choose a gameweek length for every round.
+          </span>
+        )}
         {dated > 0 && wantsLeague && players === 0 && (
           <span className="text-sm text-subtle-foreground">
             A league needs players to pick from. Set the teams and players
@@ -135,4 +264,27 @@ export function TournamentPublish({
       </div>
     </EditorCard>
   )
+}
+
+/** Each round in fixture order, with how many matches it spans. */
+function roundSpans(
+  tournament: Tournament,
+): { roundId: RoundId; roundName: string; span: number }[] {
+  const matches = tournament.matches ?? {}
+  const numberOf = (matchId: MatchId) => matches[matchId]?.matchNumber ?? 0
+
+  return Object.values(tournament.rounds ?? {})
+    .map((round) => ({
+      roundId: round.roundId,
+      roundName: round.roundName,
+      first: numberOf(round.firstMatchId),
+      span: numberOf(round.lastMatchId) - numberOf(round.firstMatchId) + 1,
+    }))
+    .sort((a, b) => a.first - b.first)
+    .map(({ roundId, roundName, span }) => ({ roundId, roundName, span }))
+}
+
+/** 1 to n, every length a round of n matches divides into evenly. */
+function divisorsOf(n: number): number[] {
+  return Array.from({ length: n }, (_, i) => i + 1).filter((d) => n % d === 0)
 }

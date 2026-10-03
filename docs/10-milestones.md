@@ -63,15 +63,10 @@ users join, submit and edit a team, see points, and follow a leaderboard.
 
 ### Documents that are now wrong
 
-Fix these, or read them with this list beside them.
+One left. The others on this list have been corrected at source.
 
 | Where | What it says | What is true |
 | --- | --- | --- |
-| `CLAUDE.md` ("Standard points are never copied…" row), `docs/01-overview.md` ("Standard and custom points resolve by fallback"), `docs/data-model.js` (points header, "falls back to standardPoints") | A league reads its own points store first and **falls back** to standard. | **There is no fallback.** A league reads custom points **or** standard points according to `isCustomScoringSystem`, never both. A custom-scoring league with no entry for a match scores zero for it. `docs/06-data-layer.md` and the code agree on this; the three places listed do not. |
-| `docs/08-pages/site-header.md`, `docs/08-pages/my-leagues.md` | Create a League is in the header and on the empty My Leagues state. | Removed from both for now (see deferred). |
-| `docs/05-data-model.md`, future-work table, "Materialised leaderboards" | Deferred. | Still deferred as described (computing on write). **Separately**, a read-side leaderboard *cache* now exists — see below. They are different things. |
-| `src/data-layer/firebase/paths.ts` header | "Nothing is implemented; every function returns `notImplemented`." | About 65 are implemented, behind the `Api` interface. |
-| `src/App.tsx` comment | "No route guards yet." | `RequireAccount` and `RequireSystemAdmin` guard routes. |
 | `docs/data-model.js`, `formats` (TBD3) | Formal scoring rules will live on each format. | The Points System page reads a **static file**, `src/content/points-system.ts`. A deliberate choice; moving it into `formats` later changes only where the page reads from. |
 
 ### Decisions taken during the build
@@ -202,40 +197,259 @@ system-admin write, `manager` role on team writes, deadlines, squad legality,
 change allowances and caps, owner or admin for league finishing, and team
 visibility.
 
-**This is now real, environment by environment.** The checks run in
-`apps/api`, and the browser holds no database access, so there is no path
-around them. The rules deny clients under `local`; `prod` is still open until
-the new frontend and service are deployed there, at which point it is locked
-too. Both known gaps are closed: drafts are admin-only, and nothing in the
-browser reads the database.
+**This is now real.** The checks run in `apps/api`, the browser holds no
+database access, and the rules deny every client in every environment, so
+there is no path around them. Both known gaps are closed: drafts are
+admin-only, and nothing in the browser reads the database.
+
+---
+
+## Milestone 3 — a real backend
+
+**Status: complete, 30 September 2026.** Built in a day; the estimate was a
+week, and the estimate was wrong because the seam did its job.
+
+**Goal:** make the rules real. Every check the data layer performed ran in the
+browser, and the security rules were permissive, so anyone could skip all of it
+and write to the database with the client SDK.
+
+### What shipped
+
+- **An Express service on Cloud Run** (`apps/api`), `asia-southeast1`, beside
+  the database. It verifies the caller's Firebase ID token, runs the checks,
+  and reaches the database with the Admin SDK.
+- **The browser holds no database access.** It keeps Firebase Auth, which is
+  what produces the token, and calls the service for everything else. The
+  bundle lost 192KB with the database SDK.
+- **The rules deny every client**, in every environment. The service is
+  privileged, so it is unaffected — which is the whole point.
+- **An npm workspaces monorepo**: `apps/web`, `apps/api`, `packages/shared`.
+- **`packages/shared` holds the contract** both sides compile against: the
+  `Api` interface, the error codes with their HTTP statuses, the environment
+  union, and `API_METHODS` — one table giving each operation its verb and
+  argument order, so a name or verb cannot drift between client and server.
+- **Keyless deploys.** GitHub Actions authenticates through Workload Identity
+  Federation; no service-account key exists anywhere. The frontend and the
+  service deploy independently, both from `release`.
+
+### Decisions
+
+| | |
+| --- | --- |
+| **Host** | Cloud Run, container, `asia-southeast1`. Cloud Functions was the alternative; the container is portable and can hold a WebSocket if the auction ever needs one |
+| **Framework** | Express, deliberately boring. Fastify was considered and rejected: with zod covering validation, its advantages did not apply here |
+| **Endpoints** | One per `Api` method, named after it — `GET /v1/getLeagueDetails`, `POST /v1/updateTeamForMatch`. Reads are GET, writes are POST |
+| **Types** | One shared package, not duplicated copies. Changes are additive; a structural change means a new type rather than an edited one |
+| **Auth** | Firebase ID token per request, verified with the Admin SDK. Roles are read from the database per request rather than baked into claims |
+| **Session** | The api object is built per request, closing over the caller, so `requireSession()` reads a closure and a handler cannot see another caller's identity |
+| **Errors** | A code per rule plus the server-rendered message. The code is for branching and logs; the message is what a person reads |
+| **Environments** | One service per environment, and **the environment comes from the deployment, never from the request** |
+| **Cutover** | Big bang, not method by method: a routing table between two backends is a mechanism that exists only to be deleted |
+
+### Authorization
+
+Audited across all 64 operations and written down in full under
+"Authorization, as it stands" above, and in `CLAUDE.md`. The audit found the
+rules already enforced; the two gaps it closed were both about unpublished
+tournaments rather than teams.
+
+### Verified
+
+By hand, with ID tokens minted for an admin and a non-admin: reads with and
+without arguments, an object filter, a write, an admin-only call, a refusal
+returning the right code and status, drafts hidden from the non-admin, and
+another manager's team returned on a locked match but not an open one. Then
+the whole app clicked through with the rules denying clients.
+
+### Deferred
+
+| Item | State |
+| --- | --- |
+| **Automated tests** | None. Every rule above is guarded by having been clicked once. The user's stated next priority |
+| **`preprod` and `test`** | Placeholders in `environments.ts`; no service, no hosting target |
+| **`apps/web/src/data-layer/firebase/archived`** | The pre-service browser copies, kept for reference, excluded from typecheck, lint and formatting. They no longer compile, so they are not a fallback |
+| **Renaming `firebase-api.ts`** | "api" means three things in this repo. *Adapter* is the accurate word — see the backlog |
+| **Response validation (zod)** | Responses are cast, not parsed. The same trust the Firebase reads had |
+
+## Milestone 4 — the auction
+
+**Status: complete, 3 October 2026.** Phases A–C merged (#74, #75, #78), plus live reads (#79); D (#80), E (#83), F (#84), G (#85), H (#86).
+
+**Goal:** a live auction for an **official auction league**, end to end — from
+publishing the tournament that opens the league to managers picking an XI from
+the squad they won. The BBL in January is the playtest.
+
+### Phases
+
+| Phase                    | What                                                                                                                                                                                                                                                                       |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A — prerequisites**    | **A1** gameweek length per round, chosen at publish. **A2** category and base price required on every new player, written to `standardAuctionConfig`. **A3** base tournaments (competitions) created and edited, with an optional home nation copied onto each tournament. |
+| **B — the league**       | A "create official auction league" option at **publish**: standard rules, public, 6 slots, join deadline equal to the auction start, which the admin picks. The publishing system admin is owner and auctioneer.                                                           |
+| **C — navigation**       | A blank auction page; Auction Center in the league; a Go to auction button for everyone.                                                                                                                                                                                   |
+| **D — display only**     | Everything the auction page shows, rendered from the data if it existed, tested with temporary fake data. The auctioneer and manager control panels, with no actions.                                                                                                      |
+| **E — live bidding**     | Start the auction, pick the batch and the player, start bidding; bid and pass; accepting bids, the timer and the calls; sell to the leader, the manual fallback sale, unsold.                                                                                              |
+| **F — the draft**        | Start the draft, next manager (skipping anyone who cannot pick), the manager's pick, the auctioneer accepting it.                                                                                                                                                          |
+| **G — running the room** | Rewind inside Start/End recovery, pause and resume, add time, end the auction.                                                                                                                                                                                             |
+| **H — in the league**    | The Squads page; My Team picking only from the manager's squad, under the XI rules and the overseas cap.                                                                                                                                                                   |
+
+**An action is done only end to end:** the UI to perform it, every database
+write it implies (squads, budgets, history, phase), the change on the actor's
+screen and on everyone else's, and its timeline event.
+
+### Not in this milestone
+
+- The backup auctioneer, and switching auctioneers
+- Custom auction rules — only the official league's standard ones
+- UI polish such as the countdown, added at the end of the milestone
+- Transfers
+
+### Decisions
+
+Recorded in the documents they belong to; listed here so a planner sees them
+together.
+
+- **Overseas** is a player's country not matching the tournament's
+  `homeNation`, copied from the competition at tournament creation. **No home
+  nation counts as India.** It replaced
+  a hardcoded India, which would have made the BBL unplayable.
+- **The draft order is assigned as managers join**, at random from the
+  positions still free; unclaimed positions show as TBA. There is no "generate
+  draft order" step.
+- **Bidding:** the only budget check is not going below zero, and a manager at
+  the maximum squad size cannot bid. The draft pool is General plus everything
+  unsold in Marquee and Star.
+- **The timer restarts from each accepted bid**, and lateness is judged by the
+  server's clock when it processes the bid.
+- **The live auction page is open to everyone, always**, and after the auction
+  it is the historical record. Auction Center is a reference page, the same in
+  every phase.
+- **Manual sell** exists as a last-resort fallback.
+- **Rewind** undoes the last round's result, repeatedly, only inside recovery,
+  and appends to the timeline rather than rewriting it. A non-production reset
+  exists for testing. **Results are logged in order** at
+  `liveAuctions/<leagueId>/roundResults`, since the timeline is never read to
+  decide anything; a rewind also moves the auction back to that round's batch
+  or draft turn. One `roundRewound` entry per rewind.
+- **Ending the auction is reversible**: Reopen auction restores it as it was.
+  **Lineups saved between an end and a reopen are left alone.** A lineup with a
+  player outside the manager's current squad is **treated as absent** (Phase
+  H): it scores nothing and shows nowhere until a new one is saved; nothing is
+  deleted.
+- **Squads page** after End only, hidden again on a reopen. One read,
+  `getSquads`. Your own squad highlights your saved XI for the current period;
+  others only their locked XI.
+- **An auction league's XI** comes only from the manager's squad at the
+  period's first match, under the role rules and the overseas cap — refused in
+  the service, and Save is disabled in My Team. Roles are re-read from the
+  stored players rather than trusted from the request.
+- **Pause** resets the clock to 30 seconds on resume. **+10 seconds** works
+  while bidding and after time up, when it reopens bidding.
+- **Team submission begins only when the auctioneer ends the auction.** An
+  auction league is pre-auction until the auction is started and in its auction
+  until it is ended, regardless of the scheduled start or the first ball; only
+  then do team submission and active follow. `league-phase.ts` derives it from
+  the live auction's own phase field, read alone.
+- **Existing players are not backfilled** with auction values; environments are
+  re-seeded. **In a league's pool, a participant without values goes in as
+  General at 2**, applied when the league copies the standard values.
+- **A draft position is claimed transactionally on join**, like a join code, so
+  two simultaneous joins cannot share one. `draftOrder` is keyed position →
+  manager for that reason.
+- **Joining closes when the auction starts**, even before the scheduled time —
+  a manager arriving mid-auction would have no budget or draft seat.
+- **Bids are processed in the auctioneer's browser**, the original design: it
+  listens to submitted bids, accepts them through the service one at a time
+  against the round it keeps in memory, and owns the timer and the calls. If
+  it disconnects the auction stalls, which is accepted — selling is manual, so
+  a missing auctioneer stalls it anyway. Bidders' `submitBid` takes no manager
+  id; the service uses the token.
+- **Live auction reads come straight from the database in the browser**, per
+  league, through a read-only rule set in the console
+  (`$env/liveAuctions/$leagueId`, signed-in only; `/liveAuctions` itself stays
+  closed). Writes still go through the service. The database SDK is loaded only
+  where it is used. **State on the auction page is Zustand.**
+- **The draft mirrors bidding**: the auctioneer moves the turn on (Start
+  draft, then Next in draft order, skipping anyone who cannot pick); the
+  manager submits a pick; the auctioneer's browser accepts it through the
+  service, which re-checks and sells at base price. **Picks live at
+  `liveAuctions/<leagueId>/draftPicks/<turn>`**, keyed by a turn counter in
+  `auctionState`, and are claimed transactionally — one per turn. **Next waits
+  for the turn to be settled**, by a pick gone through or a deliberate **Skip**
+  (its own button and endpoint, timeline `draftTurnSkipped`), which claims the
+  turn the same way, so a pick and a skip cannot both land.
+- **The batch sequence** lives in `standardAuctionConfig.batchSequence` and is
+  copied into each auction league: Marquee batsmen, bowlers, keepers,
+  all-rounders, then the same for Star, then the draft as a batch of its own.
+  **A batch is finished before the next begins**: Next batch is refused while
+  any of its players has not gone up.
+- **My Team stays in an auction league's sidebar** and says "Team submission
+  will open after the auction" until the auction is ended. An auction league
+  lands on Auction Center.
+- **The official auction league** is created at publish: public, six slots,
+  standard auction rules, join deadline equal to the auction start. The start
+  must be in the future and before the first match. The publisher owns it and
+  is its auctioneer, and **cannot play in it**: an auctioneer is never a
+  manager, and the service refuses their join.
+
+- **Testing runs on the IPL 2026 pool**, loaded by the admin panel's Populate
+  seed data, which resets a non-production environment and replaces the old
+  sample data. See `08-pages/system-admin.md`.
+
+### Done in Phase E, as Phase D required
+
+- The timeline is written in the typed shape `TimelineEventData` fixes, with a
+  `timestamp`.
+- `auctionState` is written in its Phase D shape: `currentBatch` is an
+  `AuctionBatch` (`kind: 'draft'` for the draft), and a selected player has no
+  round until bidding starts.
+
+### Resolved
+
+- **Scheduled start passed, auction not started**: the auction is simply not
+  started. The scheduled start is informative — it tells everyone when to come
+  to the auction — and **the auction's state depends only on the auctioneer
+  pressing Start**. The league stays pre-auction until then, which is what
+  `league-phase.ts` already derives.
 
 ---
 
 ## Next
 
-**Agreed order: the backend, then the auction.**
+### What decides the timing
 
-The backend is still being decided. The leading option is a **Node service on
-Google Cloud** using the Firebase Admin SDK, with the browser holding no
-database access (`.read` and `.write` false) apart from whichever auction nodes
-need live listeners. The `Api` interface in `src/data-layer/api.ts` is the
-contract: a new implementation calls the service, and nothing above the data
-layer changes.
+- **BBL in January is the auction playtest.** Eight teams and a deep enough
+  pool for six managers to fill squads; a bilateral series is not — two squads
+  is about thirty players, and six managers need eighty or more.
+- **IPL squads are not settled until the mini auction in January**, after the
+  transfer window closes in December. There is no point holding a fantasy
+  auction before then, which is why BBL comes first and IPL follows in
+  February–March.
+- **AUS vs SA runs on the current system**, as a match-based league with about
+  five people. It is the first time the season loop has been exercised by more
+  than one human, and worth treating as the experiment it is — including
+  timing how long one match's points entry actually takes.
+- **The auction's mechanics need no audience.** A synthetic tournament with
+  enough sample players exercises bidding, selling, undo, purses and squad
+  limits with one person. Only the atmosphere needs a room full of people.
 
-Things the backend design has to settle:
+### Ideas raised, with the reasoning
 
-- **Where it runs, and the region**, which follows the database's region.
-- **Which reads stay direct.** Only the auction needs live updates; everything
-  else can go through the service, with polling where freshness matters. The
-  auction nodes need a node-by-node look, since bids may need to be private.
-- **The leaderboard cache** can move from the database into server memory, or
-  stay.
-- **Sparse lineups** (`docs/05-data-model.md`) are the other large cost saving
-  and are cheaper to do during the move than after.
-
-**Known costs** at 100 managers over a 74-match season: dense lineups make an
-uncached leaderboard read about 3.8 MB, the dominant cost. The cache removes
-most repeat reads; sparse lineups would cut the rest by roughly 5–7×.
+- **Live chat during the auction** — cheap, rides on the rules carve-out the
+  auction needs anyway, and makes the room self-contained. First choice if the
+  auction is buffed.
+- **Co-managers on one team** — more people in the room, but it changes the
+  single-writer-per-team property the bidding design relies on, and touches
+  every "is this your team" check. Most of its value lands in the season,
+  which January will not have.
+- **Head-to-head fixtures, survivor, chips** — engagement features derived
+  from points already collected, so they add **no recurring admin work**. The
+  best of the cheap wins, once there are users to engage.
+- **Predict-and-win** — rejected for now, not because it is dull but because
+  it adds per-match admin work forever, on top of manual points entry.
+- **Automated scoring ingestion** — the sleeper. Points are typed in by hand
+  today, which is survivable for five people and not for a season with real
+  users. Needs lead time, and the hard part (matching external player names to
+  internal ids) is the interesting part.
 
 ---
 
@@ -243,8 +457,49 @@ most repeat reads; sparse lineups would cut the rest by roughly 5–7×.
 
 Small items logged instead of fixed. None blocks anything.
 
-- Fix the stale documents listed above, in particular the points fallback.
-- `getTournament` should not return unpublished drafts to non-admins.
+- **Keep an instance warm for an auction.** The service deploys with
+  `--min-instances 0`, so the first request after a quiet spell waits for a
+  cold start. Before an auction:
+  `gcloud run services update api --region asia-southeast1 --project fantasy-cricket-league-c0346 --min-instances 1`,
+  and the same with `--min-instances 0` afterwards. A deploy resets it to 0,
+  so do not deploy mid-auction — or run the command again after one.
+- **The auction, decided and not yet built** (3 October 2026):
+  - **"cr" on every price** in the auction and Auction Center, not only some.
+  - **"Managers out of bidding" includes** anyone whose squad is full or whose
+    budget is below the asking price, not only those who passed.
+  - **Tell the auctioneer when every manager has acted** — all passed, or one
+    leads and every other has passed or cannot bid — so they need not wait out
+    the 30 seconds before selling or marking unsold.
+
+- **A dedicated bid processor**, if the auctioneer's browser proves fragile: one
+  always-on Cloud Run instance (exactly one, CPU always allocated), separate
+  from the API, holding the listeners and the timer. Tens of dollars a month
+  if left running; never deploy it mid-auction, or add a database lock so only
+  one copy processes.
+
+- **The CORS preflight — partly done.** The site and the service are on
+  different origins and requests carry `Authorization`, so the browser sends an
+  `OPTIONS` before a request. `cors()` now sets `maxAge: 7200` (Chrome's
+  ceiling), so each write endpoint — a fixed `POST /v1/<method>` URL —
+  preflights once per two hours instead of every time. GET reads carry their
+  arguments in the query string, so each distinct URL still preflights once.
+  **The remaining fix** is serving the API from the site's origin — a Firebase
+  Hosting rewrite of `/api/**` to Cloud Run, and a Vite proxy locally — which
+  removes CORS entirely. An infrastructure change; check Hosting can rewrite to
+  Cloud Run in `asia-southeast1` first.
+- **Every request is timed**: one structured log line (method, path, status,
+  ms), preflights included, and a `Server-Timing` header on every answer. Look
+  here before optimising further.
+- **WebSockets for auction writes — considered, not built.** The browser
+  already reuses one HTTP/2 connection, so handshakes are not repeated; on
+  Cloud Run a socket is cut at 60 minutes, bills the instance while open, and
+  needs its own re-authentication as tokens expire hourly. Revisit only if the
+  timings show connection overhead.
+
+- **My Team refetches a gameweek on every visit.** Remembering loaded periods
+  (cleared on save), and fetching the neighbouring ones in the background, would
+  make going back instant. Page-only.
+
 - Custom-scoring points entry, and a cache stamp for it
   (`customPointsUpdatedAt/{leagueId}`).
 - Actions Center: derive real items, starting with "a team deadline with no

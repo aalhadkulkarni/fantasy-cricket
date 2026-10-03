@@ -32,11 +32,17 @@ import type {
   TransferProposalId,
   UserId,
 } from './ids.ts'
-import type { Format, LeagueRole, PlayerRole } from './reference.ts'
+import type {
+  Format,
+  LeagueRole,
+  PlayerCategory,
+  PlayerRole,
+} from './reference.ts'
 import type { Player } from './player.ts'
 import type { Match } from './tournament.ts'
 import type { Team } from './team.ts'
 import type {
+  AuctionBatch,
   GameWeek,
   League,
   LeagueEntry,
@@ -508,16 +514,105 @@ export interface AuctionManagerStatus extends ManagerAuctionStatus {
 
 /** A player in the auction pool, with this league's category and price. */
 export interface AuctionPoolPlayer {
+  /** Carries `teamShortName` for this league's tournament. */
   player: Player
-  playerCategory: string
+  playerCategory: PlayerCategory
   playerBasePrice: number
 }
 
-/** Whose turn it is, in order. Position one picks first. */
+/**
+ * One draft position. **Every position is listed**, held or not: one nobody has
+ * claimed yet has no manager, and reads as TBA. Position one picks first, and
+ * the order snakes back after the last.
+ */
 export interface DraftOrderEntry {
-  managerId: UserId
-  managerName: string
   position: number
+  managerId?: UserId
+  managerName?: string
+  fantasyTeamName?: string
+}
+
+/**
+ * **What a manager prepares from**, for Auction Center: when, under what
+ * rules, in what order, and who is running it. The fast part of the page — the
+ * player pool is its own read, because it is the slow one.
+ */
+/**
+ * **A match, with when it counts as over** — for opening My Team on the one
+ * that matters, never for a deadline.
+ */
+export interface Fixture extends Match {
+  /**
+   * The start plus the format's duration, or the next match's start if that is
+   * sooner. Absent while undated.
+   */
+  endsAt?: number
+}
+
+/** One player in a manager's squad, as the Squads page shows them. */
+export interface SquadEntry {
+  /** With `teamShortName` for this tournament. */
+  player: Player
+  /** What they went for at auction. */
+  pricePaid?: number
+}
+
+/** One manager's squad, and the eleven to highlight in it. */
+export interface ManagerSquadView {
+  userId: UserId
+  userName: string
+  teamName: string
+  /** Role, then name. */
+  players: SquadEntry[]
+  /**
+   * **The eleven to highlight.** Your own saved XI for the current period;
+   * for anyone else, their latest **locked** XI — an unlocked selection is
+   * never shown. Absent when there is none to show.
+   */
+  xi?: {
+    playerIds: PlayerId[]
+    captainId: PlayerId
+    viceCaptainId: PlayerId
+    /** "Gameweek 3", or the match it is for. */
+    periodName: string
+  }
+}
+
+/**
+ * **Everything the Squads page shows, in one read.** Squads are public, so
+ * every manager's is here; only the highlighted XI follows the visibility
+ * rule.
+ */
+export interface SquadsView {
+  /** The caller first when they manage a team here; then by team name. */
+  managers: ManagerSquadView[]
+  /** The caller, when one of `managers` is theirs. */
+  mine?: UserId
+  homeNation: string
+  /** Absent means no cap. */
+  maxOverseasPlayersAllowedInXI?: number
+  lineupRules: LineupRules
+}
+
+export interface AuctionSettings {
+  auctionStartTime: number
+  totalBudget: number
+  minSquadSize: number
+  maxSquadSize: number
+  /** Absent means no cap. */
+  maxOverseasPlayersAllowedInXI?: number
+  /** The fixed step every bid rises by. */
+  bidIncrement: number
+  /** How long a round runs from its last accepted bid. */
+  roundSeconds: number
+  /** Absent on a league created before the sequence existed. */
+  batchSequence?: AuctionBatch[]
+  auctioneer: { userId: UserId; userName: string }
+  /**
+   * The tournament's home nation, **India when none is set**. A player from
+   * anywhere else is overseas.
+   */
+  homeNation: string
 }
 
 // ---------------------------------------------------------------------------
@@ -549,9 +644,17 @@ export interface TeamFilter {
   format?: Format
 }
 
+/**
+ * What the base tournament form submits.
+ *
+ * **`homeNation` as an empty string clears it** on an update. Absent in a
+ * partial update means leave it alone, so "no home nation" needs a value of its
+ * own.
+ */
 export interface CompetitionConfig {
   competitionName: string
   formatId: Format
+  homeNation?: string
 }
 
 /**
@@ -576,13 +679,21 @@ export interface PlayerConfig {
   playerShortName: string
 
   /**
-   * Free text. **Overseas is derived from this being anything but India**,
-   * which is hardcoded and a known Phase 1 limitation — so a fixed country list
-   * would imply a precision the model does not have.
+   * Free text. Overseas is derived from this against a tournament's
+   * `homeNation`, so it only has to match that string.
    */
   country: string
 
   playerRole: PlayerRole
+
+  /**
+   * **The standard auction values, required on creation.** Written to
+   * `standardAuctionConfig` in the same atomic update as the player, so every
+   * player created from here on can be auctioned. The base price is positive
+   * and a multiple of 0.5, the bid increment.
+   */
+  playerCategory: PlayerCategory
+  playerBasePrice: number
 
   /**
    * Which team, in which competition. Absent or empty means unassigned.
@@ -676,6 +787,14 @@ export interface LeagueGameWeek {
   matchIds: readonly MatchId[]
   /** The first match's start. The deadline is this minus the league's offset. */
   startsAt?: number
+
+  /**
+   * **When the gameweek counts as over**, for opening My Team on the one that
+   * matters: its last match's start plus the format's duration, or the next
+   * gameweek's first start, whichever is earlier — several matches can fall on
+   * one day. Absent while a match in it is undated.
+   */
+  endsAt?: number
 
   /**
    * The most players that may change **going into this gameweek**, from the one

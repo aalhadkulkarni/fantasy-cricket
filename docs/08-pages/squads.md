@@ -6,8 +6,9 @@ leagues, after the auction only.**
 **One page, not two.** There is no separate All Squads screen: your own squad
 and everyone else's are the same view, because you look at them together.
 
-**Your squad**, with the **current locked playing XI highlighted**, and **C** and
-**VC** marked.
+**Your squad**, with **the XI you have saved for the current period**
+highlighted, and **C** and **VC** marked. It is your own team, so it is visible
+to you before it locks; everyone else's squad shows only their locked XI.
 
 **Every other manager** appears as a **collapsed item** — name and team name —
 expanding to show their squad with the same locked-XI highlighting. With six

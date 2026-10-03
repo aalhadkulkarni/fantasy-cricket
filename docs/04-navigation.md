@@ -140,15 +140,10 @@ league never reaches either, so the first two rows never apply to one.
 **The button through to `/leagues/:leagueId/auction` lives in Auction Center and
 opens a new browser tab.**
 
-**Who sees it is role-conditional, not phase-conditional.** The auctioneer and
-the backup see it from the pre-auction state onward, labelled *Open auction
-room*; everyone else sees it only once the auction is live, labelled *Go to
-Auction*.
-
-> **Otherwise no auction could ever start.** The Start auction control lives on
-> the auction page, so a button that appeared only once an auction was live
-> would be waiting on something that could never happen. See
-> `08-pages/auction-center.md`.
+**Everyone who can see the league sees it, in every phase**, labelled _Go to
+auction_. Someone with no role in the auction arrives with no controls, which is
+harmless. The auctioneer reaches the Start auction control through the same
+button.
 
 The auction is a self-contained, high-focus activity. Keeping it in its own tab
 means a manager cannot lose it by clicking something else — and if they do
@@ -194,13 +189,13 @@ should redirect to the league's default section rather than showing an error:
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | Auction Center, Transfers Center | Auction leagues only                                                                                                                  |
 | Squads                           | Auction leagues, **after the auction has run**. One page, not two — see `docs/08-pages/squads.md`                                     |
-| My Team                          | Everyone except spectators — and in an auction league, **not before the auction has completed**, since there is no squad to pick from |
+| My Team                          | Everyone except spectators. In an auction league it says **"Team submission will open after the auction"** until the auctioneer closes the auction, since there is no squad to pick from |
 | Admin Center                     | Owner and admins only                                                                                                                 |
 
 > **My Team before an auction is a real case, not an edge case.** A manager
 > joins an auction league days before the auction. There is nothing for them to
-> pick yet. The sidebar item should be absent or disabled with an explanation —
-> never a link to an empty page.
+> pick yet, so the page says when that changes — never an empty form, and never
+> a "you missed the deadline" message for a team they could not have picked.
 
 ---
 

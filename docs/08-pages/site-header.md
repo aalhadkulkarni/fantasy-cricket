@@ -14,7 +14,7 @@ may equally be a sidebar. What matters is that these items are always reachable.
 | **My Leagues** | The primary surface — where a user returns daily during a season |
 | **Tournaments** | Discovery |
 | **Join a League** | Opens the league-code modal |
-| **Create a League** | Also reachable from a tournament page |
+| **Create a League** | Also reachable from a tournament page. **Hidden for now** — see below |
 | **Actions Center** | See `actions-center.md` |
 | **Admin panel** | **System admins only** |
 
@@ -37,6 +37,12 @@ can see.
 > `competitions`.
 
 ## Create a League — two entry points, one page
+
+> **Hidden from the interface for now.** The form is not built, so the entry
+> points were removed from the header, the tournament page and the My Leagues
+> empty state. `/leagues/new` still exists, unlinked, and only official
+> leagues are created — by publishing a tournament. Everything below describes
+> the intended design, not what ships today.
 
 - **From a tournament page** — the tournament is already chosen. Natural when
   browsing and thinking "I'll run one for this".

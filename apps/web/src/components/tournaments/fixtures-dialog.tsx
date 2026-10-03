@@ -5,30 +5,34 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import type { Team, Tournament } from '@fantasy-cricket/shared'
+import type { Match, Team } from '@fantasy-cricket/shared'
 
 /**
- * The full schedule.
+ * A list of fixtures — the whole schedule on tournament home, or one
+ * gameweek's matches on My Team.
  *
  * **A modal, as `08-pages/tournaments.md` specifies**, alongside the Teams and
- * Players views that will sit beside it. A tournament page is about the leagues
- * you can join; the fixtures are reference, wanted occasionally and in full.
+ * Players views that will sit beside it. Fixtures are reference, wanted
+ * occasionally and in full.
  *
- * **Ordered by `matchNumber`, never by id.** Ids are push keys and sort by
- * creation time, which is not the fixture order.
+ * **Ordered by `matchNumber`, never by id**, whatever order they arrive in.
+ * Ids are push keys and sort by creation time, which is not the fixture order.
  */
 export function FixturesDialog({
-  tournament,
+  matches: given,
   teams,
+  title = 'Fixtures',
+  description,
   onClose,
 }: {
-  tournament: Tournament
-  teams: Team[]
+  matches: readonly Match[]
+  teams: readonly Team[]
+  title?: string
+  /** Defaults to the match count. */
+  description?: string
   onClose: () => void
 }) {
-  const matches = Object.values(tournament.matches ?? {}).sort(
-    (a, b) => a.matchNumber - b.matchNumber,
-  )
+  const matches = [...given].sort((a, b) => a.matchNumber - b.matchNumber)
 
   const nameOf = (teamId: string | undefined) =>
     teamId === undefined
@@ -39,10 +43,10 @@ export function FixturesDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[520px]">
         <DialogHeader>
-          <DialogTitle>Fixtures</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            {tournament.tournamentName} · {matches.length}{' '}
-            {matches.length === 1 ? 'match' : 'matches'}
+            {description ??
+              `${matches.length} ${matches.length === 1 ? 'match' : 'matches'}`}
           </DialogDescription>
         </DialogHeader>
 

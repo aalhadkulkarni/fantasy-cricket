@@ -96,10 +96,9 @@ export function getMyTeamForMatch(
 }
 
 /**
- * Regular leagues: the whole tournament pool.
- *
- * An auction league picks from its squad instead — see `getSquad`, which is
- * filtered by match because squad membership changes with transfers.
+ * **What may be picked for a match.** A regular league: the whole tournament
+ * pool. An auction league: the caller's squad as it stood at that match —
+ * membership changes with transfers, so ask per period, not once.
  */
 export function getSelectablePlayers(
   leagueId: LeagueId,

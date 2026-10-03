@@ -1,14 +1,20 @@
 import { useState } from 'react'
 
+import { CompetitionsPanel } from '@/components/admin/competitions-panel'
 import { PlayersPanel } from '@/components/admin/players-panel'
 import { TeamsPanel } from '@/components/admin/teams-panel'
 import { TournamentsPanel } from '@/components/admin/tournaments-panel'
 import { PageContainer } from '@/components/layout/page-container'
 import { Button } from '@/components/ui/button'
+import { resolveEnvironment } from '@/config/environments'
 import {
+  createSampleIplTournament,
   createSamplePlayers,
+  populateSeedData,
   setUpBasicSystem,
   type SamplePlayersResult,
+  type SampleTournamentResult,
+  type SeedDataResult,
   type SystemSetupResult,
 } from '@/data-layer/system-setup'
 
@@ -45,6 +51,18 @@ export function SystemAdmin() {
         <SetUpBasicSystem onSetUp={catalogueChanged} />
 
         <CreateSamplePlayers onCreated={catalogueChanged} />
+
+        {resolveEnvironment() !== 'prod' && (
+          <>
+            <PopulateSeedData onPopulated={catalogueChanged} />
+            <CreateSampleIplTournament onCreated={catalogueChanged} />
+          </>
+        )}
+
+        <CompetitionsPanel
+          catalogueVersion={catalogueVersion}
+          onChanged={catalogueChanged}
+        />
 
         <TeamsPanel
           catalogueVersion={catalogueVersion}
@@ -268,6 +286,190 @@ function SampleOutcome({ state }: { state: SampleState }) {
           <li>already present · {result.skipped.length}</li>
         )}
       </ul>
+    </div>
+  )
+}
+
+type SeedState =
+  | { status: 'idle' }
+  | { status: 'armed' }
+  | { status: 'running' }
+  | { status: 'done'; result: SeedDataResult }
+  | { status: 'failed'; message: string }
+
+/**
+ * **Wipes the environment and loads the IPL 2026 test data.** Not shown in
+ * production, and the service refuses it there regardless.
+ *
+ * Two taps: the first arms it and says what will go, the second runs it.
+ */
+function PopulateSeedData({ onPopulated }: { onPopulated: () => void }) {
+  const [state, setState] = useState<SeedState>({ status: 'idle' })
+
+  async function run() {
+    setState({ status: 'running' })
+    try {
+      setState({ status: 'done', result: await populateSeedData() })
+      onPopulated()
+    } catch (error) {
+      setState({
+        status: 'failed',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  return (
+    <div className="floodlit mt-4 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
+      <h2 className="text-base font-semibold">Populate seed data</h2>
+      <p className="mt-2 text-sm text-muted-foreground">
+        Resets this environment to the IPL 2026 pool: the ten franchises,
+        thirteen national teams and 250 players with their auction categories
+        and base prices.
+      </p>
+
+      {state.status === 'armed' ? (
+        <div className="mt-5">
+          <p className="text-sm font-semibold text-destructive">
+            Deletes every player, team, tournament and league in this
+            environment, with all lineups, squads, auctions and points. Users
+            and base tournaments stay.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button variant="destructive" onClick={() => void run()}>
+              Delete everything and populate
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setState({ status: 'idle' })}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-5">
+          <Button
+            variant="outline"
+            onClick={() => setState({ status: 'armed' })}
+            disabled={state.status === 'running'}
+          >
+            {state.status === 'running' ? 'Populating…' : 'Populate seed data'}
+          </Button>
+        </div>
+      )}
+
+      <SeedOutcome state={state} />
+    </div>
+  )
+}
+
+function SeedOutcome({ state }: { state: SeedState }) {
+  if (state.status === 'failed') {
+    return (
+      <div className="mt-5 text-sm">
+        <p className="font-semibold text-destructive">Could not populate</p>
+        <p className="mt-1 font-mono text-xs text-muted-foreground">
+          {state.message}
+        </p>
+        <p className="mt-2 text-xs text-subtle-foreground">
+          Nothing was changed. The reset is one atomic update.
+        </p>
+      </div>
+    )
+  }
+  if (state.status !== 'done') return null
+
+  const { result } = state
+
+  return (
+    <div className="mt-5 text-sm">
+      <p className="font-semibold text-settled">
+        Reset {result.environment} and populated it.
+      </p>
+      <ul className="mt-2 space-y-0.5 font-mono text-xs text-muted-foreground">
+        <li>teams · {result.teamsCreated}</li>
+        <li>players · {result.playersCreated}</li>
+        <li>users whose leagues were cleared · {result.usersCleared}</li>
+      </ul>
+      {result.missingCompetitions.length > 0 && (
+        <p className="mt-2 text-xs text-destructive">
+          Base tournaments not found, so no one was put in them:{' '}
+          {result.missingCompetitions.join(', ')}
+        </p>
+      )}
+    </div>
+  )
+}
+
+type TournamentState =
+  | { status: 'idle' }
+  | { status: 'running' }
+  | { status: 'done'; result: SampleTournamentResult }
+  | { status: 'failed'; message: string }
+
+/**
+ * **An unpublished IPL 2027 on the 2026 schedule**, so testing publish and
+ * everything after it starts from a full tournament. Not shown in production,
+ * and the service refuses it there regardless.
+ */
+function CreateSampleIplTournament({ onCreated }: { onCreated: () => void }) {
+  const [state, setState] = useState<TournamentState>({ status: 'idle' })
+
+  async function run() {
+    setState({ status: 'running' })
+    try {
+      setState({ status: 'done', result: await createSampleIplTournament() })
+      onCreated()
+    } catch (error) {
+      setState({
+        status: 'failed',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  return (
+    <div className="floodlit mt-4 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
+      <h2 className="text-base font-semibold">Create sample IPL 2027</h2>
+      <p className="mt-2 text-sm text-muted-foreground">
+        The 2026 schedule moved to 2027: 70 league fixtures, four playoffs dated
+        but TBA vs TBA, every IPL team and player. Left unpublished. Needs
+        Populate seed data first.
+      </p>
+
+      <div className="mt-5">
+        <Button
+          variant="outline"
+          onClick={() => void run()}
+          disabled={state.status === 'running'}
+        >
+          {state.status === 'running' ? 'Creating…' : 'Create sample IPL 2027'}
+        </Button>
+      </div>
+
+      {state.status === 'failed' && (
+        <div className="mt-5 text-sm">
+          <p className="font-semibold text-destructive">Could not create it</p>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">
+            {state.message}
+          </p>
+        </div>
+      )}
+
+      {state.status === 'done' && (
+        <div className="mt-5 text-sm">
+          <p className="font-semibold text-settled">
+            Created {state.result.tournamentName}, unpublished.
+          </p>
+          <ul className="mt-2 space-y-0.5 font-mono text-xs text-muted-foreground">
+            <li>matches · {state.result.matches}</li>
+            <li>teams · {state.result.teams}</li>
+            <li>players · {state.result.players}</li>
+            <li>rounds · {state.result.rounds.join(', ')}</li>
+          </ul>
+        </div>
+      )}
     </div>
   )
 }

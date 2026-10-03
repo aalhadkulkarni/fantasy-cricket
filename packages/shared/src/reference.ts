@@ -62,6 +62,18 @@ export interface UserRoleRecord {
 export const FORMATS = ['t20', 'odi', 'test'] as const
 export type Format = (typeof FORMATS)[number]
 
+/**
+ * **How long a match is taken to last**, from its scheduled start, since end
+ * times are not stored — the figures in `my-team.md`. Close enough rather than
+ * exact: it decides only which period My Team opens on, **never a deadline**,
+ * which always comes from the scheduled start alone.
+ */
+export const MATCH_DURATION_MS: Readonly<Record<Format, number>> = {
+  t20: 4 * 60 * 60 * 1000,
+  odi: 9 * 60 * 60 * 1000,
+  test: (5 * 24 + 9) * 60 * 60 * 1000,
+}
+
 /** Stored at `formats/{format}`. */
 export interface FormatRecord {
   formatId: Format
@@ -158,12 +170,15 @@ export const TIMELINE_EVENTS = [
   'draftStarted',
   'nextDraftManager',
   'draftPick',
+  'draftTurnSkipped',
   'firstCall',
   'secondCall',
   'lastCall',
   'timeUp',
   'timeIncreased',
   'auctionEnded',
+  'roundRewound',
+  'auctionReopened',
 ] as const
 export type TimelineEventId = (typeof TIMELINE_EVENTS)[number]
 

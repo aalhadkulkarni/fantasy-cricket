@@ -406,8 +406,18 @@ of managers it was out of. It is computed once, ever, at migration.
 
 **Writes**
 
-- `joinLeague(leagueId, teamName)` — public leagues
+- `joinLeague(leagueId, teamName)` — public leagues. **Refused for either of
+  the league's auctioneers**, who cannot play (`forbidden`). Its other refusals
+  carry their own codes: no such league `notFound`, a closed league
+  `closedLeague`, the join deadline passed or the auction started
+  `joinDeadlinePassed`, already playing `alreadyMember`, full `leagueFull`.
 - `requestToJoin(leagueId, teamName)` — closed leagues
+
+> **In an auction league, joining as a manager also claims a draft position** —
+> a random one nobody holds yet, **claimed transactionally** like a join code,
+> so two simultaneous joins can never hold the same one. If the membership
+> write then fails, the position is released. No position left means the
+> league is full.
 
 > **A code is a shortcut, not a bypass.** A closed league still requires
 > approval.
@@ -550,13 +560,17 @@ allowances, and the full auction configuration.
 - `getMyTeamForGameWeek(leagueId, gameWeekId)` — the lineup per match, plus the
   impact sub
 - `getMyTeamForMatch(leagueId, matchId)`
-- `getSquad(leagueId, matchId)` — auction leagues; what may be selected
-- `getSelectablePlayers(leagueId, matchId)` — regular leagues; the tournament
-  pool
+- `getSelectablePlayers(leagueId, matchId)` — **one call for both kinds of
+  league**, diverging only here: a regular league gets the tournament pool, an
+  auction league the caller's squad at that match. My Team asks per period.
 - `getPlayerPointsForMatch(leagueId, matchId)` — reads custom **or** standard
   according to the league's `isCustomScoringSystem` flag. **Not a fallback
   chain:** a custom-scoring league never reads standard points, so a match its
   admin has not entered yet has no points rather than borrowed ones.
+- `getPlayerPointsForMatches(leagueId, matchIds)` — the same for several
+  matches in one request, one entry per match in the order asked. **What a
+  gameweek's points are read with**, so a gameweek costs one round trip however
+  many matches it holds.
 - `getChangesRemaining(leagueId, roundId)`
 
 **Writes**
@@ -629,13 +643,26 @@ allowances, and the full auction configuration.
 
 **Reads**
 
-- `getSquad(leagueId, matchId)` — your own
-- `getAllSquads(leagueId, matchId)`
-- `getTeamForGameWeek(leagueId, managerId, gameWeekId)` — for the XI
-  highlighting; the same visibility rule gives only the locked XI
+- `getSquads(leagueId)` — **one read for the page**: every manager's squad at
+  the current match, the price each player went for, and the eleven to
+  highlight. Replaces a planned `getSquad`, `getAllSquads` and a
+  `getTeamForGameWeek` per manager, which was N+1 round trips for one page.
 
-> Squads are always public. Only the **locked** XI is highlighted for other
-> managers.
+> Squads are always public. **Your own squad highlights the XI you have saved
+> for the current period; anyone else's only their latest locked XI**, through
+> the same visibility rule as everywhere else. A lineup outside its squad is
+> highlighted for nobody.
+
+> **The rules a save is checked against, in an auction league** (in the
+> service, on both `updateTeamForGameWeek` and `updateTeamForMatch`): every
+> player in the caller's squad at the period's first match, and no more
+> overseas than `maxOverseasPlayersAllowedInXI`. Roles and countries are read
+> from the stored players, never taken from the request.
+
+> **A lineup outside the squad is treated as absent** wherever it is read —
+> visibility reads, scoring, the leaderboard — except the manager's own read,
+> which returns it marked `discarded` so My Team can say why. A rewind bumps
+> the leaderboard cache stamp, since it can change which lineups count.
 
 ---
 
@@ -701,49 +728,33 @@ allowances, and the full auction configuration.
 
 ## Auction Center
 
-**Split by phase, because the load-bearing fact is what pre-auction does _not_
-read.** See `08-pages/auction-center.md`.
+A reference page, the same in every phase. See `08-pages/auction-center.md`.
 
-### Pre-auction — no auction-runtime reads at all
+**Reads**
 
-- `getLeagueConfig(leagueId)` — the rules summary, and the **scheduled auction
-  start**, which lives on the league rather than in the runtime
-- `getMembers(leagueId)` — who is bidding, and who holds the auctioneer roles
+- `getAuctionSettings(leagueId)` — the start, the rules (budget, squad size,
+  overseas cap, bid step, round timer), the batch sequence and the auctioneer.
+  The fast part; reads league fields one by one, never `auctionConfig` whole
+- `getDraftOrder(leagueId)` — every position, with TBA for those nobody holds
+- `getMembers(leagueId)` and `getLineupRules(leagueId)` — who is bidding, and
+  the XI rules
+- `getAuctionPlayerPool(leagueId)` — base prices, categories, roles, team. The
+  slow part, so it is its own read
 
-> **`liveAuctions/{leagueId}` does not exist yet.** It is created by
-> `startAuction` and by nothing else, so before an auction begins there is no
-> node to read. **The layer must treat an absent runtime node as the normal
-> pre-auction case, not as an error** — this is exactly the shape that produces
-> a null-reference bug on first implementation.
+All are reads open to any signed-in caller, and refuse a league that holds no
+auction.
 
-> **`NotStarted` is not this moment.** That phase describes the state after the
-> auctioneer has opened the room and before the first player goes up, not the
-> weeks preceding it.
+> **`liveAuctions/{leagueId}` does not exist before the auction.** It is
+> created by `startAuction` and by nothing else. **The layer must treat an
+> absent runtime node as the normal pre-auction case, not as an error** — this
+> is exactly the shape that produces a null-reference bug on first
+> implementation. Nothing on this page needs the runtime, so it reads none of
+> it.
 
-### Live and after — existing calls, reused
+> **`NotStarted` is not the pre-auction state.** That phase describes the state
+> after the auctioneer has opened the room and before the first player goes up.
 
-Same calls as the live auction page, but as **one-shot reads rather than
-subscriptions**.
-
-- `getAuctionState(leagueId)`
-- `getAuctionPlayerPool(leagueId)`
-- `getSoldPlayers(leagueId)` / `getUnsoldPlayers(leagueId)`
-- `getManagerStatuses(leagueId)`
-- `getDraftOrder(leagueId)`
-
-**One subscription, and only in the live state:** `onAuctionStateChanged`, so
-the button and the running counts stay current. The detailed live subscriptions
-belong to the auction page itself.
-
-### On drill-down only
-
-- `getPlayerBiddingHistory(leagueId, playerId)` — every bid on one player, in
-  order
-
-> **Never fetched with the page.** The full history for every player is the
-> entire auction, so it is read one player at a time, when asked for.
-
-**No writes.** Auction Center changes nothing. Its only action is navigation.
+**No writes and no subscriptions.** Its only action is navigation.
 
 ---
 
@@ -760,11 +771,34 @@ belong to the auction page itself.
 - `getRemainingPlayers(leagueId)`
 - `getManagerStatuses(leagueId)` — budget and squad size per manager
 - `getDraftOrder(leagueId)`
+- `getPlayerBiddingHistory(leagueId, playerId)` — every bid on one player, in
+  order, for the after-auction record. **On drill-down only**, since the full
+  history for every player is the entire auction.
 
 **Subscriptions**
 
-- `onAuctionStateChanged(leagueId, callback)`
-- `onTimelineEvent(leagueId, callback)`
+- `onAuctionStateChanged(leagueId, callback)` — `undefined` until the auction
+  is started, which is normal
+- `onTimelineEvent(leagueId, callback)` — every entry so far, then each new one
+- `onServerTimeOffset(callback)` — this device's clock against the database's,
+  for the countdown
+- `onManagerStatusesChanged(leagueId, callback)` — budgets and holdings
+- `onPlayerStatusesChanged(leagueId, callback)` — sold, unsold, pending
+- `onCurrentRoundChanged(leagueId, playerId, callback)` — the current player's
+  accepted round; the page moves to the next player's as they go up
+- `onDraftPick(leagueId, turn, callback)` — the current draft turn's pick, if
+  made; the auctioneer's browser accepts it from here
+- `onSubmittedNoBids(leagueId, playerId, callback)` — who has passed
+- `getPlayerBiddingHistory(leagueId, playerId)` — a one-shot read from the
+  database, on drill-down only
+
+> **These are read straight from the database in the browser**, not through
+> the service — the auction changes several times a second for everyone
+> watching. A console rule allows signed-in reads of `liveAuctions/<leagueId>`
+> and nothing else; writes still go through the service. See `CLAUDE.md`.
+
+> **The page stays open after the auction**, and is then the historical record:
+> every sale, every unsold player, and the bidding on each.
 
 > **The countdown is computed client-side against Firebase server time**, never
 > the local clock, from the deadline in auction state.
@@ -773,63 +807,137 @@ belong to the auction page itself.
 
 ## Auction — bidder
 
-**Writes**
+**Writes** — manager role, checked by the service; the manager is the caller,
+never an argument.
 
-- `submitBid(leagueId, playerId, amount)`
-- `submitNoBid(leagueId, playerId)`
+- `submitBid(leagueId, playerId, amount)` — refused for a player not up, after
+  passing, when leading, off the 0.5 grid, over budget or with a full squad
+- `submitNoBid(leagueId, playerId)` — refused when leading
+- `submitDraftPick(leagueId, playerId)` — refused when it is not the caller's
+  turn, for a player not in the draft pool, over budget or with a full squad.
+  **Claimed**: written to `draftPicks/<turn>` only if that turn has no pick, so
+  a second pick, however it is sent, is refused
 
-> These write **only** to the bidder's own path. That is the entire reason the
-> auction is safe without transactions — see `docs/05-data-model.md`.
+> These write **only** to the bidder's own path,
+> `currentSubmittedBids/<playerId>/bids|noBids/<uid>`. Whether a bid is
+> accepted — the price, the clock — is the auctioneer's to judge.
 
-> **Passing is irreversible for that round.** The layer rejects a bid from
-> someone who has already passed on the current player.
+> **Passing is irreversible for that round.**
 
-> **A bid that would overdraw the budget is rejected.**
+> **A bid that would take the budget below zero is refused**, and so is any
+> bid from a manager whose squad is at the maximum size. There is no reserve
+> for filling the minimum squad.
 
 ---
 
 ## Auction — auctioneer
 
-**Writes**
+**Writes** — **the current auctioneer only** (`auctionDetails/primaryAuctioneer`,
+read per request so a handover takes effect at once). Each is one atomic update
+with its timeline entry.
 
-- `startAuction(leagueId)`
-- `generateDraftOrder(leagueId)`
-- `selectBatch(leagueId, category, role)` — **ids, not display names**, matching
-  how `currentBatch` stores them
-- `selectPlayer(leagueId, playerId)`
-- `selectRandomPlayerFromBatch(leagueId)`
-- `acceptBid(leagueId, playerId, managerId, amount)`
+- `startAuction(leagueId)` — **creates `liveAuctions/<leagueId>`**, every
+  manager on the full budget. Joining closes from here.
+- `nextBatch(leagueId)` — the next batch in the sequence, **in order only**, so
+  it takes no choice. Refused mid-round and after the last batch.
+- `putUpPlayer(leagueId, playerId)` / `putUpRandomPlayer(leagueId)` — a player
+  from the current batch, before bidding opens. Clears the previous player's
+  round.
+- `startBidding(leagueId)` — the round at base price, the clock running
+- `acceptBid(leagueId, playerId, managerId, amount)` — **checked again here**:
+  the bid the manager actually submitted, at exactly the asking price, before
+  the deadline by this service's clock, not passed, affordable. Raises the
+  price 0.5 and restarts the clock. Writes the bid history too.
 - `acceptNoBid(leagueId, playerId, managerId)`
-- `sellPlayer(leagueId, playerId, managerId, amount)` — updates bid history,
-  writes the player into that manager's squad, decrements their budget. **The
-  squad is written here, on every sale, not materialised when the auction
-  ends**, so squads are correct at every point during the auction.
-- `markPlayerUnsold(leagueId, playerId)`
-- `pauseAuction(leagueId)`
-- `resumeAuction(leagueId)`
-- `addTimeToCurrentRound(leagueId, seconds)`
-- `rewindLastRound(leagueId)` — rewrites the player's bid subtree entirely and
-  restores budgets and squad membership
-- `startDraft(leagueId)`
-- `acceptDraftPick(leagueId, playerId, managerId)`
-- `endAuction(leagueId)`
-- `handOffAuctioneerRole(leagueId, targetUserId)` — **one atomic multi-path
-  write** covering both the auctioneer roles on the membership records and the
-  `primaryAuctioneer` field on the auction config. The duplication is
-  deliberate, so that showing who the auctioneer is costs one field read rather
-  than a scan of every member's roles; the two must never be written separately.
+- `announceCall(leagueId, 'firstCall' | 'secondCall' | 'lastCall')` — timeline
+  only
+- `markTimeUp(leagueId)` — refused while time is left, by this service's clock
+  with a second's tolerance
+- `sellPlayer(leagueId)` — to the stored leader at the stored leading bid, so
+  nothing passed in can disagree. **One atomic write** across the player's
+  status, the buyer's budget and holdings, the bid history and **the buyer's
+  squad for every match** — written on every sale, densely, not when the
+  auction ends, so squads are correct throughout.
+- `sellPlayerManually(leagueId, managerId, amount)` — **a last resort**, for
+  when something has broken. Same writes; keeps the bid history and appends
+  the sale as the final bid if it is not already the last one.
+- `markPlayerUnsold(leagueId)`
+- `pauseAuction(leagueId)` — bidding only; bids, calls and time up all refuse
+  while paused. `resumeAuction(leagueId)` — **the clock resets to 30 seconds**
+  rather than continuing. *(Phase G)*
+- `addTimeToCurrentRound(leagueId, seconds)` — 1–60 seconds; the panel offers
+  +10. While bidding it extends the deadline; **after time up it reopens
+  bidding** with that much time from now. *(Phase G)*
+- `startRecovery(leagueId)` / `endRecovery(leagueId)` — enter and leave the
+  `recovering` phase. Start is between rounds only, and not while a draft pick
+  is going through; End writes how many rounds were undone. Draft picks and
+  skips are refused during recovery. *(Phase G)*
+- `rewindLastRound(leagueId)` — **refused outside recovery.** Undoes the newest
+  round result from the **results log** (below) in one update: the player back
+  in the pool with their round and history gone, the buyer refunded and the
+  player out of their squad for every match, and **the auction moved back to
+  where that round happened** — its batch, or for the draft, that turn and
+  manager, whose turn it is again. A draft pick of a previously unsold player
+  puts them back as unsold, keeping their earlier bidding. The round before
+  then becomes the last, so repeated rewinds walk back to the start. Appends a
+  `roundRewound` entry rather than removing any. Does not undo individual
+  bids. *(Phase G)*
 
-**Subscriptions**
+> **The results log**, `liveAuctions/<leagueId>/roundResults/<pushKey>`, holds
+> every round's result in order — sold, unsold, draft pick, skipped turn, and
+> the testing button's whole batch at once — written in the same update that
+> makes it. A rewind pops the newest. It exists because the timeline is
+> display-only and is never read to decide anything.
+- `resetAuction(leagueId)` — **refused in production.** A testing fallback:
+  puts the league back to before Start auction by deleting the live auction,
+  the league's squads, and the lineups and leaderboard built on them, in one
+  update. Members and the draft order stay. The auctioneer only, in any phase
+  once the auction exists. *(Built early, in Phase E, for testing.)*
+- `markBatchUnsold(leagueId)` — **refused in production.** Marks everyone left
+  in the current bidding batch unsold, between rounds, so the draft can be
+  reached without bidding. No timeline entries. *(Testing, Phase F.)*
+- `nextDraftManager(leagueId)` — the next turn in the draft; **the first call
+  starts it**, so there is no `startDraft`. The order snakes, and it **skips any
+  manager who can no longer pick** — a full squad, or a budget below the
+  cheapest base price left. **Refused until the current turn is settled** — a
+  pick that has gone through, or a skip — and once nobody can pick. *(Phase F)*
+- `skipDraftTurn(leagueId)` — skips the current manager's turn, for one taking
+  too long. **Separate from Next on purpose**, so a double click never skips
+  anyone. Claims the turn the way a pick does, so a pick and a skip landing
+  together cannot both succeed. Writes `draftTurnSkipped`. *(Phase F)*
+- `acceptDraftPick(leagueId, turn)` — **called by the processor in the
+  auctioneer's browser** as a pick arrives, never by hand. Re-checks the turn,
+  the manager, the player, budget and squad, then sells at base price in one
+  update — the same sale as a bid's — and marks the pick accepted. *(Phase F)*
+- `endAuction(leagueId)` — between rounds, not while a draft pick is going
+  through. The league moves to team submission. **Reversible**:
+  `reopenAuction(leagueId)` puts it back exactly as it was, for an accidental
+  end or an error found later. *(Phase G)*
+- `handOffAuctioneerRole(leagueId)` — **always to the backup**, who, like any
+  auctioneer, cannot be a manager. **One atomic multi-path write** covering
+  both the auctioneer roles on the membership records and the
+  `primaryAuctioneer` field on the auction config. *(Not in Milestone 4.)*
 
-- `onBidSubmitted(leagueId, callback)` — the auctioneer validates against the
-  asking price and deadline, then accepts or ignores
-- `onNoBidSubmitted(leagueId, callback)`
-- `onDraftPickSubmitted(leagueId, callback)`
+**Subscriptions** — read straight from the database, in the auctioneer's
+browser only
+
+- `onSubmittedBids(leagueId, playerId, callback)` — what each manager has bid
+- `onSubmittedNoBids(leagueId, playerId, callback)` — who has passed
+
+> **Bids are processed in the auctioneer's browser** (settled for Milestone 4),
+> by `components/auction/bid-processor.ts`. It judges each submitted bid against
+> the round it keeps in memory — one step ahead of the database, so a second
+> bid at a price that has just moved is ignored — and accepts the valid ones
+> through the service **one at a time**. It also runs the clock: the calls at
+> 20, 10 and 5 seconds left, and time up at zero. If the auctioneer's browser
+> drops, the auction stalls; that is accepted.
 
 > **Rejection is silence.** There is no explicit reject call — an invalid bid is
 > simply not accepted.
 
-> `sellPlayer` is one atomic write across bid history, squad and budget.
+> **The timer restarts from each accepted bid**, thirty seconds on. Lateness is
+> decided by the service's clock when it accepts the bid; bids carry no
+> timestamp of their own.
 
 ---
 
@@ -846,9 +954,12 @@ belong to the auction page itself.
 
 **Writes — cricket reference data**
 
-- `createCompetition(config)` / `updateCompetition(id, changes)`
+- `createCompetition(config)` / `updateCompetition(id, changes)` — name,
+  format, and an optional **home nation**, which decides who is overseas
 - `createTeam(team)` / `createTeams(teams)` / `updateTeam(id, changes)`
 - `createPlayer(player)` / `createPlayers(players)` / `updatePlayer(id, changes)`
+  — **category and base price are required on creation**, and written to
+  `standardAuctionConfig` in the same atomic update as the player
 - `setCurrentTeam(competitionId, playerId, teamId)` — the **only** writer of a
   player's current team
 - `addPlayerToTeam(teamId, playerId)` / `removePlayerFromTeam(teamId, playerId)`
@@ -867,11 +978,16 @@ belong to the auction page itself.
 **Writes — tournaments**
 
 - `createTournament(config)` — reads each player's current team to prefill, and
-  writes the tournament-scoped mapping. **It does not write back.**
+  writes the tournament-scoped mapping. **It does not write back.** It also
+  **copies the competition's home nation onto the tournament**, frozen from
+  then on.
 - `updateTournamentPlayers(tournamentId, players)`
 - `updateMatch(matchConfig)` / `updateMatches(matchConfigs)` — **also recompute
   the tournament's `startDate` and `endDate`, in the same atomic write**
-- `publishTournament(tournamentId)` — sets `publishedAt`. **Rejected here** if
+- `publishTournament(tournamentId, officialLeagues)` — sets `publishedAt`, and
+  opens the requested official leagues in the same write. A gameweek league
+  needs **a gameweek length for every round**, a divisor of that round's match
+  count, rejected here if missing or not a divisor. **Rejected here** if
   no match has a start time yet, rather than merely disabled in the admin UI.
 - `markTeamEliminated(tournamentId, teamId, fromMatchId)`
 - `markTournamentComplete(tournamentId)` — sets `completedAt`. Never set
@@ -918,7 +1034,7 @@ belong to the auction page itself.
 | **Subscription error handling** | `(error, data)` or a separate error callback. Pick one and apply it everywhere.                                                                     |
 | **Unsubscribe shape**           | Returned handle, or a matching `off` call. A returned handle fits React cleanup better.                                                             |
 | **Timeline construction**       | Whether the timeline is derived in the UI from the event subscription, or read as its own list.                                                     |
-| **Squad derivation**            | Whether a squad is computed from auction wins plus transfers, or materialised and mutated. Decides whether the match parameter filters or looks up. |
+| **Squad derivation**            | **Settled (Milestone 4):** materialised, written per match on every sale and rewind, so the match parameter looks up.                               |
 | **Auctioneer presence**         | No calls specified — Phase 2. For now an admin reassigns manually.                                                                                  |
 
 > **These are marked open deliberately.** Do not pick one and proceed — raise it

@@ -25,7 +25,8 @@ _in league A_, an owner _in league B_, and nothing in league C.
 
 **Roles are additive.** A person routinely holds several in the same league — a
 league owner who also plays is the common case, not an edge case. Nothing may
-assume the roles are exclusive.
+assume the roles are exclusive — **with one exception: an auctioneer is never a
+manager** (see Auctioneer).
 
 **Auctioneer and spectator only carry meaning in an auction league**, but they
 are still granted at league level.
@@ -210,38 +211,45 @@ The role that plays.
 
 ## Auctioneer
 
-Runs a live auction. **Must be an admin or the owner** — an ordinary manager
-cannot be made auctioneer.
+Runs a live auction. **Must be an admin or the owner, and never a manager.**
+Someone running the auction cannot also bid in it: the auction page is either
+the room's controls or a bidder's panel, never both. This holds for the backup
+auctioneer too.
 
 **Exactly one auctioneer at a time.** The owner is the auctioneer by default at
-league creation, and can reassign at any time, including mid-auction. The
-current auctioneer can also hand off to another admin. Reassignment takes effect
+league creation, and can change the auctioneer or the backup at any time,
+including mid-auction. The current auctioneer can also hand off, **which always
+passes control to the backup.** Reassignment takes effect
 immediately and revokes the previous auctioneer's control.
 
 **Running the auction**
 
 - Start the auction
-- Generate the draft order — done at the very start, before any bidding,
-  because a manager's auction strategy depends on where they sit in the draft
 - Choose the current batch, by player category and role
 - Put a player up, either chosen directly or picked at random from the batch
 - **Sell the player.** This is manual on purpose. The system does not
   auto-resolve when the timer expires, so that the auctioneer can make
   allowances for someone with connection trouble.
+- As a last resort, sell a player to a chosen manager at a chosen price, when
+  something has broken and the auction must not stall
 - Mark a player unsold
 - Pause and resume bidding, which freezes and resets the timer
 - Add extra seconds to the current round _(good to have, not essential)_
 - **Rewind** the last round, undoing a sale or an unsold result, restoring
-  budgets and squad membership
-- Accept a manager's draft pick when it is their turn
+  budgets and squad membership. Only inside recovery, which the auctioneer
+  starts and ends deliberately; repeated rewinds walk back to the start.
+- Move the draft to the next manager, skipping anyone who can no longer pick.
+  A manager's pick is accepted by the auctioneer's browser as it arrives, with
+  no click needed
 - End the auction. The system prompts when the end looks reached, but the
   auctioneer decides.
 
 **Not in Phase 1:** autopilot, where the system advances rounds automatically
 and the auctioneer only monitors.
 
-**An auctioneer may also be a manager and bid** — nothing prevents it, though
-usually they are a non-playing admin.
+**An auctioneer cannot be a manager.** The service refuses a join from either
+auctioneer, and any assignment or handover must go to someone who is not
+playing.
 
 ---
 

@@ -120,6 +120,14 @@ export interface Tournament {
   competitionId: CompetitionId
 
   /**
+   * Copied from the competition when the tournament is created, then frozen, so
+   * editing the competition never shifts who is overseas mid-tournament.
+   * **Absent means India** (`DEFAULT_HOME_NATION`) — either the competition had
+   * none, or the tournament predates the field.
+   */
+  homeNation?: string
+
+  /**
    * Set by a deliberate admin action. Its absence hides the tournament from the
    * list entirely and stops a league being created against it. Gated on at
    * least the first match having a start time.

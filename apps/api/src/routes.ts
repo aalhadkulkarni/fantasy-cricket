@@ -74,6 +74,15 @@ function handlerFor(
         ) => Promise<unknown>
         const result = await operation.apply(api, argumentsFor(method, request))
 
+        // The time so far, started before authentication in `index.ts`.
+        const startedAt = response.locals.startedAt as number | undefined
+        if (startedAt !== undefined) {
+          response.setHeader(
+            'Server-Timing',
+            `total;dur=${(performance.now() - startedAt).toFixed(1)}`,
+          )
+        }
+
         // `undefined` is a legitimate answer — no team yet, no watermark — and
         // JSON cannot carry it, so it becomes null and the client reads it back.
         response.json({ result: result ?? null })

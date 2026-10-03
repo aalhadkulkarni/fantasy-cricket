@@ -39,6 +39,7 @@ import type {
   AuctionPhaseRecord,
   Format,
   FormatRecord,
+  LeaguePlayerAuctionDetail,
   LineupRules,
   PlayerCategory,
   PlayerCategoryRecord,
@@ -190,8 +191,10 @@ export const PLAYER_CATEGORY_RECORDS: Readonly<
 export const SEED_COMPETITIONS: readonly {
   competitionName: string
   formatId: Format
+  /** Only where overseas means something. International ones have none. */
+  homeNation?: string
 }[] = [
-  { competitionName: 'IPL', formatId: 't20' },
+  { competitionName: 'IPL', formatId: 't20', homeNation: 'India' },
   { competitionName: 'ODI World Cup', formatId: 'odi' },
   { competitionName: 'ODI Series', formatId: 'odi' },
   { competitionName: 'Test Series', formatId: 'test' },
@@ -348,6 +351,12 @@ export const TIMELINE_EVENT_RECORDS: Readonly<
     timelineEventDescription: 'Current manager made a draft pick',
     params: ['managerId', 'playerId', 'basePrice'],
   },
+  draftTurnSkipped: {
+    timelineEventId: 'draftTurnSkipped',
+    timelineEventType: 'DraftTurnSkipped',
+    timelineEventDescription: "Current manager's draft turn was skipped",
+    params: ['managerId'],
+  },
   firstCall: {
     timelineEventId: 'firstCall',
     timelineEventType: 'FirstCall',
@@ -387,6 +396,18 @@ export const TIMELINE_EVENT_RECORDS: Readonly<
     timelineEventDescription: 'Auction ended',
     params: [],
   },
+  roundRewound: {
+    timelineEventId: 'roundRewound',
+    timelineEventType: 'RoundRewound',
+    timelineEventDescription: 'The auctioneer undid the last round',
+    params: ['result'],
+  },
+  auctionReopened: {
+    timelineEventId: 'auctionReopened',
+    timelineEventType: 'AuctionReopened',
+    timelineEventDescription: 'The auctioneer reopened the auction',
+    params: [],
+  },
 }
 
 // ---------------------------------------------------------------------------
@@ -408,6 +429,22 @@ export const STANDARD_AUCTION_CONFIG: StandardAuctionConfig = {
   slots: 6,
   totalBudget: 100,
   maxOverseasPlayersAllowedInXI: 4,
+  /*
+    **The running order**: batsmen, bowlers, keepers, all-rounders — Marquee
+    first, then the same for Star — and then the draft, a batch of its own.
+    Copied into each auction league when it is created.
+  */
+  batchSequence: [
+    { kind: 'auction', playerCategory: 'marquee', playerRole: 'batsman' },
+    { kind: 'auction', playerCategory: 'marquee', playerRole: 'bowler' },
+    { kind: 'auction', playerCategory: 'marquee', playerRole: 'wicketKeeper' },
+    { kind: 'auction', playerCategory: 'marquee', playerRole: 'allRounder' },
+    { kind: 'auction', playerCategory: 'star', playerRole: 'batsman' },
+    { kind: 'auction', playerCategory: 'star', playerRole: 'bowler' },
+    { kind: 'auction', playerCategory: 'star', playerRole: 'wicketKeeper' },
+    { kind: 'auction', playerCategory: 'star', playerRole: 'allRounder' },
+    { kind: 'draft' },
+  ],
 }
 
 /**
@@ -627,6 +664,35 @@ export const SAMPLE_PLAYERS: readonly {
     teamName: 'Australia',
   },
 ]
+
+/**
+ * **Standard auction values for the sample squads**, so they can be auctioned.
+ * A few Marquee, more Star, and everyone else General — enough that every
+ * batch in an auction has someone in it. Test data, chosen by reputation and
+ * nothing more careful.
+ */
+export const SAMPLE_AUCTION_VALUES: Readonly<
+  Record<string, LeaguePlayerAuctionDetail>
+> = {
+  'Hardik Pandya': { playerCategory: 'marquee', playerBasePrice: 5 },
+  'Travis Head': { playerCategory: 'marquee', playerBasePrice: 5 },
+  'Mitchell Starc': { playerCategory: 'marquee', playerBasePrice: 5 },
+  'Glenn Maxwell': { playerCategory: 'marquee', playerBasePrice: 5 },
+  'Sanju Samson': { playerCategory: 'star', playerBasePrice: 3 },
+  'Shreyas Iyer': { playerCategory: 'star', playerBasePrice: 3 },
+  'Axar Patel': { playerCategory: 'star', playerBasePrice: 3 },
+  'Arshdeep Singh': { playerCategory: 'star', playerBasePrice: 3 },
+  'Varun Chakravarthy': { playerCategory: 'star', playerBasePrice: 3 },
+  'Mitchell Marsh': { playerCategory: 'star', playerBasePrice: 3 },
+  'Josh Hazlewood': { playerCategory: 'star', playerBasePrice: 3 },
+  'Adam Zampa': { playerCategory: 'star', playerBasePrice: 3 },
+}
+
+/** Everyone not listed above. */
+export const SAMPLE_DEFAULT_AUCTION_VALUE: LeaguePlayerAuctionDetail = {
+  playerCategory: 'general',
+  playerBasePrice: 2,
+}
 
 /** The base tournament the sample squads play, by name. */
 export const SAMPLE_COMPETITION_NAME = 'T20 Series'

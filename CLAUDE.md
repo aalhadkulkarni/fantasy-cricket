@@ -129,8 +129,14 @@ verified token and never from an argument.
 Clients hold no database access: the service reaches the database as a
 privileged service account, which bypasses rules by design. Locked under
 `local` today, and under `prod` once the service is deployed there. **Do not open a
-node without a reason recorded here** — the live auction will need one, for
-browsers listening to it directly.
+node without a reason recorded here.**
+
+**The rules live in the Firebase console, not in this repo.** Open nodes, each
+with its reason:
+
+| Rule | Why |
+| --- | --- |
+| `$env/liveAuctions/$leagueId/.read = "auth != null"` | The live auction changes several times a second for everyone watching, so browsers listen to it directly (`apps/web/src/data-layer/firebase/realtime.ts`). **Read only, and per league**: `/liveAuctions` itself stays closed, so nobody can list every league's auction. Every write — bids, sells, auctioneer actions — still goes through the service. |
 
 ---
 
@@ -143,7 +149,7 @@ them.**
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **The auction has a known race condition**         | The auctioneer may read one manager's bid before another's even when the other wrote first. This has run through multiple real auctions. It is accepted, not a defect.                                                         |
 | **Points are never stored per manager**            | They are stored per player per match and totalled at read time, so a scoring correction means editing one number. **The one exception is a leaderboard cache**: derived standings kept so they are not recomputed on every view, and thrown away whenever the points or members they came from change. It is never edited and never the source of truth. |
-| **Standard points are never copied into a league** | A league checks its own store first and falls back to standard. Copying would mean fixing a correction in every league that opted in.                                                                                          |
+| **Standard points are never copied into a league** | `isCustomScoringSystem` decides which store a league reads, and there is no fallback between them: a custom-scoring league with no entry for a match scores zero rather than borrowing the standard figures. Copying would mean fixing a correction in every league that opted in. |
 | **A league's phase is never stored**               | It is derived from auction state, deadlines and `finishedAt`. The old system had it as a constant in source, so advancing a league required a redeploy.                                                                        |
 | **Illegal squads are permitted at auction**        | A manager can buy ten batsmen. The consequence lands later — they score zero for a gameweek they cannot field a legal XI for.                                                                                                  |
 | **Selling in the auction is manual**               | The system does not auto-resolve on timeout, so the auctioneer can make allowances for someone with connection trouble.                                                                                                        |
@@ -184,9 +190,9 @@ Two more worth knowing:
 | Data       | Firebase Realtime Database, reached only by the API service |
 | Auth       | Firebase Google auth in the browser; the service verifies its token |
 
-**Routing and state management libraries are not yet chosen.** One hard
-requirement on state: **live auction updates must not re-render unrelated
-components.** Plain React Context re-renders every consumer on any change, which
+**Routing is not yet chosen. State management is Zustand, on the live auction
+page only** — every other page fetches what it shows. One hard requirement on
+state: **live auction updates must not re-render unrelated components.** Plain React Context re-renders every consumer on any change, which
 is a real problem for a screen updating several times a second.
 
 ---

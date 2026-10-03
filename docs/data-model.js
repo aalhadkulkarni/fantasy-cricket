@@ -100,6 +100,9 @@ const dataModel = {
   },
 
   standardAuctionConfig: {
+    // Written for each player IN THE SAME ATOMIC UPDATE that creates them, so
+    // every player created from Milestone 4 onward has a category and base
+    // price. Players created earlier have no entry.
     playerDetails: {
       player001: {
         playerCategory: 'marquee',
@@ -126,6 +129,23 @@ const dataModel = {
     slots: 6,
     totalBudget: 100,
     maxOverseasPlayersAllowedInXI: 4,
+    /*
+      THE RUNNING ORDER, added in Milestone 4. Copied into each auction
+      league's auctionConfig at creation and frozen there, like the prices.
+      An ARRAY, one of the few in this model: it is read and written whole,
+      and its order is the whole point. The draft is a batch of its own.
+    */
+    batchSequence: [
+      { kind: 'auction', playerCategory: 'marquee', playerRole: 'batsman' },
+      { kind: 'auction', playerCategory: 'marquee', playerRole: 'bowler' },
+      { kind: 'auction', playerCategory: 'marquee', playerRole: 'wicketKeeper' },
+      { kind: 'auction', playerCategory: 'marquee', playerRole: 'allRounder' },
+      { kind: 'auction', playerCategory: 'star', playerRole: 'batsman' },
+      { kind: 'auction', playerCategory: 'star', playerRole: 'bowler' },
+      { kind: 'auction', playerCategory: 'star', playerRole: 'wicketKeeper' },
+      { kind: 'auction', playerCategory: 'star', playerRole: 'allRounder' },
+      { kind: 'draft' },
+    ],
   },
 
   standardFantasyLineupRules: {
@@ -382,6 +402,16 @@ const dataModel = {
       competitionId: 'competition001',
       competitionName: 'IPL',
       formatId: 't20',
+      /*
+        OPTIONAL. The nation a player must be from NOT to count as overseas in
+        this competition's tournaments. Absent means INDIA (DEFAULT_HOME_NATION
+        in packages/shared), applied where it is read rather than stored.
+
+        COPIED onto each tournament at creation (tournaments/{id}/homeNation)
+        and frozen there, like participatingPlayers, so editing a competition
+        never shifts who is overseas under a running tournament.
+      */
+      homeNation: 'India',
     },
     competition002: {
       competitionId: 'competition002',
@@ -555,6 +585,10 @@ const dataModel = {
       tournamentId: 'tournament001',
       tournamentName: 'IPL 2027',
       competitionId: 'competition001',
+      // Copied from competitions/{competitionId}/homeNation at creation, then
+      // frozen. Absent when the competition had none, which counts as India.
+      // A player is overseas in this tournament when their country is not this.
+      homeNation: 'India',
       /*
         AUTHORITATIVE FOR READS, MAINTAINED ON WRITE.
 
@@ -993,6 +1027,8 @@ const dataModel = {
           // TBD13 RESOLVED: null means NO limit. Consistent with TBD7 — let the
           // data convey absence rather than encoding it as a magic number.
           maxOverseasPlayersAllowedInXI: 4,
+          // Copied from standardAuctionConfig.batchSequence at creation, frozen.
+          batchSequence: [/* same nine batches as the standard */],
         },
         transferWindows: {
           transferWindow001: {
@@ -1002,13 +1038,27 @@ const dataModel = {
           },
         },
         draftOrder: {
-          // or it will be empty if not decided yet
-          user003: 1,
-          user004: 5,
-          user005: 3,
-          user006: 2,
-          user007: 6,
-          user008: 4,
+          /*
+            POSITION → MANAGER, and ASSIGNED ON JOIN rather than generated at
+            the auction's start: each manager takes a random position nobody
+            holds yet as they join, so the order is known before any bidding.
+            Positions nobody holds are absent and shown as TBA.
+
+            RESOLVED (Milestone 4): each position is CLAIMED TRANSACTIONALLY,
+            the same way a join code is, so two simultaneous joins can never
+            hold one position — the loser's claim does not commit and it tries
+            the next free one. Keyed by position precisely so that there is a
+            single path to claim.
+
+            Beware: RTDB returns a map with small integer keys as an ARRAY,
+            with holes where positions are free. Readers accept both shapes.
+          */
+          1: 'user003',
+          2: 'user006',
+          3: 'user005',
+          // 4 not yet claimed — shown as TBA
+          5: 'user004',
+          6: 'user007',
         },
         auctionStartTime: 1806345000000,
         /*
@@ -1120,11 +1170,21 @@ const dataModel = {
     Only exists for leagues where isCustomScoringSystem is true. The league
     admin calculates and enters these themselves.
 
-    RESOLUTION IS FALLBACK, NEVER A COPY:
-    a league reads its own store first and falls back to standardPoints.
-    Standard points are never copied into a league — otherwise correcting a
+    RESOLUTION IS BY FLAG, AND NEVER A COPY:
+    isCustomScoringSystem decides which store a league reads, and there is no
+    fallback between them. A custom-scoring league reads only its own points,
+    so a match its admin has not entered yet scores zero rather than borrowing
+    the standard figures — otherwise one league would score some matches by
+    its own rules and others by the standard ones, and nobody would see it
+    happen.
+
+    Standard points are never copied into a league either — correcting a
     scoring mistake would mean fixing it in every league that opted in, which
     is the fan-out problem this model avoids everywhere else.
+
+    (An earlier draft of this file described a fallback. The code has never
+    done that; docs/06-data-layer.md and src/types/points.ts agree with what
+    is written here.)
 
     Stored both ways for the same reason as standard points, and carrying the
     same revisit-at-implementation note.
@@ -1170,7 +1230,13 @@ const dataModel = {
       membersUpdatedAt: 1806400000000,
       main: {
         rows: [
-          { rank: 1, managerId: 'user001', managerName: 'Asha', fantasyTeamName: 'Asha XI', points: 412 },
+          {
+            rank: 1,
+            managerId: 'user001',
+            managerName: 'Asha',
+            fantasyTeamName: 'Asha XI',
+            points: 412,
+          },
         ],
         basedOn: { points: 1806500000000, members: 1806400000000 },
         leaderboardComputedAt: 1806500100000,
@@ -1548,9 +1614,12 @@ const dataModel = {
 
         It may also cover an admin reassigning the auctioneer mid-auction.
 
-        MECHANICS DEFERRED TO IMPLEMENTATION, deliberately and not by oversight:
-        what exactly enters and leaves it, how far back a rewind may go, and who
-        may do either. Not a Phase 1 priority.
+        RESOLVED (Milestone 4): the auctioneer enters it with Start recovery
+        and leaves it with End recovery. Inside it, rewind undoes the last
+        round's result (a sale or an unsold); the round before then becomes
+        the last, so repeated rewinds walk back to the start. Individual bids
+        are not undone. The timeline is appended to (auctionBeingRecovered,
+        auctionRecovered), never rewritten.
       */
       phaseId: 'recovering',
       phaseName: 'Recovering',
@@ -1663,6 +1732,14 @@ const dataModel = {
       timelineEventDescription: 'Current manager made a draft pick',
       params: ['managerId', 'playerId', 'basePrice'],
     },
+    // The auctioneer skipping a manager who is taking too long. A deliberate
+    // action of its own, separate from Next, so a double click cannot skip.
+    draftTurnSkipped: {
+      timelineEventId: 'draftTurnSkipped',
+      timelineEventType: 'DraftTurnSkipped',
+      timelineEventDescription: "Current manager's draft turn was skipped",
+      params: ['managerId'],
+    },
     /*
       The three calls are TIME-DRIVEN, not auctioneer buttons. The auctioneer's
       client emits them at 20, 10 and 5 seconds remaining on the round timer,
@@ -1704,6 +1781,21 @@ const dataModel = {
       timelineEventId: 'auctionEnded',
       timelineEventType: 'AuctionEnded',
       timelineEventDescription: 'Auction ended',
+      params: [],
+    },
+    // Appended by each rewind, carrying the result it undid. The timeline is
+    // never rewritten: a rewind adds an entry rather than removing one.
+    roundRewound: {
+      timelineEventId: 'roundRewound',
+      timelineEventType: 'RoundRewound',
+      timelineEventDescription: 'The auctioneer undid the last round',
+      params: ['result'],
+    },
+    // Ending is reversible, for an accidental end or an error found later.
+    auctionReopened: {
+      timelineEventId: 'auctionReopened',
+      timelineEventType: 'AuctionReopened',
+      timelineEventDescription: 'The auctioneer reopened the auction',
       params: [],
     },
   },
@@ -1749,7 +1841,13 @@ const dataModel = {
       auctionState: {
         // Ids, not display names. Every reference to a reference table in this
         // model is an id; the client renders the label from the table.
+        // One step of the league's batchSequence: { kind: 'auction', category,
+        // role } while bidding, or { kind: 'draft' } for the draft. Absent until
+        // the auctioneer picks the first batch; so is currentPlayerId.
+        // A current player with no round in currentAcceptedBids yet is
+        // "selected, not yet bidding".
         currentBatch: {
+          kind: 'auction',
           playerCategory: 'marquee',
           playerRole: 'batsman',
         },
@@ -1760,6 +1858,48 @@ const dataModel = {
         // the draft ORDER itself lives in leagues/{lid}/auctionDetails/draftOrder,
         // since it is settled configuration rather than live state.
         currentDraftManagerId: null,
+        // the draft's turn counter, from 0, moving on with every "Next in
+        // draft order" (skipped managers included). Picks are keyed by it.
+        currentDraftTurn: null,
+        // how many rounds the current recovery has undone; only in recovery.
+        rewoundInRecovery: null,
+      },
+
+      // RESOLVED (Milestone 4, Phase G): what a rewind undoes, in order.
+      // One entry per round result, keyed by push key (time order), written in
+      // the same update as the result. A rewind pops the newest and undoes it.
+      // The timeline cannot serve: it is display-only, never read to decide.
+      roundResults: {
+        result001: {
+          kind: 'sold',
+          playerId: 'player001',
+          managerId: 'user004',
+          amount: 6,
+          batch: { kind: 'auction', playerCategory: 'marquee', playerRole: 'batsman' },
+        },
+        result002: {
+          kind: 'unsold',
+          playerId: 'player008',
+          batch: { kind: 'auction', playerCategory: 'marquee', playerRole: 'batsman' },
+        },
+        // also: draftPick { playerId, managerId, amount, turn, bidId, wasUnsold },
+        // draftTurnSkipped { managerId, turn }, batchUnsold { playerIds, batch }
+      },
+
+      // RESOLVED (Milestone 4, Phase F): where a submitted draft pick lives.
+      // One entry per turn, keyed by currentDraftTurn — not per manager, since
+      // a manager picks many times in one draft. Written by the service for
+      // the manager whose turn it is, and only if the turn has no pick yet
+      // (a transactional claim), so a second pick is refused however it is
+      // sent. The auctioneer's browser listens to the current turn and
+      // accepts; the service re-checks and makes the sale, setting accepted.
+      draftPicks: {
+        3: {
+          managerId: 'user004',
+          playerId: 'player009',
+          submittedAt: 1730000000000,
+          accepted: true,
+        },
       },
 
       managerStatus: {

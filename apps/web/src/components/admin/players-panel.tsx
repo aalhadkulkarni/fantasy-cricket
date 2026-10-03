@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import {
+  CATEGORY_NAMES,
   countryOptions,
   emptyFields,
   fieldsFromPlayer,
   lastWord,
+  parseBasePrice,
   type PlayerFields,
 } from '@/components/admin/player-form'
 import { Button } from '@/components/ui/button'
@@ -36,10 +38,11 @@ import {
   setPlayerRetired,
   updatePlayer,
 } from '@/data-layer'
-import { PLAYER_ROLES } from '@fantasy-cricket/shared'
+import { PLAYER_CATEGORIES, PLAYER_ROLES } from '@fantasy-cricket/shared'
 import type {
   Competition,
   Player,
+  PlayerCategory,
   PlayerRoleRecord,
   Team,
   TeamId,
@@ -289,6 +292,8 @@ function Body({
               <span className="text-xs text-muted-foreground">
                 {roles[player.playerRole]?.playerRoleName ?? player.playerRole}{' '}
                 · {player.country}
+                {player.playerCategory !== undefined &&
+                  ` · ${CATEGORY_NAMES[player.playerCategory]} ${player.playerBasePrice ?? ''}`}
               </span>
             </span>
             <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -388,11 +393,28 @@ function PlayerDialog({
   const set = (next: Partial<PlayerFields>) =>
     setFields((current) => ({ ...current, ...next }))
 
-  // Country is required because it decides whether a player counts as overseas,
-  // and a blank one would quietly read as not-India.
+  const basePrice = parseBasePrice(fields.playerBasePrice)
+  const hasAuctionValues =
+    fields.playerCategory !== '' && basePrice !== undefined
+
+  /*
+    Auction values are required for a new player. A player created before they
+    were required may be saved without them, but not with only one: the two are
+    one record, and half of it cannot be auctioned.
+  */
+  const auctionValuesUntouched =
+    isEditing &&
+    player.playerCategory === undefined &&
+    fields.playerCategory === '' &&
+    fields.playerBasePrice.trim() === ''
+  const auctionValuesOk = hasAuctionValues || auctionValuesUntouched
+
+  // Country is required because it decides whether a player counts as
+  // overseas, and a blank one would match no home nation at all.
   const canSave =
     fields.playerName.trim() !== '' &&
     fields.country !== '' &&
+    auctionValuesOk &&
     status !== 'saving'
 
   async function save() {
@@ -417,6 +439,9 @@ function PlayerDialog({
       playerShortName: fields.playerShortName.trim() || lastWord(name),
       country: fields.country,
       playerRole: fields.playerRole,
+      // `canSave` has already refused a new player without both.
+      playerCategory: fields.playerCategory as PlayerCategory,
+      playerBasePrice: basePrice ?? 0,
       currentTeams: fields.teams,
     })
 
@@ -443,6 +468,12 @@ function PlayerDialog({
       playerShortName: fields.playerShortName.trim() || lastWord(name),
       country: fields.country,
       playerRole: fields.playerRole,
+      ...(hasAuctionValues
+        ? {
+            playerCategory: fields.playerCategory as PlayerCategory,
+            playerBasePrice: basePrice,
+          }
+        : {}),
     })
 
     const before = player.currentTeams ?? {}
@@ -542,6 +573,57 @@ function PlayerDialog({
               </SelectContent>
             </Select>
           </div>
+
+          {/*
+            Side by side: two short values that are read together, and each is
+            narrow enough for half a phone's width.
+          */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-2">
+              <Label htmlFor="player-category">Category</Label>
+              <Select
+                value={fields.playerCategory}
+                onValueChange={(value) =>
+                  set({ playerCategory: value as PlayerCategory })
+                }
+              >
+                <SelectTrigger id="player-category" className="w-full">
+                  <SelectValue placeholder="Pick one" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PLAYER_CATEGORIES.map((category) => (
+                    <SelectItem key={category} value={category}>
+                      {CATEGORY_NAMES[category]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="player-price">Base price</Label>
+              <Input
+                id="player-price"
+                type="number"
+                inputMode="decimal"
+                min={0.5}
+                step={0.5}
+                value={fields.playerBasePrice}
+                onChange={(e) => set({ playerBasePrice: e.target.value })}
+                placeholder="2"
+                aria-invalid={
+                  fields.playerBasePrice.trim() !== '' &&
+                  basePrice === undefined
+                }
+              />
+            </div>
+          </div>
+
+          <p className="-mt-2 text-xs text-subtle-foreground">
+            {isEditing && player.playerCategory === undefined
+              ? 'This player has no auction values yet. Add both, or leave both empty.'
+              : 'Standard auction values. Base price above zero, in steps of 0.5.'}
+          </p>
 
           <fieldset className="grid gap-3">
             <legend className="text-sm font-medium">Teams</legend>

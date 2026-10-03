@@ -25,6 +25,7 @@ import type {
   TimelineMessageId,
   UserId,
 } from './ids.ts'
+import type { AuctionBatch } from './league.ts'
 import type {
   AuctionPhase,
   PlayerCategory,
@@ -33,34 +34,141 @@ import type {
 } from './reference.ts'
 
 // ---------------------------------------------------------------------------
+// Fixed for Phase 1
+// ---------------------------------------------------------------------------
+
+/**
+ * **Every bid is the asking price, and the asking price rises by this.** The
+ * same step whatever the player is worth. Not configurable in Phase 1.
+ */
+export const BID_INCREMENT = 0.5
+
+/**
+ * **A round runs this long from its last accepted bid**, so every accepted bid
+ * restarts it. Thirty seconds proved comfortably enough across real auctions.
+ * Not configurable in Phase 1; the auctioneer can add time to a round.
+ */
+export const ROUND_SECONDS = 30
+
+/**
+ * **The three calls**, written to the timeline at 20, 10 and 5 seconds left by
+ * whoever runs the round's clock — the auctioneer's browser.
+ */
+export const AUCTION_CALLS = ['firstCall', 'secondCall', 'lastCall'] as const
+export type AuctionCall = (typeof AUCTION_CALLS)[number]
+
+/** Seconds left at which each call is made. */
+export const CALL_AT_SECONDS: Readonly<Record<AuctionCall, number>> = {
+  firstCall: 20,
+  secondCall: 10,
+  lastCall: 5,
+}
+
+// ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 
 /**
- * The batch currently being auctioned. Ids, not display names — the client
- * renders labels from the reference tables.
- */
-export interface CurrentBatch {
-  playerCategory: PlayerCategory
-  playerRole: PlayerRole
-}
-
-/**
- * Authoritative state, written only by the auctioneer's client.
+ * Authoritative state, written only by the auctioneer.
+ *
+ * **Most of it is absent at first.** The auction opens in `notStarted` with no
+ * batch and no player; a batch is chosen, then a player. A reader must treat
+ * each as optional rather than assume a player is always up.
+ *
+ * **The batch is an `AuctionBatch`**, one step of the league's batch
+ * sequence, so the draft — a batch of its own — is expressible: `kind: 'draft'`
+ * rather than a category and role.
+ *
+ * **A player is selected before bidding opens** ("Current player is X") and
+ * the round exists only once bidding starts. So `betweenPlayers` with a current
+ * player that has no round yet means "selected, not yet bidding".
  *
  * DERIVED: the countdown. Computed client-side against Firebase server time
- * from the deadline in `currentAcceptedBids`, never against the local clock.
+ * from the round's deadline, never against the local clock.
  */
 export interface AuctionState {
-  currentBatch: CurrentBatch
-  currentPlayerId: PlayerId
-  lastPlayerId: PlayerId
-
   phase: AuctionPhase
+
+  currentBatch?: AuctionBatch
+  currentPlayerId?: PlayerId
+  lastPlayerId?: PlayerId
 
   /** Whose turn it is during the draft. Absent outside the draft. */
   currentDraftManagerId?: UserId
+
+  /**
+   * **The draft's turn counter**, from 0, moving on with every Next in draft
+   * order — skipped managers included. A pick is keyed by it, which is what
+   * makes "already picked" mean *this* turn rather than this manager ever.
+   * Absent until the draft starts.
+   */
+  currentDraftTurn?: number
+
+  /** How many rounds the current recovery has undone. Present only in one. */
+  rewoundInRecovery?: number
 }
+
+/**
+ * **One round's result, in the order they happened**, at
+ * `roundResults/{pushKey}` — push keys sort by time. Appended in the same
+ * update that makes the result, and popped by a rewind, which undoes the
+ * newest. Holds what the undo needs: whose budget to refund, by how much, and
+ * where the auction was, so a rewind can take it back there.
+ *
+ * Not the timeline: that is display only and never read to decide anything.
+ */
+export type RoundResult =
+  | {
+      kind: 'sold'
+      playerId: PlayerId
+      managerId: UserId
+      amount: number
+      batch: AuctionBatch
+    }
+  | { kind: 'unsold'; playerId: PlayerId; batch: AuctionBatch }
+  | {
+      kind: 'draftPick'
+      playerId: PlayerId
+      managerId: UserId
+      amount: number
+      turn: number
+      /** The bid the pick added to the player's history, removed on rewind. */
+      bidId: BidId
+      /**
+       * Unsold in the bidding before being picked. A rewind puts them back as
+       * unsold — otherwise a Marquee or Star player would leave the draft
+       * pool for good — and keeps their earlier bidding.
+       */
+      wasUnsold: boolean
+    }
+  | { kind: 'draftTurnSkipped'; managerId: UserId; turn: number }
+  /** The testing button: a whole batch at once, undone as one. */
+  | { kind: 'batchUnsold'; playerIds: PlayerId[]; batch: AuctionBatch }
+
+/**
+ * **What became of one turn of the draft**, at `draftPicks/{turn}`: a pick,
+ * or a skip. Written once — whichever lands first, a manager's pick or the
+ * auctioneer's skip, claims the turn and the other is refused.
+ *
+ * A pick is marked accepted when the auctioneer's browser makes the sale. A
+ * skip is the auctioneer's deliberate action for a manager taking too long.
+ * Narrow on `skipped`.
+ */
+export type DraftPick =
+  | {
+      managerId: UserId
+      playerId: PlayerId
+      submittedAt: number
+      accepted?: true
+      skipped?: never
+    }
+  | {
+      managerId: UserId
+      skipped: true
+      submittedAt: number
+      playerId?: never
+      accepted?: never
+    }
 
 /**
  * Per-manager budget and holdings during the auction.
@@ -154,9 +262,11 @@ export interface AcceptedBidsForPlayer {
   /** Last accepted bid plus thirty seconds. Bids after this are ignored. */
   deadline: number
 
-  bids: Record<BidId, Bid>
-  lastAcceptedBid: BidId
-  noBids: Record<NoBidId, NoBid>
+  /** Absent until the first bid — Firebase stores no empty map. */
+  bids?: Record<BidId, Bid>
+  lastAcceptedBid?: BidId
+  /** Absent until someone passes. */
+  noBids?: Record<NoBidId, NoBid>
 }
 
 /**
@@ -197,11 +307,48 @@ export interface CurrentAcceptedBids {
 // ---------------------------------------------------------------------------
 
 /**
+ * **What each kind of event carries**, keyed by its id. Written from the
+ * catalogue's parameter names in `seed-data.ts`, with types the catalogue
+ * cannot express. The writer (Phase E) and every renderer share this, so the
+ * two cannot disagree about a field.
+ */
+export interface TimelineEventData {
+  auctionStarted: Record<string, never>
+  nextBatch: { playerCategory: PlayerCategory; playerRole: PlayerRole }
+  nextPlayer: { playerId: PlayerId; basePrice: number; timeLimit: number }
+  bid: { playerId: PlayerId; bid: number; managerId: UserId }
+  noBid: { playerId: PlayerId; managerId: UserId }
+  paused: Record<string, never>
+  auctionRestarted: Record<string, never>
+  auctionBeingRecovered: Record<string, never>
+  auctionRecovered: { rewindedRounds: number }
+  auctioneerChanged: { oldAuctioneerId: UserId; newAuctioneerId: UserId }
+  sold: { playerId: PlayerId; winningBid: number; managerId: UserId }
+  unsold: { playerId: PlayerId }
+  draftStarted: Record<string, never>
+  nextDraftManager: { managerId: UserId }
+  draftPick: { managerId: UserId; playerId: PlayerId; basePrice: number }
+  draftTurnSkipped: { managerId: UserId }
+  firstCall: { timeRemaining: number }
+  secondCall: { timeRemaining: number }
+  lastCall: { timeRemaining: number }
+  timeUp: Record<string, never>
+  timeIncreased: { timeAdded: number }
+  auctionEnded: Record<string, never>
+  roundRewound: { result: RoundResult }
+  auctionReopened: Record<string, never>
+}
+
+/**
  * One thing that happened, at `liveAuctions/{leagueId}/timeline`.
  *
  * Stores an event id plus its data rather than a pre-written sentence, which is
  * what lets every client render its own wording and lets the countdown be a
  * live timer instead of a series of "20 seconds left" log lines.
+ *
+ * **A discriminated union on `timelineEventId`**: narrow on the id and the data
+ * is typed. An id this client does not know still arrives — an older page
+ * reading a newer auction — so a renderer must fall back rather than break.
  *
  * **DISPLAY ONLY. The timeline is written to and read for rendering, never
  * dispatched on.** No state change, no data change, no side effect hangs off an
@@ -213,20 +360,16 @@ export interface CurrentAcceptedBids {
  * remain without a `lastCall` entry telling it. Reacting to the entry rather
  * than the deadline puts the reaction out of step with the countdown sitting
  * beside it on screen.
- *
- * DERIVED: the rendered message. Look `timelineEventId` up in `timelineEvents`
- * and fill from `timelineEventData`.
- *
- * NOT MODELLED HERE: the shape of `timelineEventData` per event. The catalogue
- * lists parameter *names* only, so there is nothing to derive a per-event type
- * from. Making this a discriminated union would mean writing those shapes by
- * hand, which is worth doing when something actually renders the timeline.
  */
-export interface TimelineMessage {
-  timelineMessageId: TimelineMessageId
-  timelineEventId: TimelineEventId
-  timelineEventData: Record<string, unknown>
-}
+export type TimelineMessage = {
+  [Id in TimelineEventId]: {
+    timelineMessageId: TimelineMessageId
+    timelineEventId: Id
+    timelineEventData: TimelineEventData[Id]
+    /** When it was written, by the server's clock. Absent on older entries. */
+    timestamp?: number
+  }
+}[TimelineEventId]
 
 // ---------------------------------------------------------------------------
 // The runtime
@@ -245,4 +388,25 @@ export interface LiveAuction {
   currentAcceptedBids: CurrentAcceptedBids
 
   timeline: Record<TimelineMessageId, TimelineMessage>
+}
+
+/**
+ * **Whether a manager can still take a draft turn**: squad space, and budget
+ * for the cheapest player left in the pool. Shared so the service, which skips
+ * anyone who cannot, and the auctioneer's panel, which prompts to end the
+ * auction once nobody can, never disagree.
+ *
+ * `cheapest` is undefined when the pool is empty — nobody can pick then.
+ */
+export function canStillPick(
+  status: ManagerAuctionStatus | undefined,
+  maxSquadSize: number | undefined,
+  cheapest: number | undefined,
+): boolean {
+  if (cheapest === undefined) return false
+  const squad = Object.keys(status?.playerList ?? {}).length
+  return (
+    (maxSquadSize === undefined || squad < maxSquadSize) &&
+    (status?.budget ?? 0) >= cheapest
+  )
 }

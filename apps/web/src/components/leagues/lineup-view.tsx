@@ -1,5 +1,10 @@
 import { PlayerName } from '@/components/leagues/player-name'
 import { RoleTag } from '@/components/leagues/role-tag'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import type { Player, PlayerId, PlayerPoints } from '@fantasy-cricket/shared'
 
 /** Fixed, and the vice-captain is never promoted when the captain does not play. */
@@ -24,6 +29,7 @@ export function LineupView({
   points,
   /** What the total is summed over. A gameweek says "gameweek", not "match". */
   totalLabel = 'Total',
+  breakdown,
 }: {
   lineup: readonly Player[]
   captainId: PlayerId
@@ -31,7 +37,16 @@ export function LineupView({
   /** Absent for an unscored match, which reads as zero throughout. */
   points: PlayerPoints
   totalLabel?: string
+  /**
+   * **Each match's points, for a period of more than one.** With it, a
+   * player's points open the per-match figures on tap — option 2 in
+   * `my-team.md`. A popover rather than a tooltip, because a tooltip needs
+   * hover and most use is a phone.
+   */
+  breakdown?: readonly { label: string; points: PlayerPoints }[]
 }) {
+  const showBreakdown = breakdown !== undefined && breakdown.length > 1
+
   const ordered = [...lineup].sort(
     (a, b) =>
       ORDER.indexOf(a.playerRole) - ORDER.indexOf(b.playerRole) ||
@@ -83,16 +98,27 @@ export function LineupView({
                 {player.playerId === viceCaptainId && <Badge>VC</Badge>}
               </span>
 
-              <span className="flex shrink-0 items-baseline gap-2.5">
-                <span className="text-[15px] font-semibold">
-                  {format(base * multiplier)}
-                </span>
-                {multiplier !== 1 && base !== 0 && (
-                  <span className="font-mono text-[10.5px] text-subtle-foreground">
-                    {format(base)}×{multiplier}
-                  </span>
-                )}
-              </span>
+              {showBreakdown ? (
+                <Popover>
+                  <PopoverTrigger
+                    className="-mr-1.5 shrink-0 rounded-md px-1.5 py-0.5 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    aria-label={`${player.playerName}: points in each match`}
+                  >
+                    <Points base={base} multiplier={multiplier} />
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-64">
+                    <Breakdown
+                      name={player.playerName}
+                      playerId={player.playerId}
+                      breakdown={breakdown}
+                      base={base}
+                      multiplier={multiplier}
+                    />
+                  </PopoverContent>
+                </Popover>
+              ) : (
+                <Points base={base} multiplier={multiplier} />
+              )}
             </li>
           )
         })}
@@ -103,6 +129,71 @@ export function LineupView({
         <span className="text-[15px] font-bold">{totalLabel}</span>
         <span className="text-[15px] font-bold">{format(total)}</span>
       </div>
+    </div>
+  )
+}
+
+function Points({ base, multiplier }: { base: number; multiplier: number }) {
+  return (
+    <span className="flex shrink-0 items-baseline gap-2.5">
+      <span className="text-[15px] font-semibold">
+        {format(base * multiplier)}
+      </span>
+      {multiplier !== 1 && base !== 0 && (
+        <span className="font-mono text-[10.5px] text-subtle-foreground">
+          {format(base)}×{multiplier}
+        </span>
+      )}
+    </span>
+  )
+}
+
+/**
+ * **Raw points per match, and the multiplier once, on the total.** Applying
+ * it per line would show three multiplied figures for one captaincy. A match
+ * with no entry has not been scored for this player, which reads as a dash
+ * rather than a zero the scorer typed.
+ */
+function Breakdown({
+  name,
+  playerId,
+  breakdown,
+  base,
+  multiplier,
+}: {
+  name: string
+  playerId: PlayerId
+  breakdown: readonly { label: string; points: PlayerPoints }[]
+  base: number
+  multiplier: number
+}) {
+  return (
+    <div className="text-sm">
+      <p className="font-semibold">{name}</p>
+      <ul className="mt-2 grid gap-1">
+        {breakdown.map((entry) => {
+          const value = entry.points[playerId]
+          return (
+            <li
+              key={entry.label}
+              className="flex items-baseline justify-between gap-3"
+            >
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {entry.label}
+              </span>
+              <span>{value === undefined ? '–' : format(value)}</span>
+            </li>
+          )
+        })}
+      </ul>
+      <p className="mt-2 flex items-baseline justify-between gap-3 border-t pt-2 font-semibold">
+        <span>Total</span>
+        <span>
+          {multiplier === 1
+            ? format(base)
+            : `${format(base)} ×${multiplier} = ${format(base * multiplier)}`}
+        </span>
+      </p>
     </div>
   )
 }

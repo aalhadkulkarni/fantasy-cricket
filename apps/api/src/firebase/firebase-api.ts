@@ -35,6 +35,9 @@ import type {
   Api,
   CreatePlayersResult,
   SamplePlayersResult,
+  SampleTournamentResult,
+  SeedDataResult,
+  MatchPlayerPoints,
   OfficialLeagues,
   SystemSetupResult,
 } from '@fantasy-cricket/shared'
@@ -42,11 +45,26 @@ import type { Environment } from '@fantasy-cricket/shared'
 
 import type { Session } from '../auth.ts'
 import type {
+  AcceptedBidsForPlayer,
+  DraftPick,
+  RoundResult,
   ArchivedLeagueCard,
   ArchivedLeagueIndexEntry,
+  AuctionBatch,
+  AuctionCall,
+  AuctionConfig,
+  AuctionPhase,
+  AuctionPoolPlayer,
+  AuctionSettings,
+  AuctionState,
+  Bid,
+  BidId,
   BannedUser,
   Competition,
+  CompetitionConfig,
   CompetitionId,
+  DraftOrderEntry,
+  Format,
   FormatRecord,
   GameWeek,
   GameWeekId,
@@ -59,9 +77,12 @@ import type {
   LeagueIndexEntry,
   LeagueJoinCode,
   LeagueMember,
+  LeaguePlayerAuctionDetail,
   LeagueSummary,
   LineupRules,
   LineupSubmission,
+  ManagerAuctionStatus,
+  Fixture,
   Match,
   MatchConfig,
   MatchId,
@@ -70,6 +91,8 @@ import type {
   MatchSide,
   LeagueDetails,
   LeagueMemberSummary,
+  ManagerSquadView,
+  SquadsView,
   RoundDetails,
   PeriodLeaderboard,
   LeaderboardRow,
@@ -80,9 +103,12 @@ import type {
   PlayerId,
   PlayerPoints,
   PlayerRoleRecord,
+  PlayerStatus,
+  NoBidId,
   Round,
   RoundConfig,
   RoundId,
+  StandardAuctionConfig,
   SystemSetup,
   Team,
   TeamConfig,
@@ -94,12 +120,27 @@ import type {
   TournamentId,
   TournamentLeagueIndexEntry,
   TournamentRoundConfig,
+  TimelineEventData,
+  TimelineEventId,
   User,
   UserId,
 } from '@fantasy-cricket/shared'
 
-import { DataLayerError } from '@fantasy-cricket/shared'
+import {
+  AUCTION_CALLS,
+  BID_INCREMENT,
+  CALL_AT_SECONDS,
+  canStillPick,
+  DataLayerError,
+  DEFAULT_HOME_NATION,
+  FORMATS,
+  MATCH_DURATION_MS,
+  PLAYER_CATEGORIES,
+  PLAYER_ROLES,
+  ROUND_SECONDS,
+} from '@fantasy-cricket/shared'
 import { derivePhase } from '../league-phase.ts'
+import { draftOrderList, nextDraftTurn } from '../draft-order.ts'
 import {
   AUCTION_PHASE_RECORDS,
   changeAllowanceFor,
@@ -109,6 +150,8 @@ import {
   SAMPLE_COMPETITION_NAME,
   SAMPLE_PLAYERS,
   SAMPLE_TEAM_SHORT_NAMES,
+  SAMPLE_AUCTION_VALUES,
+  SAMPLE_DEFAULT_AUCTION_VALUE,
   SEED_COMPETITIONS,
   STANDARD_AUCTION_CONFIG,
   STANDARD_FANTASY_LINEUP_RULES,
@@ -116,7 +159,20 @@ import {
   TIMELINE_EVENT_RECORDS,
   USER_ROLES,
 } from '../seed-data.ts'
-import { FirebaseService } from './firebase-service.ts'
+import {
+  auctionValueAt,
+  FORMAT_COMPETITIONS,
+  IPL_2026_PLAYERS,
+  IPL_COMPETITION,
+  IPL_ROUNDS,
+  IPL_TEAMS,
+  iplScheduleIn,
+  NATIONAL_TEAMS,
+  ROLE_OF,
+  shortNames,
+  type IntlFormat,
+} from '../seed-ipl-2026.ts'
+import { FirebaseService, type DbPath } from './firebase-service.ts'
 import { createPaths } from './paths.ts'
 
 /**
@@ -218,6 +274,97 @@ export function createFirebaseApi(
   const OFFICIAL_LEAGUE_SLOTS = 200
 
   /**
+   * The official auction league's slots. Beyond eight an auction stops being
+   * fun, which is the ceiling; six is the room the standard config is built
+   * around.
+   */
+  const OFFICIAL_AUCTION_LEAGUE_SLOTS = 6
+
+  /** A generous ceiling on one points read. See `getPlayerPointsForMatches`. */
+  const MAX_MATCHES_PER_POINTS_READ = 100
+
+  /**
+   * **Where this league's points for a match live**, decided once by its
+   * scoring flag. A custom-scoring league reads only its own store and never
+   * falls back to the standard one, per match or otherwise.
+   */
+  async function pointsPathFor(
+    leagueId: LeagueId,
+  ): Promise<(matchId: MatchId) => DbPath> {
+    const [isCustom, tournamentId] = await Promise.all([
+      service.read<boolean>(
+        service.path('leagues', leagueId, 'isCustomScoringSystem'),
+      ),
+      service.read<TournamentId>(
+        service.path('leagues', leagueId, 'tournamentId'),
+      ),
+    ])
+
+    if (isCustom === true) {
+      return (matchId) => paths.customPointsByMatch(leagueId, matchId)
+    }
+    if (tournamentId === undefined) {
+      throw new DataLayerError('notFound', 'That league no longer exists.')
+    }
+    return (matchId) => paths.standardPointsByMatch(tournamentId, matchId)
+  }
+
+  /**
+   * **What a participant with no standard auction values goes into a league's
+   * pool as.** Players created before values were required have none, and
+   * leaving them out would make them unbuyable for the whole season.
+   */
+  const DEFAULT_AUCTION_DETAIL: LeaguePlayerAuctionDetail = {
+    playerCategory: 'general',
+    playerBasePrice: 2,
+  }
+
+  /**
+   * **The standard auction config, projected onto one tournament** and frozen
+   * into the league. A projection rather than a snapshot: the standard holds
+   * every player in the system, a league needs only its participants. Frozen
+   * because managers bid against these values, so editing the standard later
+   * must not change what an auction ran under.
+   */
+  async function auctionConfigFor(
+    tournament: Tournament,
+    ownerId: UserId,
+  ): Promise<AuctionConfig> {
+    const standard = await service.read<StandardAuctionConfig>(
+      paths.standardAuctionConfig(),
+    )
+    const details = standard?.playerDetails ?? {}
+
+    const playerDetails: Record<string, LeaguePlayerAuctionDetail> = {}
+    for (const playerId of Object.keys(tournament.participatingPlayers ?? {})) {
+      playerDetails[playerId] =
+        details[playerId as PlayerId] ?? DEFAULT_AUCTION_DETAIL
+    }
+
+    const maxOverseas =
+      standard?.maxOverseasPlayersAllowedInXI ??
+      STANDARD_AUCTION_CONFIG.maxOverseasPlayersAllowedInXI
+
+    return {
+      lastUpdatedBy: { user: ownerId, timestamp: Date.now() },
+      playerDetails,
+      totalBudget: standard?.totalBudget ?? STANDARD_AUCTION_CONFIG.totalBudget,
+      minSquadSize:
+        standard?.minSquadSize ?? STANDARD_AUCTION_CONFIG.minSquadSize,
+      maxSquadSize:
+        standard?.maxSquadSize ?? STANDARD_AUCTION_CONFIG.maxSquadSize,
+      // Absent means no cap, and Firebase would drop an undefined anyway.
+      ...(maxOverseas === undefined
+        ? {}
+        : { maxOverseasPlayersAllowedInXI: maxOverseas }),
+      // Frozen with the league, like the prices. An environment seeded before
+      // the sequence existed has none stored, so the seed's is used.
+      batchSequence:
+        standard?.batchSequence ?? STANDARD_AUCTION_CONFIG.batchSequence ?? [],
+    }
+  }
+
+  /**
    * One league, as the card both the tournament row and the code lookup render.
    *
    * **Two small reads per league**, and neither is the league itself: how many
@@ -261,6 +408,129 @@ export function createFirebaseApi(
   }
 
   /**
+   * A trimmed, non-empty name no other base tournament has, ignoring case.
+   *
+   * **Read-then-write, and that is enough here.** Only system admins create
+   * base tournaments, a handful of times a year; two creating the same name in
+   * the same second is not a case worth a transaction.
+   */
+  async function uniqueCompetitionName(
+    raw: string,
+    self?: CompetitionId,
+  ): Promise<string> {
+    const name = raw.trim()
+    if (name === '') {
+      throw new DataLayerError('invalid', 'A base tournament needs a name.')
+    }
+
+    const all = await service.read<Record<string, Competition>>(
+      paths.competitions(),
+    )
+    const clash = Object.values(all ?? {}).find(
+      (competition) =>
+        competition.competitionId !== self &&
+        competition.competitionName.toLowerCase() === name.toLowerCase(),
+    )
+    if (clash !== undefined) {
+      throw new DataLayerError(
+        'invalid',
+        `There is already a base tournament called ${clash.competitionName}.`,
+      )
+    }
+    return name
+  }
+
+  function assertFormat(formatId: unknown): void {
+    if (!(FORMATS as readonly unknown[]).includes(formatId)) {
+      throw new DataLayerError('invalid', 'Pick a format.')
+    }
+  }
+
+  /**
+   * **A player's standard auction values, checked.** The category must be one
+   * of the three, and the base price positive and on the 0.5 grid every bid
+   * moves along, so no auction can open at a price no bid could reach.
+   */
+  function auctionDetailFor(
+    playerName: string,
+    playerCategory: unknown,
+    playerBasePrice: unknown,
+  ): LeaguePlayerAuctionDetail {
+    if (!(PLAYER_CATEGORIES as readonly unknown[]).includes(playerCategory)) {
+      throw new DataLayerError(
+        'invalid',
+        `${playerName} needs a category: marquee, star or general.`,
+      )
+    }
+    if (
+      typeof playerBasePrice !== 'number' ||
+      !Number.isFinite(playerBasePrice) ||
+      playerBasePrice <= 0 ||
+      !Number.isInteger(playerBasePrice * 2)
+    ) {
+      throw new DataLayerError(
+        'invalid',
+        `${playerName} needs a base price above zero, in steps of 0.5.`,
+      )
+    }
+    return {
+      playerCategory:
+        playerCategory as LeaguePlayerAuctionDetail['playerCategory'],
+      playerBasePrice,
+    }
+  }
+
+  function draftPositionPath(leagueId: LeagueId, position: number): DbPath {
+    return service.path(
+      'leagues',
+      leagueId,
+      'auctionDetails',
+      'draftOrder',
+      String(position),
+    )
+  }
+
+  /**
+   * **A random free draft position, claimed transactionally**, the same way a
+   * join code is: two managers joining at once can both see position 4 free,
+   * but only one claim on it commits, and the other moves on to the next.
+   *
+   * A manager who already holds a position keeps it. The draft order is read
+   * in either shape RTDB returns — a map, or an array with holes, which is
+   * what small integer keys come back as.
+   */
+  async function claimDraftPosition(
+    league: League,
+    userId: UserId,
+  ): Promise<number | undefined> {
+    const raw = league.isAuctionEnabled
+      ? league.auctionDetails.draftOrder
+      : undefined
+    const held = new Map<number, UserId>()
+    for (const [key, holder] of Object.entries(raw ?? {})) {
+      if (typeof holder === 'string') held.set(Number(key), holder)
+    }
+
+    for (const holder of held.values()) {
+      if (holder === userId) return undefined
+    }
+
+    const free = Array.from({ length: league.maxSlots }, (_, i) => i + 1)
+      .filter((position) => !held.has(position))
+      .sort(() => Math.random() - 0.5)
+
+    for (const position of free) {
+      const won = await service.claim(
+        draftPositionPath(league.leagueId, position),
+        userId,
+      )
+      if (won) return position
+    }
+
+    throw new DataLayerError('leagueFull', 'This league is full.')
+  }
+
+  /**
    * **Eight characters**, as `05-data-model.md` specifies, from an alphabet
    * with no `0`/`O` or `1`/`I`/`L` because people read these aloud and type
    * them from memory.
@@ -295,48 +565,86 @@ export function createFirebaseApi(
   }
 
   /**
-   * One gameweek per round.
+   * **Each round split into equal gameweeks of the length chosen for it.**
+   * Numbered and named across the whole tournament, so the third gameweek is
+   * "Game Week 3" whichever round it falls in.
    *
-   * The impact sub is a change *during* a gameweek, so it is forced off where a
-   * round holds a single match and there is no during.
+   * **Refused unless every round has a length that divides its match count**,
+   * since gameweeks are equal length within a round. This is the check; the
+   * publish form offering only divisors is convenience.
+   *
+   * The impact sub is a change *during* a gameweek, so it is forced off in a
+   * round whose gameweeks are a single match and there is no during.
    */
-  function oneGameWeekPerRound(
+  function gameWeeksFor(
     tournament: Tournament,
+    lengths: Partial<Record<RoundId, number>> | undefined,
   ): Record<string, RoundConfig> {
     const matches = tournament.matches ?? {}
     const numberOf = (matchId: MatchId) => matches[matchId]?.matchNumber ?? 0
+    const idAt = new Map(
+      Object.values(matches).map((match) => [match.matchNumber, match.matchId]),
+    )
 
     const rounds = Object.values(tournament.rounds ?? {}).sort(
       (a, b) => numberOf(a.firstMatchId) - numberOf(b.firstMatchId),
     )
 
     const configs: Record<string, RoundConfig> = {}
+    let gameWeekNumber = 0
 
-    rounds.forEach((round, index) => {
-      const gameWeekId = service.generateKey() as GameWeekId
-      const span =
-        numberOf(round.lastMatchId) - numberOf(round.firstMatchId) + 1
+    for (const round of rounds) {
+      const first = numberOf(round.firstMatchId)
+      const span = numberOf(round.lastMatchId) - first + 1
+      const length = lengths?.[round.roundId]
+
+      if (length === undefined) {
+        throw new DataLayerError(
+          'invalidConfig',
+          `Choose a gameweek length for ${round.roundName}.`,
+        )
+      }
+      if (
+        !Number.isInteger(length) ||
+        length < 1 ||
+        length > span ||
+        span % length !== 0
+      ) {
+        throw new DataLayerError(
+          'invalidConfig',
+          `${round.roundName} has ${span} matches, so its gameweeks can only be a length that divides ${span}.`,
+        )
+      }
+
+      const gameWeeks: Record<string, GameWeek> = {}
+
+      for (let start = first; start < first + span; start += length) {
+        const startMatchId = idAt.get(start)
+        const endMatchId = idAt.get(start + length - 1)
+        if (startMatchId === undefined || endMatchId === undefined) {
+          throw new DataLayerError(
+            'invalidConfig',
+            `${round.roundName} names a match that does not exist.`,
+          )
+        }
+
+        gameWeekNumber += 1
+        const gameWeekId = service.generateKey() as GameWeekId
+        gameWeeks[gameWeekId] = {
+          gameWeekId,
+          gameWeekName: `Game Week ${gameWeekNumber}`,
+          gameWeekNumber,
+          startMatchId,
+          endMatchId,
+        }
+      }
 
       configs[round.roundId] = {
         // Absent allowances mean unlimited, which is what an open league wants.
-        isImpactSubAllowed: span > 1,
-        gameWeeks: {
-          [gameWeekId]: {
-            gameWeekId,
-            /*
-              **Named for itself, not for its round.** Naming it after the round
-              made a team saved per gameweek read as one saved per round, which
-              is a different thing: a round holds gameweeks, and in a longer
-              tournament it holds several.
-            */
-            gameWeekName: `Game Week ${index + 1}`,
-            gameWeekNumber: index + 1,
-            startMatchId: round.firstMatchId,
-            endMatchId: round.lastMatchId,
-          },
-        },
+        isImpactSubAllowed: length > 1,
+        gameWeeks,
       }
-    })
+    }
 
     return configs
   }
@@ -351,7 +659,9 @@ export function createFirebaseApi(
    *
    * The owner is **not a manager**. A manager has a fantasy team name, chosen
    * when joining, so whoever publishes joins their own league the same way
-   * everyone else does.
+   * everyone else does. In an auction league the owner is also the auctioneer,
+   * recorded on the membership and on `auctionDetails` in this same write —
+   * the two copies must never disagree about who holds control.
    */
   async function officialLeague(
     inputs: {
@@ -362,10 +672,18 @@ export function createFirebaseApi(
       offset: number
       joinDeadline: number
     },
-    gameWeeks: boolean,
+    kind:
+      | { type: 'match' }
+      | { type: 'gameWeek'; roundConfigs: Record<string, RoundConfig> }
+      | {
+          type: 'auction'
+          roundConfigs: Record<string, RoundConfig>
+          auctionConfig: AuctionConfig
+          auctionStartTime: number
+        },
   ): Promise<Record<string, unknown>> {
-    const { tournament, ownerId, ownerName, rules, offset, joinDeadline } =
-      inputs
+    const { tournament, ownerId, ownerName, rules, offset } = inputs
+    const isAuction = kind.type === 'auction'
 
     const leagueId = service.generateKey() as LeagueId
     const leagueJoinCode = await claimJoinCode(leagueId)
@@ -375,10 +693,24 @@ export function createFirebaseApi(
     )
 
     const leagueName = `${tournament.tournamentName} — Official ${
-      gameWeeks ? 'Gameweek' : 'Match'
+      kind.type === 'auction'
+        ? 'Auction'
+        : kind.type === 'gameWeek'
+          ? 'Gameweek'
+          : 'Match'
     } League`
 
-    const roles = { leagueOwner: true, leagueAdmin: true } as const
+    const roles = isAuction
+      ? ({
+          leagueOwner: true,
+          leagueAdmin: true,
+          primaryAuctioneer: true,
+        } as const)
+      : ({ leagueOwner: true, leagueAdmin: true } as const)
+
+    const maxSlots = isAuction
+      ? OFFICIAL_AUCTION_LEAGUE_SLOTS
+      : OFFICIAL_LEAGUE_SLOTS
 
     const base = {
       leagueId,
@@ -387,35 +719,63 @@ export function createFirebaseApi(
       leagueJoinCode,
       tournamentId: tournament.tournamentId,
       leagueEntry: 'Open',
-      maxSlots: OFFICIAL_LEAGUE_SLOTS,
+      maxSlots,
       fantasyLineupRules: rules,
       leagueMembers: { [ownerId]: { leagueRoles: roles } },
       fantasyLeagueTeamChangesDeadlineOffset: offset,
-      fantasyLeagueJoinDeadline: joinDeadline,
+      // Nothing to join after bidding begins, so an auction league closes then.
+      fantasyLeagueJoinDeadline:
+        kind.type === 'auction' ? kind.auctionStartTime : inputs.joinDeadline,
       isCustomScoringSystem: false,
-      isAuctionEnabled: false,
+      isAuctionEnabled: isAuction,
+    }
+
+    let league: Record<string, unknown>
+    switch (kind.type) {
+      case 'match':
+        league = {
+          ...base,
+          isGameWeeksEnabled: false,
+          /*
+            **One allowance for the whole league, sized by the tournament.**
+            The same figure serves all three, because they are counted
+            separately against their own allowances rather than sharing one
+            pool. See `changeAllowanceFor`.
+          */
+          totalChangesAllowed: allowance,
+          totalCaptainChangesAllowed: allowance,
+          totalViceCaptainChangesAllowed: allowance,
+        }
+        break
+      case 'gameWeek':
+        league = {
+          ...base,
+          isGameWeeksEnabled: true,
+          roundConfigs: kind.roundConfigs,
+        }
+        break
+      case 'auction':
+        league = {
+          ...base,
+          // Forced: an auction league is always gameweek-based. Its change
+          // allowances are absent, which is unlimited — the squad won at
+          // auction is already the constraint.
+          isGameWeeksEnabled: true,
+          roundConfigs: kind.roundConfigs,
+          auctionDetails: {
+            auctionConfig: kind.auctionConfig,
+            auctionStartTime: kind.auctionStartTime,
+            primaryAuctioneer: ownerId,
+            // No draftOrder: positions are claimed as managers join, and an
+            // empty map is not stored. No transfer windows: not in Phase 1's
+            // official league.
+          },
+        }
+        break
     }
 
     return {
-      [paths.leagues(leagueId)]: gameWeeks
-        ? {
-            ...base,
-            isGameWeeksEnabled: true,
-            roundConfigs: oneGameWeekPerRound(tournament),
-          }
-        : {
-            ...base,
-            isGameWeeksEnabled: false,
-            /*
-              **One allowance for the whole league, sized by the tournament.**
-              The same figure serves all three, because they are counted
-              separately against their own allowances rather than sharing one
-              pool. See `changeAllowanceFor`.
-            */
-            totalChangesAllowed: allowance,
-            totalCaptainChangesAllowed: allowance,
-            totalViceCaptainChangesAllowed: allowance,
-          },
+      [paths.leagues(leagueId)]: league,
 
       // The tournament page's list of its leagues. Exactly the fields that row
       // renders, and no more, or it drifts into a second copy of the league.
@@ -426,9 +786,9 @@ export function createFirebaseApi(
         leagueId,
       )]: {
         leagueName,
-        isAuctionEnabled: false,
+        isAuctionEnabled: isAuction,
         leagueEntry: 'Open',
-        maxSlots: OFFICIAL_LEAGUE_SLOTS,
+        maxSlots,
       },
 
       // My Leagues, for the owner.
@@ -436,9 +796,9 @@ export function createFirebaseApi(
         leagueName,
         tournamentId: tournament.tournamentId,
         tournamentName: tournament.tournamentName,
-        isAuctionEnabled: false,
+        isAuctionEnabled: isAuction,
         ownerName,
-        maxSlots: OFFICIAL_LEAGUE_SLOTS,
+        maxSlots,
         membershipStatus: 'Accepted',
         myRoles: roles,
       },
@@ -481,25 +841,11 @@ export function createFirebaseApi(
       entries.map(async ([leagueId, entry]) => {
         const id = leagueId as LeagueId
 
-        const [members, finishedAt, auctionStartTime, auctionRuntime] =
-          await Promise.all([
-            service.read<Record<string, LeagueMember>>(paths.leagueMembers(id)),
-            service.read<number>(service.path('leagues', id, 'finishedAt')),
-            entry.isAuctionEnabled
-              ? service.read<number>(
-                  service.path(
-                    'leagues',
-                    id,
-                    'auctionDetails',
-                    'auctionStartTime',
-                  ),
-                )
-              : undefined,
-            // Its absence is the normal pre-auction state, never an error.
-            entry.isAuctionEnabled
-              ? service.read<unknown>(service.path('liveAuctions', id))
-              : undefined,
-          ])
+        const [members, finishedAt, auctionPhase] = await Promise.all([
+          service.read<Record<string, LeagueMember>>(paths.leagueMembers(id)),
+          service.read<number>(service.path('leagues', id, 'finishedAt')),
+          entry.isAuctionEnabled ? liveAuctionPhase(id) : undefined,
+        ])
 
         return {
           ...entry,
@@ -511,8 +857,7 @@ export function createFirebaseApi(
             finishedAt,
             tournamentStartDate: startDates.get(entry.tournamentId),
             isAuctionEnabled: entry.isAuctionEnabled,
-            auctionStartTime,
-            auctionHasStarted: auctionRuntime !== undefined,
+            auctionPhase,
             now,
           }),
         }
@@ -602,6 +947,427 @@ export function createFirebaseApi(
     return teamOf
   }
 
+  /**
+   * **Refuses anything but an existing auction league.** The auction reads all
+   * start here, so a regular league's id gets a clear answer rather than a
+   * page of absences.
+   */
+  async function assertAuctionLeague(leagueId: LeagueId): Promise<void> {
+    const isAuction = await service.read<boolean>(
+      service.path('leagues', leagueId, 'isAuctionEnabled'),
+    )
+    if (isAuction === undefined) {
+      throw new DataLayerError('notFound', 'That league no longer exists.')
+    }
+    if (!isAuction) {
+      throw new DataLayerError('invalid', 'This league holds no auction.')
+    }
+  }
+
+  /**
+   * **The live auction's phase, and nothing else from it.** After an auction
+   * the runtime node holds every bid and the whole timeline, and a league card
+   * needs one word of it. Absent until the auction is started, which is the
+   * normal pre-auction state rather than an error.
+   */
+  function liveAuctionPhase(
+    leagueId: LeagueId,
+  ): Promise<AuctionPhase | undefined> {
+    return service.read<AuctionPhase>(
+      service.path('liveAuctions', leagueId, 'auctionState', 'phase'),
+    )
+  }
+
+  // -------------------------------------------------------------------------
+  // The live auction: helpers for the writes
+  // -------------------------------------------------------------------------
+
+  /** A path under a league's live auction. */
+  function livePath(leagueId: LeagueId, ...rest: string[]): DbPath {
+    return service.path('liveAuctions', leagueId, ...rest)
+  }
+
+  /**
+   * **Only the current auctioneer runs the auction.** Read per request from
+   * `auctionDetails/primaryAuctioneer`, so a handover takes effect on the next
+   * call with nothing cached to go stale.
+   */
+  async function assertAuctioneer(leagueId: LeagueId): Promise<void> {
+    await assertAuctionLeague(leagueId)
+    const session = requireSession()
+    const auctioneer = await service.read<UserId>(
+      auctionDetailsPath(leagueId, 'primaryAuctioneer'),
+    )
+    if (auctioneer !== session.uid) {
+      throw new DataLayerError(
+        'notAuctioneer',
+        'Only the auctioneer can run the auction.',
+      )
+    }
+  }
+
+  /** The live state, refusing an auction that has not been started. */
+  async function liveState(leagueId: LeagueId): Promise<AuctionState> {
+    const state = await service.read<AuctionState>(
+      livePath(leagueId, 'auctionState'),
+    )
+    if (state === undefined) {
+      throw new DataLayerError('auctionState', 'The auction has not started.')
+    }
+    return state
+  }
+
+  /**
+   * **Between rounds**: nothing is being bid on, so the batch may move and a
+   * player may go up. A round in progress has to be sold or marked unsold
+   * first.
+   */
+  const BETWEEN_ROUNDS: readonly AuctionPhase[] = [
+    'notStarted',
+    'betweenPlayers',
+    'sold',
+    'unsold',
+  ]
+
+  function assertPhase(
+    state: AuctionState,
+    allowed: readonly AuctionPhase[],
+    message: string,
+  ): void {
+    if (!allowed.includes(state.phase)) {
+      throw new DataLayerError('auctionState', message)
+    }
+  }
+
+  /** The player up, refusing when it is not the one named. */
+  function assertCurrent(state: AuctionState, playerId: PlayerId): void {
+    if (state.currentPlayerId !== playerId) {
+      throw new DataLayerError(
+        'auctionState',
+        'That player is not the one up right now.',
+      )
+    }
+  }
+
+  /**
+   * **One timeline entry, as paths.** Id plus data, never a sentence, stamped
+   * with this service's clock. Display only: nothing reads it to decide
+   * anything.
+   */
+  function timelineEntry<Id extends TimelineEventId>(
+    leagueId: LeagueId,
+    timelineEventId: Id,
+    timelineEventData: TimelineEventData[Id],
+  ): Record<string, unknown> {
+    const key = service.generateKey()
+    return {
+      [livePath(leagueId, 'timeline', key)]: {
+        timelineMessageId: key,
+        timelineEventId,
+        timelineEventData,
+        timestamp: Date.now(),
+      },
+    }
+  }
+
+  /**
+   * **One round's result onto the log**, as paths, for the update that makes
+   * it. A rewind pops the newest; push keys keep them in order.
+   */
+  function resultEntry(
+    leagueId: LeagueId,
+    result: RoundResult,
+  ): Record<string, unknown> {
+    return {
+      [livePath(leagueId, 'roundResults', service.generateKey())]: result,
+    }
+  }
+
+  /** The bidding batch a result belongs to. Always set while a player is up. */
+  function biddingBatch(state: AuctionState): AuctionBatch {
+    if (state.currentBatch?.kind !== 'auction') {
+      throw new DataLayerError('auctionState', 'No bidding batch is running.')
+    }
+    return state.currentBatch
+  }
+
+  /** Prices move in steps of 0.5, so a bid must sit on that grid. */
+  function assertPriceGrid(amount: unknown): asserts amount is number {
+    if (
+      typeof amount !== 'number' ||
+      !Number.isFinite(amount) ||
+      amount <= 0 ||
+      !Number.isInteger(amount * 2)
+    ) {
+      throw new DataLayerError(
+        'invalid',
+        'A price is above zero, in steps of 0.5.',
+      )
+    }
+  }
+
+  /**
+   * **Whether this manager may take a player at this price**: still a manager,
+   * the budget covers it (it may not go below zero), and the squad has room.
+   * The squad's makeup is deliberately not checked — an illegal squad is the
+   * manager's to choose.
+   */
+  async function assertCanBuy(
+    leagueId: LeagueId,
+    managerId: UserId,
+    amount: number,
+  ): Promise<void> {
+    const [roles, status, maxSquadSize] = await Promise.all([
+      service.read<LeagueMember['leagueRoles']>(
+        service.path(
+          'leagues',
+          leagueId,
+          'leagueMembers',
+          managerId,
+          'leagueRoles',
+        ),
+      ),
+      service.read<ManagerAuctionStatus>(
+        livePath(leagueId, 'managerStatus', managerId),
+      ),
+      service.read<number>(
+        auctionDetailsPath(leagueId, 'auctionConfig', 'maxSquadSize'),
+      ),
+    ])
+    if (roles?.manager !== true) {
+      throw new DataLayerError('notAManager', 'That person is not bidding.')
+    }
+    if ((status?.budget ?? 0) < amount) {
+      throw new DataLayerError('auctionState', 'Not enough budget for that.')
+    }
+    if (
+      maxSquadSize !== undefined &&
+      Object.keys(status?.playerList ?? {}).length >= maxSquadSize
+    ) {
+      throw new DataLayerError('auctionState', 'That squad is already full.')
+    }
+  }
+
+  /** Whether a manager has passed on this round, by either record. */
+  function hasPassed(
+    round: AcceptedBidsForPlayer | undefined,
+    submittedNoBids: Partial<Record<string, true>> | undefined,
+    managerId: UserId,
+  ): boolean {
+    return (
+      submittedNoBids?.[managerId] === true ||
+      Object.values(round?.noBids ?? {}).some((p) => p.managerId === managerId)
+    )
+  }
+
+  /**
+   * **A sale, as paths — the whole of it in one atomic update.** The player's
+   * status, the buyer's budget and holdings, the bid history with the winning
+   * bid marked, the round closed, the timeline — and **the buyer's squad for
+   * every match**, written now rather than when the auction ends, so squads
+   * are right at every point during it. Stored densely: the same list in every
+   * match until a transfer changes it.
+   */
+  async function saleUpdate(
+    leagueId: LeagueId,
+    playerId: PlayerId,
+    managerId: UserId,
+    amount: number,
+    winningBid: Bid,
+    /** The timeline entry, when the sale is not announced as `sold`. */
+    announcement?: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const tournamentId = await service.read<TournamentId>(
+      service.path('leagues', leagueId, 'tournamentId'),
+    )
+    if (tournamentId === undefined) {
+      throw new DataLayerError('notFound', 'That league no longer exists.')
+    }
+    const [budget, matches, squads] = await Promise.all([
+      service.read<number>(
+        livePath(leagueId, 'managerStatus', managerId, 'budget'),
+      ),
+      service.read<Record<string, Match>>(
+        paths.tournamentMatches(tournamentId),
+      ),
+      service.read<Record<string, PlayerId[]>>(
+        service.path('squads', leagueId, managerId),
+      ),
+    ])
+
+    const update: Record<string, unknown> = {
+      [livePath(leagueId, 'playerStatus', playerId)]: {
+        playerId,
+        status: 'Sold',
+        managerId,
+        winningBid: amount,
+      },
+      [livePath(leagueId, 'managerStatus', managerId, 'budget')]:
+        (budget ?? 0) - amount,
+      [livePath(leagueId, 'managerStatus', managerId, 'playerList', playerId)]:
+        amount,
+      [livePath(leagueId, 'playerWiseBiddingHistory', playerId, 'status')]:
+        'Sold',
+      [livePath(
+        leagueId,
+        'playerWiseBiddingHistory',
+        playerId,
+        'bids',
+        winningBid.bidId,
+      )]: { ...winningBid, sold: true },
+      [livePath(leagueId, 'auctionState', 'phase')]: 'sold',
+      [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: false,
+      [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: false,
+      ...(announcement ??
+        timelineEntry(leagueId, 'sold', {
+          playerId,
+          winningBid: amount,
+          managerId,
+        })),
+    }
+
+    for (const matchId of Object.keys(matches ?? {})) {
+      const squad = squads?.[matchId] ?? []
+      if (!squad.includes(playerId)) {
+        update[service.path('squads', leagueId, managerId, matchId)] = [
+          ...squad,
+          playerId,
+        ]
+      }
+    }
+
+    return update
+  }
+
+  /**
+   * **Who in the current batch may still go up**: matching its category and
+   * role, and neither sold nor marked unsold. Refuses outside a bidding batch
+   * and mid-round.
+   */
+  async function eligibleInBatch(
+    leagueId: LeagueId,
+    state: AuctionState,
+  ): Promise<PlayerId[]> {
+    assertPhase(state, BETWEEN_ROUNDS, 'Finish this round first.')
+    const batch = state.currentBatch
+    if (batch === undefined || batch.kind !== 'auction') {
+      throw new DataLayerError('auctionState', 'Choose a bidding batch first.')
+    }
+    const [details, statuses, players] = await Promise.all([
+      service.read<Record<string, LeaguePlayerAuctionDetail>>(
+        auctionDetailsPath(leagueId, 'auctionConfig', 'playerDetails'),
+      ),
+      service.read<Partial<Record<string, PlayerStatus>>>(
+        livePath(leagueId, 'playerStatus'),
+      ),
+      service.read<Record<string, Player>>(paths.players()),
+    ])
+    return Object.entries(details ?? {})
+      .filter(
+        ([playerId, detail]) =>
+          detail.playerCategory === batch.playerCategory &&
+          players?.[playerId]?.playerRole === batch.playerRole &&
+          statuses?.[playerId]?.status !== 'Sold' &&
+          statuses?.[playerId]?.status !== 'Unsold',
+      )
+      .map(([playerId]) => playerId as PlayerId)
+  }
+
+  /**
+   * **Puts a player up**, before bidding opens. The previous player's round
+   * is cleared — keyed per player, so nothing of it can leak into the next —
+   * and kept only as the last player, for the headline.
+   */
+  async function putUp(
+    leagueId: LeagueId,
+    state: AuctionState,
+    playerId: PlayerId,
+  ): Promise<void> {
+    const previous = state.currentPlayerId
+    await service.update({
+      ...(previous === undefined || previous === playerId
+        ? {}
+        : {
+            [livePath(leagueId, 'currentSubmittedBids', previous)]: null,
+            [livePath(leagueId, 'currentAcceptedBids', previous)]: null,
+            [livePath(leagueId, 'auctionState', 'lastPlayerId')]: previous,
+          }),
+      [livePath(leagueId, 'auctionState', 'currentPlayerId')]: playerId,
+      [livePath(leagueId, 'auctionState', 'phase')]: 'betweenPlayers',
+      [livePath(leagueId, 'currentSubmittedBids', 'currentPlayer')]: playerId,
+      [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: false,
+      [livePath(leagueId, 'currentAcceptedBids', 'currentPlayer')]: playerId,
+      [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: false,
+    })
+  }
+
+  /**
+   * **The draft pool, priced**: every General player not yet sold, plus
+   * everyone left unsold from the bidding batches, each at their base price.
+   */
+  async function draftPoolPrices(
+    leagueId: LeagueId,
+  ): Promise<Map<string, number>> {
+    const [details, statuses] = await Promise.all([
+      service.read<Record<string, LeaguePlayerAuctionDetail>>(
+        auctionDetailsPath(leagueId, 'auctionConfig', 'playerDetails'),
+      ),
+      service.read<Partial<Record<string, PlayerStatus>>>(
+        livePath(leagueId, 'playerStatus'),
+      ),
+    ])
+    const prices = new Map<string, number>()
+    for (const [playerId, detail] of Object.entries(details ?? {})) {
+      const status = statuses?.[playerId]?.status
+      if (
+        status === 'Unsold' ||
+        (status !== 'Sold' && detail.playerCategory === 'general')
+      ) {
+        prices.set(playerId, detail.playerBasePrice)
+      }
+    }
+    return prices
+  }
+
+  /**
+   * **Refuses while a draft pick is going through** — submitted, not yet
+   * accepted. Recovery and ending wait for it, so a sale cannot land halfway
+   * through either.
+   */
+  async function assertNoPickInFlight(
+    leagueId: LeagueId,
+    state: AuctionState,
+  ): Promise<void> {
+    if (state.currentBatch?.kind !== 'draft') return
+    if (state.currentDraftTurn === undefined) return
+    const pick = await service.read<DraftPick>(
+      livePath(leagueId, 'draftPicks', String(state.currentDraftTurn)),
+    )
+    if (pick !== undefined && pick.skipped !== true && pick.accepted !== true) {
+      throw new DataLayerError(
+        'auctionState',
+        'A draft pick is still going through. Wait for it.',
+      )
+    }
+  }
+
+  /** The live state, refusing outside the draft. */
+  async function draftState(leagueId: LeagueId): Promise<AuctionState> {
+    const state = await liveState(leagueId)
+    if (state.currentBatch?.kind !== 'draft') {
+      throw new DataLayerError(
+        'auctionState',
+        'The draft has not been reached.',
+      )
+    }
+    return state
+  }
+
+  /** A path under a league's auction details. Never read the node whole. */
+  function auctionDetailsPath(leagueId: LeagueId, ...rest: string[]): DbPath {
+    return service.path('leagues', leagueId, 'auctionDetails', ...rest)
+  }
+
   function withTeam(player: Player, teamOf: Map<string, string>): Player {
     const teamShortName = teamOf.get(player.playerId)
     return teamShortName === undefined || teamShortName === ''
@@ -656,33 +1422,148 @@ export function createFirebaseApi(
     }
   }
 
-  /** A manager's stored team for a match, resolved. No visibility check. */
+  // -------------------------------------------------------------------------
+  // Squads: what an auction league's manager may field
+  // -------------------------------------------------------------------------
+
+  async function isAuctionLeague(leagueId: LeagueId): Promise<boolean> {
+    return (
+      (await service.read<boolean>(
+        service.path('leagues', leagueId, 'isAuctionEnabled'),
+      )) === true
+    )
+  }
+
+  /**
+   * **How long a match in this tournament is taken to last**, from its base
+   * tournament's format. One with no format on record is taken as T20, the
+   * shortest. Only for deciding what My Team opens on, never a deadline.
+   */
+  async function matchDuration(tournamentId: TournamentId): Promise<number> {
+    const competitionId = await service.read<CompetitionId>(
+      service.path('tournaments', tournamentId, 'competitionId'),
+    )
+    const format =
+      competitionId === undefined
+        ? undefined
+        : await service.read<Format>(
+            service.path('competitions', competitionId, 'formatId'),
+          )
+    return MATCH_DURATION_MS[format ?? 't20']
+  }
+
+  /** The tournament's home nation, **India when none is set**. */
+  async function leagueHomeNation(leagueId: LeagueId): Promise<string> {
+    const tournamentId = await service.read<TournamentId>(
+      service.path('leagues', leagueId, 'tournamentId'),
+    )
+    const homeNation =
+      tournamentId === undefined
+        ? undefined
+        : await service.read<string>(
+            service.path('tournaments', tournamentId, 'homeNation'),
+          )
+    return homeNation ?? DEFAULT_HOME_NATION
+  }
+
+  /**
+   * **A manager's squad at one match**, as a set of ids. Written per match on
+   * every sale; the same at every match until transfers exist.
+   */
+  async function squadAt(
+    leagueId: LeagueId,
+    managerId: UserId,
+    matchId: MatchId,
+  ): Promise<Set<string>> {
+    const ids = await service.read<PlayerId[] | Record<string, PlayerId>>(
+      paths.squads(leagueId, managerId, matchId),
+    )
+    // Stored as an array, which RTDB may hand back as an object.
+    return new Set(Object.values(ids ?? {}))
+  }
+
+  /** The first match of a gameweek, which its squad is taken at. */
+  async function gameWeekStart(
+    leagueId: LeagueId,
+    gameWeekId: GameWeekId,
+  ): Promise<MatchId | undefined> {
+    const { rounds } = await leagueFixtures(leagueId)
+    return Object.values(rounds)
+      .flatMap((round) => Object.values(round.gameWeeks ?? {}))
+      .find((gw) => gw.gameWeekId === gameWeekId)?.startMatchId
+  }
+
+  /**
+   * **Whether a saved lineup has fallen outside the squad** — in an auction
+   * league, a player in it the manager no longer owns at that match, as after
+   * a rewind following a reopen. Such a lineup is **treated as absent**: it
+   * scores nothing and shows nowhere, until a new one is saved. Nothing is
+   * deleted, so a correction that restores the player brings it back.
+   */
+  async function outsideSquad(
+    leagueId: LeagueId,
+    managerId: UserId,
+    ids: readonly PlayerId[],
+    matchId: MatchId | undefined,
+  ): Promise<boolean> {
+    if (matchId === undefined || !(await isAuctionLeague(leagueId))) {
+      return false
+    }
+    const squad = await squadAt(leagueId, managerId, matchId)
+    return ids.some((id) => !squad.has(id))
+  }
+
+  /**
+   * A manager's stored team for a match, resolved. No visibility check.
+   *
+   * **A lineup outside the squad is absent**, unless `keepDiscarded` — the
+   * manager's own read — when it comes back marked, so My Team can say why.
+   */
   async function readMatchTeam(
     leagueId: LeagueId,
     userId: UserId,
     matchId: MatchId,
+    keepDiscarded = false,
   ): Promise<MatchLineup | undefined> {
     const stored = await service.read<StoredLineup>(
       service.path('matchBasedLineups', leagueId, userId, matchId),
     )
     if (stored === undefined) return undefined
 
+    const discarded = await outsideSquad(
+      leagueId,
+      userId,
+      stored.lineup,
+      matchId,
+    )
+    if (discarded && !keepDiscarded) return undefined
+
     return {
       ...stored,
       lineup: await resolvePlayers(stored.lineup, leagueId),
+      ...(discarded ? { discarded: true as const } : {}),
     }
   }
 
-  /** A manager's stored team for a gameweek, resolved. No visibility check. */
+  /** A manager's stored team for a gameweek, as `readMatchTeam`. */
   async function readGameWeekTeam(
     leagueId: LeagueId,
     userId: UserId,
     gameWeekId: GameWeekId,
+    keepDiscarded = false,
   ): Promise<GameWeekLineup | undefined> {
     const stored = await service.read<StoredGameWeekLineup>(
       service.path('gameWeekBasedLineups', leagueId, userId, gameWeekId),
     )
     if (stored === undefined) return undefined
+
+    const discarded = await outsideSquad(
+      leagueId,
+      userId,
+      [...stored.startingLineup, ...(stored.postImpactSubLineup ?? [])],
+      await gameWeekStart(leagueId, gameWeekId),
+    )
+    if (discarded && !keepDiscarded) return undefined
 
     const [startingLineup, postImpactSubLineup] = await Promise.all([
       resolvePlayers(stored.startingLineup, leagueId),
@@ -699,6 +1580,7 @@ export function createFirebaseApi(
         ? {}
         : { impactSub: stored.impactSub }),
       ...(postImpactSubLineup === undefined ? {} : { postImpactSubLineup }),
+      ...(discarded ? { discarded: true as const } : {}),
     }
   }
 
@@ -805,6 +1687,50 @@ export function createFirebaseApi(
   }
 
   /**
+   * **Every manager's lineups less those outside their squad**, with the
+   * league's squads read in one go (or one manager's, for `only`).
+   */
+  async function withoutDiscarded(
+    leagueId: LeagueId,
+    lineups: Scoring['lineups'],
+    startOf: (period: string) => MatchId | undefined,
+    only?: UserId,
+  ): Promise<Scoring['lineups']> {
+    type Squads = Record<string, PlayerId[] | Record<string, PlayerId>>
+    const squads: Partial<Record<string, Squads>> =
+      only === undefined
+        ? ((await service.read<Record<string, Squads>>(
+            paths.squads(leagueId),
+          )) ?? {})
+        : {
+            [only]:
+              (await service.read<Squads>(paths.squads(leagueId, only))) ?? {},
+          }
+
+    const kept: Scoring['lineups'] = {}
+    for (const [managerId, periods] of Object.entries(lineups)) {
+      if (periods === undefined) continue
+      const mine = squads[managerId] ?? {}
+      kept[managerId as UserId] = Object.fromEntries(
+        Object.entries(periods).filter(([period, stored]) => {
+          const matchId = startOf(period)
+          if (matchId === undefined) return true
+          const squad = new Set(Object.values(mine[matchId] ?? {}))
+          const ids =
+            'startingLineup' in stored
+              ? [
+                  ...stored.startingLineup,
+                  ...(stored.postImpactSubLineup ?? []),
+                ]
+              : stored.lineup
+          return ids.every((id) => squad.has(id))
+        }),
+      )
+    }
+    return kept
+  }
+
+  /**
    * **Three subtree reads, not one per manager**: the league's lineups, the
    * points node, and its members. `only` narrows the lineups and members to one
    * manager, for the single-manager reads.
@@ -813,7 +1739,7 @@ export function createFirebaseApi(
     leagueId: LeagueId,
     only?: UserId,
   ): Promise<Scoring> {
-    const [fixtures, isCustom, isGameWeeks] = await Promise.all([
+    const [fixtures, isCustom, isGameWeeks, isAuction] = await Promise.all([
       leagueFixtures(leagueId),
       service.read<boolean>(
         service.path('leagues', leagueId, 'isCustomScoringSystem'),
@@ -821,6 +1747,7 @@ export function createFirebaseApi(
       service.read<boolean>(
         service.path('leagues', leagueId, 'isGameWeeksEnabled'),
       ),
+      isAuctionLeague(leagueId),
     ])
 
     const node =
@@ -856,13 +1783,27 @@ export function createFirebaseApi(
           ),
     ])
 
+    // **A lineup outside the squad scores nothing**, so it is dropped here —
+    // in an auction league, against the squad at the period's first match.
+    const counted = isAuction
+      ? await withoutDiscarded(
+          leagueId,
+          lineups ?? {},
+          (period) =>
+            isGameWeeks === true
+              ? weeks.find((w) => w.gameWeek.gameWeekId === period)?.matchIds[0]
+              : (period as MatchId),
+          only,
+        )
+      : (lineups ?? {})
+
     return {
       matches: fixtures.matches,
       offset: fixtures.offset,
       isGameWeeks: isGameWeeks === true,
       weeks,
       points: points ?? {},
-      lineups: lineups ?? {},
+      lineups: counted,
       members: members ?? {},
       watermark: watermarkOf(
         fixtures.matches,
@@ -1244,17 +2185,19 @@ export function createFirebaseApi(
   async function assertLegal(
     leagueId: LeagueId,
     submission: LineupSubmission,
+    /** The match the squad is taken at: the period's first. */
+    atMatchId: MatchId,
   ): Promise<void> {
-    const { lineup, captainId, viceCaptainId } = submission
+    const { captainId, viceCaptainId } = submission
 
-    if (lineup.length !== 11) {
+    if (submission.lineup.length !== 11) {
       throw new DataLayerError(
         'illegalLineup',
-        `A team is eleven players. This one has ${lineup.length}.`,
+        `A team is eleven players. This one has ${submission.lineup.length}.`,
       )
     }
 
-    const ids = new Set(lineup.map((player) => player.playerId))
+    const ids = new Set(submission.lineup.map((player) => player.playerId))
     if (ids.size !== 11) {
       throw new DataLayerError(
         'illegalLineup',
@@ -1274,11 +2217,58 @@ export function createFirebaseApi(
       )
     }
 
-    const rules = await api.getLineupRules(leagueId)
+    // **The stored players, not the ones sent.** A role or country in the
+    // request is the client's word; the catalogue is the authority.
+    const [rules, everyone] = await Promise.all([
+      api.getLineupRules(leagueId),
+      service.read<Record<string, Player>>(paths.players()),
+    ])
+    const lineup = [...ids].map((id) => everyone?.[id])
+    if (lineup.some((player) => player === undefined)) {
+      throw new DataLayerError(
+        'illegalLineup',
+        'That team has an unknown player.',
+      )
+    }
+    const players = lineup as Player[]
+
+    // **An auction league fields only its squad, under the overseas cap.**
+    if (await isAuctionLeague(leagueId)) {
+      const uid = requireSession().uid as UserId
+      const [squad, cap, homeNation] = await Promise.all([
+        squadAt(leagueId, uid, atMatchId),
+        service.read<number>(
+          service.path(
+            'leagues',
+            leagueId,
+            'auctionDetails',
+            'auctionConfig',
+            'maxOverseasPlayersAllowedInXI',
+          ),
+        ),
+        leagueHomeNation(leagueId),
+      ])
+      const outside = players.filter((p) => !squad.has(p.playerId))
+      if (outside.length > 0) {
+        throw new DataLayerError(
+          'illegalLineup',
+          `${outside.map((p) => p.playerName).join(', ')} ${
+            outside.length === 1 ? 'is' : 'are'
+          } not in your squad.`,
+        )
+      }
+      const overseas = players.filter((p) => p.country !== homeNation).length
+      if (cap !== undefined && overseas > cap) {
+        throw new DataLayerError(
+          'illegalLineup',
+          `This league allows at most ${cap} overseas players. You have ${overseas}.`,
+        )
+      }
+    }
 
     for (const [role, rule] of Object.entries(rules)) {
       if (rule === undefined) continue
-      const count = lineup.filter((p) => p.playerRole === role).length
+      const count = players.filter((p) => p.playerRole === role).length
 
       if (count < rule.min) {
         throw new DataLayerError(
@@ -1351,6 +2341,71 @@ export function createFirebaseApi(
         paths.competitions(),
       )
       return Object.values(all ?? {})
+    },
+
+    async createCompetition(config: CompetitionConfig): Promise<CompetitionId> {
+      await assertSystemAdmin()
+
+      const competitionName = await uniqueCompetitionName(
+        config.competitionName,
+      )
+      assertFormat(config.formatId)
+      const homeNation = config.homeNation?.trim() ?? ''
+
+      const competitionId = service.generateKey() as CompetitionId
+
+      await service.write(paths.competitions(competitionId), {
+        competitionId,
+        competitionName,
+        formatId: config.formatId,
+        // Absent is how "no notion of overseas" is spelled.
+        ...(homeNation === '' ? {} : { homeNation }),
+      } satisfies Competition)
+
+      return competitionId
+    },
+
+    /**
+     * **Changing the format does not reach existing tournaments' matches**, and
+     * nothing here pretends otherwise: a tournament reads its format through the
+     * competition, so it follows. The home nation does not, because each
+     * tournament froze its own copy when it was created.
+     */
+    async updateCompetition(
+      competitionId: CompetitionId,
+      changes: Partial<CompetitionConfig>,
+    ): Promise<void> {
+      await assertSystemAdmin()
+
+      const existing = await service.read<Competition>(
+        paths.competitions(competitionId),
+      )
+      if (existing === undefined) {
+        throw new DataLayerError('notFound', 'No such base tournament.')
+      }
+
+      const update: Record<string, unknown> = {}
+      const at = (field: string) =>
+        service.path('competitions', competitionId, field)
+
+      if (changes.competitionName !== undefined) {
+        update[at('competitionName')] = await uniqueCompetitionName(
+          changes.competitionName,
+          competitionId,
+        )
+      }
+      if (changes.formatId !== undefined) {
+        assertFormat(changes.formatId)
+        update[at('formatId')] = changes.formatId
+      }
+      if (changes.homeNation !== undefined) {
+        const homeNation = changes.homeNation.trim()
+        // Null deletes the key, which is what clearing it means.
+        update[at('homeNation')] = homeNation === '' ? null : homeNation
+      }
+
+      if (Object.keys(update).length === 0) return
+      await service.update(update)
     },
 
     async getPlayerRoles(): Promise<PlayerRoleRecord[]> {
@@ -1475,9 +2530,22 @@ export function createFirebaseApi(
      * player list entirely, and `system-admin.md` defers a Retired Players view
      * to Phase 2 — retirement is rare enough not to come up here.
      */
+    /**
+     * **Carries each player's standard auction values**, from one extra read of
+     * `standardAuctionConfig/playerDetails`, so the admin's player dialog can
+     * show and edit them. Players created before they were required have none.
+     */
     async getPlayers(filter?: PlayerFilter): Promise<Player[]> {
-      const all = await service.read<Record<string, Player>>(paths.players())
-      let players = Object.values(all ?? {})
+      const [all, auctionDetails] = await Promise.all([
+        service.read<Record<string, Player>>(paths.players()),
+        service.read<Record<string, LeaguePlayerAuctionDetail>>(
+          paths.standardPlayerAuctionDetails(),
+        ),
+      ])
+      let players = Object.values(all ?? {}).map((player) => {
+        const detail = auctionDetails?.[player.playerId]
+        return detail === undefined ? player : { ...player, ...detail }
+      })
 
       if (filter?.includeRetired !== true) {
         players = players.filter((p) => p.isRetired !== true)
@@ -1510,6 +2578,11 @@ export function createFirebaseApi(
      * **Existing names are skipped, not duplicated.** Matched on name, which is
      * the only thing a person can be expected to keep stable, so re-adding a
      * squad is safe.
+     *
+     * **Every row is checked before anything is written**, including the
+     * category and base price, which land in `standardAuctionConfig` in the
+     * same update. One bad row refuses the whole batch rather than saving the
+     * rest and leaving the admin to work out which were missed.
      */
     async createPlayers(
       players: readonly PlayerConfig[],
@@ -1528,7 +2601,22 @@ export function createFirebaseApi(
       let created = 0
 
       for (const config of players) {
-        const playerName = config.playerName.trim()
+        const playerName = (config.playerName ?? '').trim()
+        if (playerName === '') {
+          throw new DataLayerError('invalid', 'Every player needs a name.')
+        }
+        if ((config.country ?? '').trim() === '') {
+          throw new DataLayerError('invalid', `${playerName} needs a country.`)
+        }
+        if (!(PLAYER_ROLES as readonly unknown[]).includes(config.playerRole)) {
+          throw new DataLayerError('invalid', `${playerName} needs a role.`)
+        }
+        const auctionDetail = auctionDetailFor(
+          playerName,
+          config.playerCategory,
+          config.playerBasePrice,
+        )
+
         if (takenNames.has(playerName.toLowerCase())) {
           skipped.push(playerName)
           continue
@@ -1549,6 +2637,7 @@ export function createFirebaseApi(
           isRetired: false,
           ...(Object.keys(currentTeams).length > 0 ? { currentTeams } : {}),
         }
+        update[paths.standardPlayerAuctionDetails(playerId)] = auctionDetail
 
         // The other side of each membership, written in the same call.
         for (const [competitionId, teamId] of Object.entries(currentTeams)) {
@@ -1590,6 +2679,23 @@ export function createFirebaseApi(
       }
       if (changes.playerRole !== undefined) {
         update[at('playerRole')] = changes.playerRole
+      }
+
+      // The two auction values are one record, so either changing rewrites it
+      // whole — merged with what is stored, since a player created before they
+      // were required has nothing to merge with and must be given both.
+      if (
+        changes.playerCategory !== undefined ||
+        changes.playerBasePrice !== undefined
+      ) {
+        const stored = await service.read<LeaguePlayerAuctionDetail>(
+          paths.standardPlayerAuctionDetails(playerId),
+        )
+        update[paths.standardPlayerAuctionDetails(playerId)] = auctionDetailFor(
+          changes.playerName?.trim() || 'This player',
+          changes.playerCategory ?? stored?.playerCategory,
+          changes.playerBasePrice ?? stored?.playerBasePrice,
+        )
       }
 
       if (Object.keys(update).length === 0) return
@@ -1816,7 +2922,7 @@ export function createFirebaseApi(
       ])
 
       if (league === undefined) {
-        throw new DataLayerError('banned', 'That league no longer exists.')
+        throw new DataLayerError('notFound', 'That league no longer exists.')
       }
       if (banned !== undefined) {
         throw new DataLayerError(
@@ -1826,14 +2932,29 @@ export function createFirebaseApi(
       }
       if (league.leagueEntry !== 'Open') {
         throw new DataLayerError(
-          'joinDeadlinePassed',
+          'closedLeague',
           'This league is closed, so joining needs its admin to approve you. Requesting to join is not built yet.',
         )
       }
       if (Date.now() > league.fantasyLeagueJoinDeadline) {
         throw new DataLayerError(
-          'alreadyMember',
+          'joinDeadlinePassed',
           'The deadline to join this league has passed.',
+        )
+      }
+
+      /*
+        **Joining closes when the auction starts**, even before the scheduled
+        time. A manager arriving mid-auction would have no budget and no draft
+        seat, and would be bidding against squads already half built.
+      */
+      if (
+        league.isAuctionEnabled &&
+        (await liveAuctionPhase(leagueId)) !== undefined
+      ) {
+        throw new DataLayerError(
+          'joinDeadlinePassed',
+          'The auction has started, so joining has closed.',
         )
       }
 
@@ -1844,6 +2965,25 @@ export function createFirebaseApi(
         throw new DataLayerError(
           'alreadyMember',
           'You are already playing in this league.',
+        )
+      }
+
+      // **Whoever runs the auction cannot play in it** — primary or backup.
+      // The auction page has no way to be both the room and a bidder in it.
+      const details =
+        'auctionDetails' in league ? league.auctionDetails : undefined
+      const auctioneers = [
+        details?.primaryAuctioneer,
+        details?.secondaryAuctioneer,
+      ]
+      if (
+        mine?.leagueRoles?.primaryAuctioneer === true ||
+        mine?.leagueRoles?.secondaryAuctioneer === true ||
+        auctioneers.includes(userId)
+      ) {
+        throw new DataLayerError(
+          'forbidden',
+          "You run this league's auction, so you cannot also play in it.",
         )
       }
 
@@ -1872,7 +3012,7 @@ export function createFirebaseApi(
       // Merged, not replaced. Someone joining a league they own keeps owning it.
       const myRoles = { ...(mine?.leagueRoles ?? {}), manager: true as const }
 
-      await service.update({
+      const membership: Record<string, unknown> = {
         /*
           **Leaf paths on the membership, deliberately.** Writing the member
           object whole would erase `leagueOwner` and `leagueAdmin` from anyone
@@ -1900,7 +3040,25 @@ export function createFirebaseApi(
           membershipStatus: 'Accepted',
           myRoles,
         },
-      })
+      }
+
+      // Before the membership, so a league with no position left refuses the
+      // join rather than admitting a manager the draft has no seat for.
+      const claimedPosition = league.isAuctionEnabled
+        ? await claimDraftPosition(league, userId)
+        : undefined
+
+      try {
+        await service.update(membership)
+      } catch (error) {
+        // A failed join must not keep a seat in the draft.
+        if (claimedPosition !== undefined) {
+          await service.update({
+            [draftPositionPath(leagueId, claimedPosition)]: null,
+          })
+        }
+        throw error
+      }
     },
 
     /**
@@ -1920,6 +3078,13 @@ export function createFirebaseApi(
           'invalidConfig',
           'A tournament needs at least one match.',
         )
+      }
+
+      const competition = await service.read<Competition>(
+        paths.competitions(config.competitionId),
+      )
+      if (competition === undefined) {
+        throw new DataLayerError('notFound', 'No such base tournament.')
       }
 
       const tournamentId = service.generateKey() as TournamentId
@@ -1946,6 +3111,11 @@ export function createFirebaseApi(
         tournamentId,
         tournamentName: config.tournamentName.trim(),
         competitionId: config.competitionId,
+        // Copied and frozen, so editing the base tournament later never shifts
+        // who is overseas here.
+        ...(competition.homeNation === undefined
+          ? {}
+          : { homeNation: competition.homeNation }),
         matches,
         rounds: {
           [roundId]: {
@@ -2421,9 +3591,11 @@ export function createFirebaseApi(
         )
       }
 
+      const auction = officialLeagues?.auction
       const wantsLeague =
         officialLeagues?.matchBased === true ||
-        officialLeagues?.gameWeekBased === true
+        officialLeagues?.gameWeekBased === true ||
+        auction !== undefined
 
       if (
         wantsLeague &&
@@ -2433,6 +3605,48 @@ export function createFirebaseApi(
           'invalidConfig',
           'This tournament has no players, so a league against it would have nobody to pick. Set its teams and players first.',
         )
+      }
+
+      /*
+        Everything below is checked before anything is claimed or written, so
+        a bad input refuses the publish outright rather than half-way through.
+        Each gameweek league gets its own call, so no two leagues share a
+        gameweek id.
+      */
+      const roundConfigs =
+        officialLeagues?.gameWeekBased === true
+          ? gameWeeksFor(tournament, officialLeagues.gameWeekLengths)
+          : undefined
+      const auctionRoundConfigs =
+        auction !== undefined
+          ? gameWeeksFor(tournament, officialLeagues?.gameWeekLengths)
+          : undefined
+
+      // Squads are won before teams are picked, so the auction has to finish
+      // before the first ball. Before the first match is the checkable part.
+      const firstMatchStart = Math.min(
+        ...dated.map((match) => match.startTimestamp ?? Number.MAX_VALUE),
+      )
+      if (auction !== undefined) {
+        const start = auction.auctionStartTime
+        if (typeof start !== 'number' || !Number.isFinite(start)) {
+          throw new DataLayerError(
+            'invalidConfig',
+            'Choose when the auction starts.',
+          )
+        }
+        if (start <= Date.now()) {
+          throw new DataLayerError(
+            'invalidConfig',
+            'The auction has to start in the future.',
+          )
+        }
+        if (start >= firstMatchStart) {
+          throw new DataLayerError(
+            'invalidConfig',
+            'The auction has to start before the first match, so squads are won before teams are picked.',
+          )
+        }
       }
 
       const update: Record<string, unknown> = {}
@@ -2456,26 +3670,39 @@ export function createFirebaseApi(
         const offset = deadlineOffset ?? STANDARD_TEAM_CHANGES_DEADLINE_OFFSET
         const rules = lineupRules ?? STANDARD_FANTASY_LINEUP_RULES
 
-        // No later than the first match's deadline, which is its start minus
-        // the offset teams lock by.
-        const firstStart = Math.min(
-          ...dated.map((match) => match.startTimestamp ?? Number.MAX_VALUE),
-        )
-
         const common = {
           tournament,
           ownerId: session.uid as UserId,
           ownerName: owner?.userName ?? 'System admin',
           rules,
           offset,
-          joinDeadline: firstStart - offset,
+          // No later than the first match's deadline, which is its start
+          // minus the offset teams lock by.
+          joinDeadline: firstMatchStart - offset,
         }
 
         if (officialLeagues?.matchBased === true) {
-          Object.assign(update, await officialLeague(common, false))
+          Object.assign(update, await officialLeague(common, { type: 'match' }))
         }
-        if (officialLeagues?.gameWeekBased === true) {
-          Object.assign(update, await officialLeague(common, true))
+        if (roundConfigs !== undefined) {
+          Object.assign(
+            update,
+            await officialLeague(common, { type: 'gameWeek', roundConfigs }),
+          )
+        }
+        if (auction !== undefined && auctionRoundConfigs !== undefined) {
+          Object.assign(
+            update,
+            await officialLeague(common, {
+              type: 'auction',
+              roundConfigs: auctionRoundConfigs,
+              auctionConfig: await auctionConfigFor(
+                tournament,
+                session.uid as UserId,
+              ),
+              auctionStartTime: auction.auctionStartTime,
+            }),
+          )
         }
       }
 
@@ -2544,43 +3771,24 @@ export function createFirebaseApi(
         throw new DataLayerError('notFound', 'That league no longer exists.')
       }
 
-      const [
-        tournamentName,
-        startDate,
-        offset,
-        auctionStartTime,
-        runtime,
-        nextDeadline,
-      ] = await Promise.all([
-        service.read<string>(
-          service.path('tournaments', tournamentId, 'tournamentName'),
-        ),
-        service.read<number>(
-          service.path('tournaments', tournamentId, 'startDate'),
-        ),
-        service.read<number>(at('fantasyLeagueTeamChangesDeadlineOffset')),
-        isAuctionEnabled === true
-          ? service.read<number>(
-              service.path(
-                'leagues',
-                leagueId,
-                'auctionDetails',
-                'auctionStartTime',
-              ),
-            )
-          : undefined,
-        isAuctionEnabled === true
-          ? service.read<unknown>(service.path('liveAuctions', leagueId))
-          : undefined,
-        upcomingDeadline(leagueId, isGameWeeksEnabled === true),
-      ])
+      const [tournamentName, startDate, offset, auctionPhase, nextDeadline] =
+        await Promise.all([
+          service.read<string>(
+            service.path('tournaments', tournamentId, 'tournamentName'),
+          ),
+          service.read<number>(
+            service.path('tournaments', tournamentId, 'startDate'),
+          ),
+          service.read<number>(at('fantasyLeagueTeamChangesDeadlineOffset')),
+          isAuctionEnabled === true ? liveAuctionPhase(leagueId) : undefined,
+          upcomingDeadline(leagueId, isGameWeeksEnabled === true),
+        ])
 
       const phase = derivePhase({
         finishedAt,
         tournamentStartDate: startDate,
         isAuctionEnabled: isAuctionEnabled === true,
-        auctionStartTime,
-        auctionHasStarted: runtime !== undefined,
+        auctionPhase,
         now: Date.now(),
       })
 
@@ -2715,9 +3923,12 @@ export function createFirebaseApi(
     async getGameWeeks(leagueId: LeagueId): Promise<LeagueGameWeek[]> {
       const { tournamentId, matches, rounds } = await leagueFixtures(leagueId)
 
-      const tournamentRounds = await service.read<Record<string, Round>>(
-        paths.tournamentRounds(tournamentId),
-      )
+      const [tournamentRounds, duration] = await Promise.all([
+        service.read<Record<string, Round>>(
+          paths.tournamentRounds(tournamentId),
+        ),
+        matchDuration(tournamentId),
+      ])
 
       const numberOf = (matchId: MatchId) =>
         matches.find((m) => m.matchId === matchId)?.matchNumber ?? 0
@@ -2760,6 +3971,29 @@ export function createFirebaseApi(
         round starts" allowance, and one inside the same round by its "between
         gameweeks" allowance. Absent in either means unlimited.
       */
+      /*
+        **When each gameweek is over**: its last match's start plus the
+        format's duration, or the next gameweek's first start if that comes
+        sooner — on a day with several matches it does.
+      */
+      for (const [index, entry] of entries.entries()) {
+        const spanned = entry.week.matchIds.map((id) =>
+          matches.find((m) => m.matchId === id),
+        )
+        const lastStart = spanned.at(-1)?.startTimestamp
+        if (
+          lastStart === undefined ||
+          spanned.some((m) => m?.startTimestamp === undefined)
+        ) {
+          continue
+        }
+        const nextStart = entries[index + 1]?.week.startsAt
+        entry.week = {
+          ...entry.week,
+          endsAt: Math.min(lastStart + duration, nextStart ?? Infinity),
+        }
+      }
+
       return entries.map(({ roundId, week }, index) => {
         if (index === 0) return week
 
@@ -2812,14 +4046,33 @@ export function createFirebaseApi(
       return undefined
     },
 
-    async getFixtures(tournamentId: TournamentId): Promise<Match[]> {
-      const stored = await service.read<Record<string, Match>>(
-        paths.tournamentMatches(tournamentId),
-      )
+    /**
+     * In match order, **each with when it counts as over**: its start plus the
+     * format's duration, or the next match's start if sooner. Only for
+     * choosing which match My Team opens on; deadlines never use it.
+     */
+    async getFixtures(tournamentId: TournamentId): Promise<Fixture[]> {
+      const [stored, duration] = await Promise.all([
+        service.read<Record<string, Match>>(
+          paths.tournamentMatches(tournamentId),
+        ),
+        matchDuration(tournamentId),
+      ])
 
-      return Object.values(stored ?? {}).sort(
+      const matches = Object.values(stored ?? {}).sort(
         (a, b) => a.matchNumber - b.matchNumber,
       )
+      return matches.map((match, index) => {
+        if (match.startTimestamp === undefined) return match
+        const nextStart = matches[index + 1]?.startTimestamp
+        return {
+          ...match,
+          endsAt: Math.min(
+            match.startTimestamp + duration,
+            nextStart ?? Infinity,
+          ),
+        }
+      })
     },
 
     /**
@@ -2829,36 +4082,56 @@ export function createFirebaseApi(
      * caller reads as zero — the model treats zero and absent as the same
      * thing, and does not record why a player scored nothing.
      */
+    /**
+     * **One request, one decision about the store, then one read per match in
+     * parallel.** The league's scoring flag and tournament are read once
+     * rather than once per match.
+     *
+     * Read, open to any signed-in caller, like the single call: points are
+     * public, and nothing here says who fielded whom.
+     */
+    async getPlayerPointsForMatches(
+      leagueId: LeagueId,
+      matchIds: readonly MatchId[],
+    ): Promise<MatchPlayerPoints[]> {
+      // Validated as unknown: the arguments come off the wire, and the
+      // declared type is a hope rather than a guarantee.
+      const raw: unknown = matchIds
+      if (
+        !Array.isArray(raw) ||
+        raw.some((id: unknown) => typeof id !== 'string' || id === '')
+      ) {
+        throw new DataLayerError('invalid', 'Ask for a list of match ids.')
+      }
+      const ids = raw as MatchId[]
+
+      // A tournament is at most a few dozen matches. Anything far larger is a
+      // mistake, and would otherwise be a fan-out of reads on one request.
+      if (ids.length > MAX_MATCHES_PER_POINTS_READ) {
+        throw new DataLayerError(
+          'invalid',
+          `Ask for at most ${MAX_MATCHES_PER_POINTS_READ} matches at once.`,
+        )
+      }
+      if (ids.length === 0) return []
+
+      const pathFor = await pointsPathFor(leagueId)
+      const perMatch = await Promise.all(
+        ids.map((matchId) => service.read<PlayerPoints>(pathFor(matchId))),
+      )
+
+      return ids.map((matchId, i) => ({
+        matchId,
+        points: perMatch[i] ?? {},
+      }))
+    },
+
     async getPlayerPointsForMatch(
       leagueId: LeagueId,
       matchId: MatchId,
     ): Promise<PlayerPoints> {
-      const [isCustom, tournamentId] = await Promise.all([
-        service.read<boolean>(
-          service.path('leagues', leagueId, 'isCustomScoringSystem'),
-        ),
-        service.read<TournamentId>(
-          service.path('leagues', leagueId, 'tournamentId'),
-        ),
-      ])
-
-      if (isCustom === true) {
-        return (
-          (await service.read<PlayerPoints>(
-            paths.customPointsByMatch(leagueId, matchId),
-          )) ?? {}
-        )
-      }
-
-      if (tournamentId === undefined) {
-        throw new DataLayerError('notFound', 'That league no longer exists.')
-      }
-
-      return (
-        (await service.read<PlayerPoints>(
-          paths.standardPointsByMatch(tournamentId, matchId),
-        )) ?? {}
-      )
+      const pathFor = await pointsPathFor(leagueId)
+      return (await service.read<PlayerPoints>(pathFor(matchId))) ?? {}
     },
 
     /**
@@ -3253,13 +4526,22 @@ export function createFirebaseApi(
      */
     async getSelectablePlayers(
       leagueId: LeagueId,
-      _matchId: MatchId,
+      matchId: MatchId,
     ): Promise<Player[]> {
       const tournamentId = await service.read<TournamentId>(
         service.path('leagues', leagueId, 'tournamentId'),
       )
       if (tournamentId === undefined) {
         throw new DataLayerError('notFound', 'That league no longer exists.')
+      }
+
+      // **The one place the two kinds of league diverge**: an auction league
+      // picks only from the caller's squad, as it stood at that match.
+      if (await isAuctionLeague(leagueId)) {
+        const uid = requireSession().uid as UserId
+        const squad = await squadAt(leagueId, uid, matchId)
+        const players = await resolvePlayers([...squad] as PlayerId[], leagueId)
+        return players.sort((a, b) => a.playerName.localeCompare(b.playerName))
       }
 
       const [teamOf, everyone] = await Promise.all([
@@ -3279,7 +4561,7 @@ export function createFirebaseApi(
       matchId: MatchId,
     ): Promise<MatchLineup | undefined> {
       const session = requireSession()
-      return readMatchTeam(leagueId, session.uid as UserId, matchId)
+      return readMatchTeam(leagueId, session.uid as UserId, matchId, true)
     },
 
     async getMyTeamForGameWeek(
@@ -3287,7 +4569,7 @@ export function createFirebaseApi(
       gameWeekId: GameWeekId,
     ): Promise<GameWeekLineup | undefined> {
       const session = requireSession()
-      return readGameWeekTeam(leagueId, session.uid as UserId, gameWeekId)
+      return readGameWeekTeam(leagueId, session.uid as UserId, gameWeekId, true)
     },
 
     async getTeamForMatch(
@@ -3446,6 +4728,1486 @@ export function createFirebaseApi(
       }
     },
 
+    /**
+     * **Field by field, never `auctionConfig` whole**, which carries a price
+     * for every player in the tournament — the pool is its own read.
+     */
+    /**
+     * **Everything the Squads page shows, in one read**: every manager's squad
+     * at the current match, with what each player went for, and the eleven to
+     * highlight. Squads are public; the eleven follows the visibility rule —
+     * yours is your saved XI for the current period, anyone else's only their
+     * latest locked one. A lineup outside the squad shows for nobody.
+     */
+    async getSquads(leagueId: LeagueId): Promise<SquadsView> {
+      await assertAuctionLeague(leagueId)
+      const uid = requireSession().uid as UserId
+
+      const [
+        members,
+        settings,
+        lineupRules,
+        current,
+        isGameWeeks,
+        statuses,
+        squads,
+        everyone,
+        teamOf,
+        fixtures,
+      ] = await Promise.all([
+        api.getMembers(leagueId),
+        api.getAuctionSettings(leagueId),
+        api.getLineupRules(leagueId),
+        api.getCurrentMatch(leagueId),
+        service.read<boolean>(
+          service.path('leagues', leagueId, 'isGameWeeksEnabled'),
+        ),
+        service.read<Partial<Record<string, ManagerAuctionStatus>>>(
+          livePath(leagueId, 'managerStatus'),
+        ),
+        service.read<
+          Record<string, Record<string, PlayerId[] | Record<string, PlayerId>>>
+        >(paths.squads(leagueId)),
+        service.read<Record<string, Player>>(paths.players()),
+        leagueTeams(leagueId),
+        leagueFixtures(leagueId),
+      ])
+
+      // **Which eleven to highlight**, by period: yours for the current one,
+      // everyone else's for the latest locked one.
+      type Highlight = ManagerSquadView['xi']
+      let highlight: (managerId: UserId) => Promise<Highlight>
+      if (isGameWeeks === true) {
+        const weeks = await api.getGameWeeks(leagueId)
+        const currentWeek = weeks.find((w) =>
+          w.matchIds.includes(current.matchId),
+        )
+        const lockedWeek = [...weeks].reverse().find((w) =>
+          isLocked(
+            fixtures.matches.find((m) => m.matchId === w.matchIds[0]),
+            fixtures.offset,
+          ),
+        )
+        highlight = async (managerId) => {
+          const week = managerId === uid ? currentWeek : lockedWeek
+          if (week === undefined) return undefined
+          const id = week.gameWeek.gameWeekId
+          const team =
+            managerId === uid
+              ? await readGameWeekTeam(leagueId, uid, id)
+              : await api.getTeamForGameWeek(leagueId, managerId, id)
+          if (team === undefined) return undefined
+          return {
+            playerIds: (team.postImpactSubLineup ?? team.startingLineup).map(
+              (p) => p.playerId,
+            ),
+            captainId: team.captainId,
+            viceCaptainId: team.viceCaptainId,
+            periodName: week.gameWeek.gameWeekName,
+          }
+        }
+      } else {
+        const lockedMatch = [...fixtures.matches]
+          .reverse()
+          .find((m) => isLocked(m, fixtures.offset))
+        highlight = async (managerId) => {
+          const match = managerId === uid ? current : lockedMatch
+          if (match === undefined) return undefined
+          const team =
+            managerId === uid
+              ? await readMatchTeam(leagueId, uid, match.matchId)
+              : await api.getTeamForMatch(leagueId, managerId, match.matchId)
+          if (team === undefined) return undefined
+          return {
+            playerIds: team.lineup.map((p) => p.playerId),
+            captainId: team.captainId,
+            viceCaptainId: team.viceCaptainId,
+            periodName: `Match ${match.matchNumber}`,
+          }
+        }
+      }
+
+      const views = await Promise.all(
+        members
+          .filter((member) => member.leagueRoles.manager === true)
+          .map(async (member): Promise<ManagerSquadView> => {
+            const ids = Object.values(
+              squads?.[member.userId]?.[current.matchId] ?? {},
+            )
+            const paid = statuses?.[member.userId]?.playerList ?? {}
+            const players = ids
+              .map((id) => everyone?.[id])
+              .filter((player): player is Player => player !== undefined)
+              .map((player) => ({
+                player: withTeam(player, teamOf),
+                ...(paid[player.playerId] === undefined
+                  ? {}
+                  : { pricePaid: paid[player.playerId] }),
+              }))
+              .sort(
+                (a, b) =>
+                  PLAYER_ROLES.indexOf(a.player.playerRole) -
+                    PLAYER_ROLES.indexOf(b.player.playerRole) ||
+                  a.player.playerName.localeCompare(b.player.playerName),
+              )
+            const xi = await highlight(member.userId)
+            return {
+              userId: member.userId,
+              userName: member.userName,
+              teamName: member.fantasyTeamName ?? member.userName,
+              players,
+              ...(xi === undefined ? {} : { xi }),
+            }
+          }),
+      )
+
+      const isMine = (view: ManagerSquadView) => view.userId === uid
+      views.sort(
+        (a, b) =>
+          Number(isMine(b)) - Number(isMine(a)) ||
+          a.teamName.localeCompare(b.teamName),
+      )
+
+      return {
+        managers: views,
+        ...(views.some(isMine) ? { mine: uid } : {}),
+        homeNation: settings.homeNation,
+        ...(settings.maxOverseasPlayersAllowedInXI === undefined
+          ? {}
+          : {
+              maxOverseasPlayersAllowedInXI:
+                settings.maxOverseasPlayersAllowedInXI,
+            }),
+        lineupRules,
+      }
+    },
+
+    async getAuctionSettings(leagueId: LeagueId): Promise<AuctionSettings> {
+      await assertAuctionLeague(leagueId)
+
+      const config = (field: string) =>
+        auctionDetailsPath(leagueId, 'auctionConfig', field)
+
+      const [
+        auctionStartTime,
+        auctioneerId,
+        totalBudget,
+        minSquadSize,
+        maxSquadSize,
+        maxOverseas,
+        batchSequence,
+      ] = await Promise.all([
+        service.read<number>(auctionDetailsPath(leagueId, 'auctionStartTime')),
+        service.read<UserId>(auctionDetailsPath(leagueId, 'primaryAuctioneer')),
+        service.read<number>(config('totalBudget')),
+        service.read<number>(config('minSquadSize')),
+        service.read<number>(config('maxSquadSize')),
+        service.read<number>(config('maxOverseasPlayersAllowedInXI')),
+        service.read<AuctionBatch[]>(config('batchSequence')),
+      ])
+
+      if (
+        auctionStartTime === undefined ||
+        auctioneerId === undefined ||
+        totalBudget === undefined ||
+        minSquadSize === undefined ||
+        maxSquadSize === undefined
+      ) {
+        throw new DataLayerError(
+          'internal',
+          'This auction league is missing part of its configuration.',
+        )
+      }
+
+      const [auctioneerName, tournamentId] = await Promise.all([
+        service.read<string>(service.path('users', auctioneerId, 'userName')),
+        service.read<TournamentId>(
+          service.path('leagues', leagueId, 'tournamentId'),
+        ),
+      ])
+      // India when the tournament names nobody — see DEFAULT_HOME_NATION.
+      const homeNation =
+        (tournamentId === undefined
+          ? undefined
+          : await service.read<string>(
+              service.path('tournaments', tournamentId, 'homeNation'),
+            )) ?? DEFAULT_HOME_NATION
+
+      return {
+        auctionStartTime,
+        totalBudget,
+        minSquadSize,
+        maxSquadSize,
+        bidIncrement: BID_INCREMENT,
+        roundSeconds: ROUND_SECONDS,
+        auctioneer: {
+          userId: auctioneerId,
+          userName: auctioneerName ?? 'Unknown',
+        },
+        homeNation,
+        ...omitUndefined({
+          maxOverseasPlayersAllowedInXI: maxOverseas,
+          batchSequence,
+        }),
+      }
+    },
+
+    /**
+     * **Every position from 1 to the league's slots**, held or not.
+     *
+     * Stored position → manager, which RTDB hands back as an array with holes
+     * where positions are free, so both shapes are read.
+     */
+    async getDraftOrder(leagueId: LeagueId): Promise<DraftOrderEntry[]> {
+      await assertAuctionLeague(leagueId)
+
+      const [maxSlots, raw] = await Promise.all([
+        service.read<number>(service.path('leagues', leagueId, 'maxSlots')),
+        service.read<unknown>(auctionDetailsPath(leagueId, 'draftOrder')),
+      ])
+
+      const held = new Map<number, UserId>()
+      if (raw !== null && typeof raw === 'object') {
+        for (const [key, holder] of Object.entries(raw)) {
+          if (typeof holder === 'string') {
+            held.set(Number(key), holder as UserId)
+          }
+        }
+      }
+
+      const positions = Array.from({ length: maxSlots ?? 0 }, (_, i) => i + 1)
+
+      return Promise.all(
+        positions.map(async (position): Promise<DraftOrderEntry> => {
+          const managerId = held.get(position)
+          if (managerId === undefined) return { position }
+
+          const [managerName, fantasyTeamName] = await Promise.all([
+            service.read<string>(service.path('users', managerId, 'userName')),
+            service.read<string>(
+              service.path(
+                'leagues',
+                leagueId,
+                'leagueMembers',
+                managerId,
+                'fantasyTeamName',
+              ),
+            ),
+          ])
+
+          return {
+            position,
+            managerId,
+            managerName: managerName ?? 'Unknown',
+            ...omitUndefined({ fantasyTeamName }),
+          }
+        }),
+      )
+    },
+
+    /**
+     * **The league's frozen pool**, not the tournament's participants as they
+     * are today: the prices and categories managers bid against were copied
+     * when the league was created.
+     */
+    async getAuctionPlayerPool(
+      leagueId: LeagueId,
+    ): Promise<AuctionPoolPlayer[]> {
+      await assertAuctionLeague(leagueId)
+
+      const [tournamentId, details] = await Promise.all([
+        service.read<TournamentId>(
+          service.path('leagues', leagueId, 'tournamentId'),
+        ),
+        service.read<Record<string, LeaguePlayerAuctionDetail>>(
+          auctionDetailsPath(leagueId, 'auctionConfig', 'playerDetails'),
+        ),
+      ])
+      if (tournamentId === undefined) {
+        throw new DataLayerError('notFound', 'That league no longer exists.')
+      }
+
+      const [teamOf, everyone] = await Promise.all([
+        tournamentTeams(tournamentId),
+        service.read<Record<string, Player>>(paths.players()),
+      ])
+
+      const pool: AuctionPoolPlayer[] = []
+      for (const [playerId, detail] of Object.entries(details ?? {})) {
+        const player = everyone?.[playerId]
+        if (player === undefined) continue
+        pool.push({
+          player: withTeam(player, teamOf),
+          playerCategory: detail.playerCategory,
+          playerBasePrice: detail.playerBasePrice,
+        })
+      }
+
+      // The order the auction runs in: category, then role, then name.
+      return pool.sort(
+        (a, b) =>
+          PLAYER_CATEGORIES.indexOf(a.playerCategory) -
+            PLAYER_CATEGORIES.indexOf(b.playerCategory) ||
+          PLAYER_ROLES.indexOf(a.player.playerRole) -
+            PLAYER_ROLES.indexOf(b.player.playerRole) ||
+          a.player.playerName.localeCompare(b.player.playerName),
+      )
+    },
+
+    // -----------------------------------------------------------------------
+    // The live auction: the auctioneer's writes
+    // -----------------------------------------------------------------------
+
+    /**
+     * **Creates the live auction** — the only thing that does. Every manager
+     * starts on the full budget, and from here the league is in its auction
+     * until the auctioneer ends it. Joining closes now.
+     */
+    async startAuction(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+
+      const [existing, members, totalBudget] = await Promise.all([
+        service.read<AuctionState>(livePath(leagueId, 'auctionState')),
+        service.read<Partial<Record<string, LeagueMember>>>(
+          paths.leagueMembers(leagueId),
+        ),
+        service.read<number>(
+          auctionDetailsPath(leagueId, 'auctionConfig', 'totalBudget'),
+        ),
+      ])
+      if (existing !== undefined) {
+        throw new DataLayerError(
+          'auctionState',
+          'The auction has already started.',
+        )
+      }
+      if (totalBudget === undefined) {
+        throw new DataLayerError('internal', 'This auction has no budget set.')
+      }
+
+      const update: Record<string, unknown> = {
+        [livePath(leagueId, 'auctionState')]: { phase: 'notStarted' },
+        ...timelineEntry(leagueId, 'auctionStarted', {}),
+      }
+      for (const [userId, member] of Object.entries(members ?? {})) {
+        if (member?.leagueRoles?.manager !== true) continue
+        update[livePath(leagueId, 'managerStatus', userId, 'budget')] =
+          totalBudget
+      }
+      await service.update(update)
+    },
+
+    /**
+     * **The next batch in the sequence, in order only.** No argument, so no
+     * batch can be skipped or revisited. Clears the player up; the previous
+     * one is kept as the last, for the headline.
+     */
+    async nextBatch(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const [state, sequence] = await Promise.all([
+        liveState(leagueId),
+        service.read<AuctionBatch[]>(
+          auctionDetailsPath(leagueId, 'auctionConfig', 'batchSequence'),
+        ),
+      ])
+      assertPhase(state, BETWEEN_ROUNDS, 'Finish this round before moving on.')
+
+      const order = sequence ?? []
+      const at =
+        state.currentBatch === undefined
+          ? -1
+          : order.findIndex((batch) =>
+              state.currentBatch?.kind === 'draft'
+                ? batch.kind === 'draft'
+                : batch.kind === 'auction' &&
+                  state.currentBatch?.kind === 'auction' &&
+                  batch.playerCategory === state.currentBatch.playerCategory &&
+                  batch.playerRole === state.currentBatch.playerRole,
+            )
+      const next = order[at + 1]
+      if (next === undefined) {
+        throw new DataLayerError(
+          'auctionState',
+          'Every batch in the order has been reached.',
+        )
+      }
+
+      // Every player in a bidding batch goes up, sold or unsold, before the
+      // next batch begins.
+      if (state.currentBatch?.kind === 'auction') {
+        const left = (await eligibleInBatch(leagueId, state)).length
+        if (left > 0) {
+          throw new DataLayerError(
+            'auctionState',
+            `${left} ${left === 1 ? 'player is' : 'players are'} still to go up in this batch.`,
+          )
+        }
+      }
+
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'currentBatch')]: next,
+        [livePath(leagueId, 'auctionState', 'currentPlayerId')]: null,
+        ...(state.currentPlayerId === undefined
+          ? {}
+          : {
+              [livePath(leagueId, 'auctionState', 'lastPlayerId')]:
+                state.currentPlayerId,
+            }),
+        [livePath(leagueId, 'auctionState', 'phase')]: 'betweenPlayers',
+        // The draft is announced when it starts, which is the next phase's.
+        ...(next.kind === 'auction'
+          ? timelineEntry(leagueId, 'nextBatch', {
+              playerCategory: next.playerCategory,
+              playerRole: next.playerRole,
+            })
+          : {}),
+      })
+    },
+
+    async putUpPlayer(leagueId: LeagueId, playerId: PlayerId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      const eligible = await eligibleInBatch(leagueId, state)
+      if (!eligible.includes(playerId)) {
+        throw new DataLayerError(
+          'auctionState',
+          'That player is not in this batch, or has already gone up.',
+        )
+      }
+      await putUp(leagueId, state, playerId)
+    },
+
+    async putUpRandomPlayer(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      const eligible = await eligibleInBatch(leagueId, state)
+      const pick = eligible[Math.floor(Math.random() * eligible.length)]
+      if (pick === undefined) {
+        throw new DataLayerError(
+          'auctionState',
+          'Nobody is left in this batch. Move to the next one.',
+        )
+      }
+      await putUp(leagueId, state, pick)
+    },
+
+    /** Opens bidding on the player up, at base price, with the clock running. */
+    async startBidding(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      const playerId = state.currentPlayerId
+      if (state.phase !== 'betweenPlayers' || playerId === undefined) {
+        throw new DataLayerError('auctionState', 'Put a player up first.')
+      }
+      const [round, basePrice] = await Promise.all([
+        service.read<AcceptedBidsForPlayer>(
+          livePath(leagueId, 'currentAcceptedBids', playerId),
+        ),
+        service.read<number>(
+          auctionDetailsPath(
+            leagueId,
+            'auctionConfig',
+            'playerDetails',
+            playerId,
+            'playerBasePrice',
+          ),
+        ),
+      ])
+      if (round !== undefined) {
+        throw new DataLayerError('auctionState', 'Bidding has already started.')
+      }
+      if (basePrice === undefined) {
+        throw new DataLayerError(
+          'notFound',
+          'That player is not in this auction.',
+        )
+      }
+
+      await service.update({
+        [livePath(leagueId, 'currentAcceptedBids', playerId)]: {
+          basePrice,
+          minNextBid: basePrice,
+          deadline: Date.now() + ROUND_SECONDS * 1000,
+        },
+        [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: true,
+        [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: true,
+        [livePath(leagueId, 'playerWiseBiddingHistory', playerId, 'status')]:
+          'Pending',
+        [livePath(leagueId, 'auctionState', 'phase')]: 'bidding',
+        ...timelineEntry(leagueId, 'nextPlayer', {
+          playerId,
+          basePrice,
+          timeLimit: ROUND_SECONDS,
+        }),
+      })
+    },
+
+    /**
+     * **Accepts one submitted bid, checked again here.** The auctioneer's
+     * browser has already judged it against the round it holds in memory; this
+     * is the guard. The bid must be the one the manager actually submitted, at
+     * exactly the asking price, before the deadline by this service's clock.
+     */
+    async acceptBid(
+      leagueId: LeagueId,
+      playerId: PlayerId,
+      managerId: UserId,
+      amount: number,
+    ): Promise<void> {
+      await assertAuctioneer(leagueId)
+      assertPriceGrid(amount)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding'], 'Bidding is not open.')
+      assertCurrent(state, playerId)
+
+      const [round, submitted, submittedNoBids] = await Promise.all([
+        service.read<AcceptedBidsForPlayer>(
+          livePath(leagueId, 'currentAcceptedBids', playerId),
+        ),
+        service.read<number>(
+          livePath(
+            leagueId,
+            'currentSubmittedBids',
+            playerId,
+            'bids',
+            managerId,
+          ),
+        ),
+        service.read<Partial<Record<string, true>>>(
+          livePath(leagueId, 'currentSubmittedBids', playerId, 'noBids'),
+        ),
+      ])
+      const now = Date.now()
+      if (round === undefined) {
+        throw new DataLayerError('auctionState', 'Bidding has not started.')
+      }
+      if (submitted !== amount) {
+        throw new DataLayerError(
+          'auctionState',
+          'That is not the bid this manager submitted.',
+        )
+      }
+      if (amount !== round.minNextBid) {
+        throw new DataLayerError(
+          'auctionState',
+          'That bid is not at the asking price.',
+        )
+      }
+      if (now > round.deadline) {
+        throw new DataLayerError('auctionState', 'That bid came in after time.')
+      }
+      if (round.currentLeadingManager === managerId) {
+        throw new DataLayerError(
+          'auctionState',
+          'That manager is already leading.',
+        )
+      }
+      if (hasPassed(round, submittedNoBids, managerId)) {
+        throw new DataLayerError('auctionState', 'That manager has passed.')
+      }
+      await assertCanBuy(leagueId, managerId, amount)
+
+      const bidId = service.generateKey() as BidId
+      const bid: Bid = {
+        bidId,
+        bidNumber: Object.keys(round.bids ?? {}).length + 1,
+        bid: amount,
+        managerId,
+        timestamp: now,
+      }
+      const at = (field: string) =>
+        livePath(leagueId, 'currentAcceptedBids', playerId, field)
+
+      await service.update({
+        [livePath(leagueId, 'currentAcceptedBids', playerId, 'bids', bidId)]:
+          bid,
+        [at('currentLeadingBid')]: amount,
+        [at('currentLeadingManager')]: managerId,
+        [at('minNextBid')]: amount + BID_INCREMENT,
+        // Every accepted bid restarts the clock.
+        [at('deadline')]: now + ROUND_SECONDS * 1000,
+        [at('lastAcceptedBid')]: bidId,
+        [livePath(
+          leagueId,
+          'playerWiseBiddingHistory',
+          playerId,
+          'bids',
+          bidId,
+        )]: bid,
+        ...timelineEntry(leagueId, 'bid', { playerId, bid: amount, managerId }),
+      })
+    },
+
+    /** Records a pass the manager submitted. Irreversible for the round. */
+    async acceptNoBid(
+      leagueId: LeagueId,
+      playerId: PlayerId,
+      managerId: UserId,
+    ): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding', 'timeUp'], 'Bidding is not open.')
+      assertCurrent(state, playerId)
+
+      const [round, submitted] = await Promise.all([
+        service.read<AcceptedBidsForPlayer>(
+          livePath(leagueId, 'currentAcceptedBids', playerId),
+        ),
+        service.read<boolean>(
+          livePath(
+            leagueId,
+            'currentSubmittedBids',
+            playerId,
+            'noBids',
+            managerId,
+          ),
+        ),
+      ])
+      if (submitted !== true) {
+        throw new DataLayerError('auctionState', 'That manager has not passed.')
+      }
+      if (hasPassed(round, undefined, managerId)) return // already recorded
+
+      const noBidId = service.generateKey() as NoBidId
+      await service.update({
+        [livePath(
+          leagueId,
+          'currentAcceptedBids',
+          playerId,
+          'noBids',
+          noBidId,
+        )]: {
+          noBidNumber: Object.keys(round?.noBids ?? {}).length + 1,
+          managerId,
+          timestamp: Date.now(),
+        },
+        ...timelineEntry(leagueId, 'noBid', { playerId, managerId }),
+      })
+    },
+
+    /** A call onto the timeline. Changes no state; the clock already says it. */
+    async announceCall(leagueId: LeagueId, call: AuctionCall): Promise<void> {
+      await assertAuctioneer(leagueId)
+      if (!(AUCTION_CALLS as readonly unknown[]).includes(call)) {
+        throw new DataLayerError('invalid', 'Not a call.')
+      }
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding'], 'Bidding is not open.')
+      await service.update(
+        timelineEntry(leagueId, call, { timeRemaining: CALL_AT_SECONDS[call] }),
+      )
+    },
+
+    /**
+     * **Closes bidding once the deadline has passed by this service's clock**,
+     * allowing a second's difference between it and the auctioneer's. Selling
+     * stays manual.
+     */
+    async markTimeUp(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding'], 'Bidding is not open.')
+      const playerId = state.currentPlayerId
+      if (playerId === undefined) {
+        throw new DataLayerError('auctionState', 'Nobody is up.')
+      }
+      const deadline = await service.read<number>(
+        livePath(leagueId, 'currentAcceptedBids', playerId, 'deadline'),
+      )
+      if (deadline !== undefined && Date.now() < deadline - 1000) {
+        throw new DataLayerError('auctionState', 'There is still time left.')
+      }
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'phase')]: 'timeUp',
+        [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: false,
+        [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: false,
+        ...timelineEntry(leagueId, 'timeUp', {}),
+      })
+    },
+
+    /**
+     * **Sells the player up to the leader at the leading bid**, both read here
+     * rather than passed in. Manual, deliberately: allowed while bidding or
+     * after time up, at the auctioneer's judgement.
+     */
+    async sellPlayer(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding', 'timeUp'], 'Nothing is being sold.')
+      const playerId = state.currentPlayerId
+      if (playerId === undefined) {
+        throw new DataLayerError('auctionState', 'Nobody is up.')
+      }
+      const round = await service.read<AcceptedBidsForPlayer>(
+        livePath(leagueId, 'currentAcceptedBids', playerId),
+      )
+      const leader = round?.currentLeadingManager
+      const amount = round?.currentLeadingBid
+      const winning =
+        round?.lastAcceptedBid === undefined
+          ? undefined
+          : round.bids?.[round.lastAcceptedBid]
+      if (
+        leader === undefined ||
+        amount === undefined ||
+        winning === undefined
+      ) {
+        throw new DataLayerError(
+          'auctionState',
+          'Nobody has bid. Mark the player unsold instead.',
+        )
+      }
+      await assertCanBuy(leagueId, leader, amount)
+      await service.update({
+        ...(await saleUpdate(leagueId, playerId, leader, amount, winning)),
+        ...resultEntry(leagueId, {
+          kind: 'sold',
+          playerId,
+          managerId: leader,
+          amount,
+          batch: biddingBatch(state),
+        }),
+      })
+    },
+
+    /**
+     * **The last-resort sale**, to a chosen manager at a chosen price. The
+     * bidding so far is kept; the sale becomes the final bid unless it already
+     * is the last one accepted.
+     */
+    async sellPlayerManually(
+      leagueId: LeagueId,
+      managerId: UserId,
+      amount: number,
+    ): Promise<void> {
+      await assertAuctioneer(leagueId)
+      assertPriceGrid(amount)
+      const state = await liveState(leagueId)
+      const playerId = state.currentPlayerId
+      if (
+        playerId === undefined ||
+        !(['betweenPlayers', 'bidding', 'paused', 'timeUp'] as const).includes(
+          state.phase as 'betweenPlayers',
+        )
+      ) {
+        throw new DataLayerError('auctionState', 'Nobody is up to sell.')
+      }
+      const status = await service.read<PlayerStatus>(
+        livePath(leagueId, 'playerStatus', playerId),
+      )
+      if (status?.status === 'Sold' || status?.status === 'Unsold') {
+        throw new DataLayerError(
+          'auctionState',
+          'That player is already decided.',
+        )
+      }
+      await assertCanBuy(leagueId, managerId, amount)
+
+      const round = await service.read<AcceptedBidsForPlayer>(
+        livePath(leagueId, 'currentAcceptedBids', playerId),
+      )
+      const last =
+        round?.lastAcceptedBid === undefined
+          ? undefined
+          : round.bids?.[round.lastAcceptedBid]
+      const winning: Bid =
+        last !== undefined &&
+        last.managerId === managerId &&
+        last.bid === amount
+          ? last
+          : {
+              bidId: service.generateKey() as BidId,
+              bidNumber: Object.keys(round?.bids ?? {}).length + 1,
+              bid: amount,
+              managerId,
+              timestamp: Date.now(),
+            }
+      await service.update({
+        ...(await saleUpdate(leagueId, playerId, managerId, amount, winning)),
+        ...resultEntry(leagueId, {
+          kind: 'sold',
+          playerId,
+          managerId,
+          amount,
+          batch: biddingBatch(state),
+        }),
+      })
+    },
+
+    async markPlayerUnsold(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding', 'timeUp'], 'Nothing is being sold.')
+      const playerId = state.currentPlayerId
+      if (playerId === undefined) {
+        throw new DataLayerError('auctionState', 'Nobody is up.')
+      }
+      await service.update({
+        [livePath(leagueId, 'playerStatus', playerId)]: {
+          playerId,
+          status: 'Unsold',
+        },
+        [livePath(leagueId, 'playerWiseBiddingHistory', playerId, 'status')]:
+          'Unsold',
+        [livePath(leagueId, 'auctionState', 'phase')]: 'unsold',
+        [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: false,
+        [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: false,
+        ...timelineEntry(leagueId, 'unsold', { playerId }),
+        ...resultEntry(leagueId, {
+          kind: 'unsold',
+          playerId,
+          batch: biddingBatch(state),
+        }),
+      })
+    },
+
+    // -----------------------------------------------------------------------
+    // The live auction: running the room
+    // -----------------------------------------------------------------------
+
+    /**
+     * **Freezes the round.** Bids, calls and time up all refuse outside
+     * `bidding`, so pausing is just the phase.
+     */
+    async pauseAuction(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding'], 'Only bidding can be paused.')
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'phase')]: 'paused',
+        [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: false,
+        [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: false,
+        ...timelineEntry(leagueId, 'paused', {}),
+      })
+    },
+
+    /** **The clock resets on resume** rather than continuing: 30 seconds. */
+    async resumeAuction(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['paused'], 'Bidding is not paused.')
+      const playerId = state.currentPlayerId
+      if (playerId === undefined) {
+        throw new DataLayerError('auctionState', 'Nobody is up.')
+      }
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'phase')]: 'bidding',
+        [livePath(leagueId, 'currentAcceptedBids', playerId, 'deadline')]:
+          Date.now() + ROUND_SECONDS * 1000,
+        [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: true,
+        [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: true,
+        ...timelineEntry(leagueId, 'auctionRestarted', {}),
+      })
+    },
+
+    /**
+     * **More time on the round**, for a manager with connection trouble.
+     * While bidding it extends the deadline; after time up it reopens bidding
+     * with that much time from now.
+     */
+    async addTimeToCurrentRound(
+      leagueId: LeagueId,
+      seconds: number,
+    ): Promise<void> {
+      await assertAuctioneer(leagueId)
+      if (!Number.isInteger(seconds) || seconds < 1 || seconds > 60) {
+        throw new DataLayerError('invalid', 'Add between 1 and 60 seconds.')
+      }
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding', 'timeUp'], 'No round is running.')
+      const playerId = state.currentPlayerId
+      if (playerId === undefined) {
+        throw new DataLayerError('auctionState', 'Nobody is up.')
+      }
+      const deadline = await service.read<number>(
+        livePath(leagueId, 'currentAcceptedBids', playerId, 'deadline'),
+      )
+      const now = Date.now()
+      const from =
+        state.phase === 'bidding' ? Math.max(deadline ?? now, now) : now
+
+      await service.update({
+        [livePath(leagueId, 'currentAcceptedBids', playerId, 'deadline')]:
+          from + seconds * 1000,
+        ...(state.phase === 'timeUp'
+          ? {
+              [livePath(leagueId, 'auctionState', 'phase')]: 'bidding',
+              [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: true,
+              [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: true,
+            }
+          : {}),
+        ...timelineEntry(leagueId, 'timeIncreased', { timeAdded: seconds }),
+      })
+    },
+
+    /**
+     * **Enters recovery**, the only place a rewind is allowed, so one can
+     * never fire mid-round by accident. Between rounds only.
+     */
+    async startRecovery(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, BETWEEN_ROUNDS, 'Finish this round first.')
+      await assertNoPickInFlight(leagueId, state)
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'phase')]: 'recovering',
+        [livePath(leagueId, 'auctionState', 'rewoundInRecovery')]: 0,
+        ...timelineEntry(leagueId, 'auctionBeingRecovered', {}),
+      })
+    },
+
+    /**
+     * **Undoes the newest round result**, in one update: the player back in
+     * the pool, the buyer refunded and their squad restored, and the auction
+     * moved back to where that round happened — its batch, or for the draft,
+     * that turn and manager. Repeated rewinds walk back to the start.
+     *
+     * Appends to the timeline rather than removing anything. Individual bids
+     * are not undone; the player's bidding goes with the result.
+     */
+    async rewindLastRound(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['recovering'], 'Start recovery first.')
+
+      const log = await service.read<Record<string, RoundResult>>(
+        livePath(leagueId, 'roundResults'),
+      )
+      const key = Object.keys(log ?? {})
+        .sort()
+        .at(-1)
+      const result = key === undefined ? undefined : log?.[key]
+      if (key === undefined || result === undefined) {
+        throw new DataLayerError('auctionState', 'Nothing left to rewind.')
+      }
+
+      const update: Record<string, unknown> = {
+        [livePath(leagueId, 'roundResults', key)]: null,
+        [livePath(leagueId, 'auctionState', 'currentPlayerId')]: null,
+        [livePath(leagueId, 'auctionState', 'lastPlayerId')]: null,
+        [livePath(leagueId, 'auctionState', 'rewoundInRecovery')]:
+          (state.rewoundInRecovery ?? 0) + 1,
+        ...timelineEntry(leagueId, 'roundRewound', { result }),
+        // A squad change can void a saved lineup, so the cached standings
+        // must not outlive it.
+        [service.path('leaderboards', leagueId, 'membersUpdatedAt')]:
+          Date.now(),
+      }
+
+      // The player as if never put up: no status, no history, no round.
+      const clearPlayer = (playerId: PlayerId) => {
+        update[livePath(leagueId, 'playerStatus', playerId)] = null
+        update[livePath(leagueId, 'playerWiseBiddingHistory', playerId)] = null
+        update[livePath(leagueId, 'currentAcceptedBids', playerId)] = null
+        update[livePath(leagueId, 'currentSubmittedBids', playerId)] = null
+      }
+
+      if (result.kind === 'draftPick' && result.wasUnsold) {
+        // Back to unsold, with the bidding before the draft kept: only the
+        // pick's own bid goes.
+        const { playerId } = result
+        update[livePath(leagueId, 'playerStatus', playerId)] = {
+          playerId,
+          status: 'Unsold',
+        }
+        update[
+          livePath(leagueId, 'playerWiseBiddingHistory', playerId, 'status')
+        ] = 'Unsold'
+        update[
+          livePath(
+            leagueId,
+            'playerWiseBiddingHistory',
+            playerId,
+            'bids',
+            result.bidId,
+          )
+        ] = null
+      } else if (result.kind === 'sold' || result.kind === 'draftPick') {
+        clearPlayer(result.playerId)
+      }
+
+      if (result.kind === 'sold' || result.kind === 'draftPick') {
+        const { playerId, managerId, amount } = result
+        const [budget, squads] = await Promise.all([
+          service.read<number>(
+            livePath(leagueId, 'managerStatus', managerId, 'budget'),
+          ),
+          service.read<Record<string, PlayerId[]>>(
+            paths.squads(leagueId, managerId),
+          ),
+        ])
+        update[livePath(leagueId, 'managerStatus', managerId, 'budget')] =
+          (budget ?? 0) + amount
+        update[
+          livePath(leagueId, 'managerStatus', managerId, 'playerList', playerId)
+        ] = null
+        for (const [matchId, squad] of Object.entries(squads ?? {})) {
+          update[paths.squads(leagueId, managerId, matchId as MatchId)] =
+            squad.filter((id) => id !== playerId)
+        }
+      } else if (result.kind === 'unsold') {
+        clearPlayer(result.playerId)
+      } else if (result.kind === 'batchUnsold') {
+        result.playerIds.forEach(clearPlayer)
+      }
+
+      // Back to where the round happened.
+      if (result.kind === 'draftPick' || result.kind === 'draftTurnSkipped') {
+        update[livePath(leagueId, 'auctionState', 'currentBatch')] = {
+          kind: 'draft',
+        }
+        update[livePath(leagueId, 'auctionState', 'currentDraftTurn')] =
+          result.turn
+        update[livePath(leagueId, 'auctionState', 'currentDraftManagerId')] =
+          result.managerId
+        update[livePath(leagueId, 'draftPicks', String(result.turn))] = null
+      } else {
+        update[livePath(leagueId, 'auctionState', 'currentBatch')] =
+          result.batch
+        update[livePath(leagueId, 'auctionState', 'currentDraftTurn')] = null
+        update[livePath(leagueId, 'auctionState', 'currentDraftManagerId')] =
+          null
+      }
+
+      await service.update(update)
+    },
+
+    /** **Leaves recovery**, saying how many rounds it undid. */
+    async endRecovery(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['recovering'], 'The auction is not in recovery.')
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'phase')]: 'betweenPlayers',
+        [livePath(leagueId, 'auctionState', 'rewoundInRecovery')]: null,
+        ...timelineEntry(leagueId, 'auctionRecovered', {
+          rewindedRounds: state.rewoundInRecovery ?? 0,
+        }),
+      })
+    },
+
+    /**
+     * **Ends the auction**; the league moves to team submission. Between
+     * rounds only. Reversible with `reopenAuction`.
+     */
+    async endAuction(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, BETWEEN_ROUNDS, 'Finish this round first.')
+      await assertNoPickInFlight(leagueId, state)
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'phase')]: 'ended',
+        ...timelineEntry(leagueId, 'auctionEnded', {}),
+      })
+    },
+
+    /**
+     * **Reopens an ended auction**, for an accidental end or an error found
+     * later. Everything is as it was; the league is back in its auction and
+     * team submission closes. Lineups saved in between are left alone —
+     * Phase H discards any that fall outside the squad.
+     */
+    async reopenAuction(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['ended'], 'The auction has not ended.')
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'phase')]: 'betweenPlayers',
+        ...timelineEntry(leagueId, 'auctionReopened', {}),
+      })
+    },
+
+    // -----------------------------------------------------------------------
+    // The live auction: the draft
+    // -----------------------------------------------------------------------
+
+    /**
+     * **The next turn in the draft**, which the first call also starts. The
+     * order snakes, and anyone who can no longer pick — a full squad, or a
+     * budget below the cheapest player left — is skipped rather than waited
+     * on. Refused while a pick is still going through, and once nobody can
+     * pick at all.
+     */
+    async nextDraftManager(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await draftState(leagueId)
+      assertPhase(state, BETWEEN_ROUNDS, 'Finish this round first.')
+
+      // The turn has to be settled first: a pick that has gone through, or a
+      // deliberate skip. Next never moves past a manager still deciding, so a
+      // double click cannot skip anyone.
+      const turn = state.currentDraftTurn
+      if (turn !== undefined) {
+        const pick = await service.read<DraftPick>(
+          livePath(leagueId, 'draftPicks', String(turn)),
+        )
+        if (pick === undefined) {
+          throw new DataLayerError(
+            'auctionState',
+            'This manager has not picked yet. Skip their turn to move on.',
+          )
+        }
+        if (pick.skipped !== true && pick.accepted !== true) {
+          throw new DataLayerError(
+            'auctionState',
+            'A pick is still going through. Wait for it.',
+          )
+        }
+      }
+
+      const [rawOrder, managers, maxSquadSize, pool] = await Promise.all([
+        service.read<unknown>(auctionDetailsPath(leagueId, 'draftOrder')),
+        service.read<Partial<Record<string, ManagerAuctionStatus>>>(
+          livePath(leagueId, 'managerStatus'),
+        ),
+        service.read<number>(
+          auctionDetailsPath(leagueId, 'auctionConfig', 'maxSquadSize'),
+        ),
+        draftPoolPrices(leagueId),
+      ])
+      const cheapest = pool.size === 0 ? undefined : Math.min(...pool.values())
+      const canPick = (managerId: UserId) =>
+        canStillPick(managers?.[managerId], maxSquadSize, cheapest)
+
+      const next = nextDraftTurn(
+        draftOrderList(rawOrder),
+        turn === undefined ? 0 : turn + 1,
+        canPick,
+      )
+      if (next === undefined) {
+        throw new DataLayerError(
+          'auctionState',
+          'Nobody can pick any more. The draft is over.',
+        )
+      }
+
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'currentDraftTurn')]: next.turn,
+        [livePath(leagueId, 'auctionState', 'currentDraftManagerId')]:
+          next.managerId,
+        [livePath(leagueId, 'auctionState', 'phase')]: 'betweenPlayers',
+        ...(turn === undefined
+          ? timelineEntry(leagueId, 'draftStarted', {})
+          : {}),
+        ...timelineEntry(leagueId, 'nextDraftManager', {
+          managerId: next.managerId,
+        }),
+      })
+    },
+
+    /**
+     * **Accepts the current turn's pick**, from the auctioneer's browser as it
+     * arrives. Re-checks everything, then sells at base price in one update —
+     * the same sale as a bid's, announced as a draft pick — and marks the pick
+     * accepted.
+     */
+    async acceptDraftPick(leagueId: LeagueId, turn: number): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await draftState(leagueId)
+      assertPhase(state, BETWEEN_ROUNDS, 'The draft is on hold.')
+      if (state.currentDraftTurn !== turn) {
+        throw new DataLayerError('auctionState', 'That turn is over.')
+      }
+      const pick = await service.read<DraftPick>(
+        livePath(leagueId, 'draftPicks', String(turn)),
+      )
+      if (pick === undefined) {
+        throw new DataLayerError('auctionState', 'Nobody has picked yet.')
+      }
+      if (pick.skipped === true) {
+        throw new DataLayerError('auctionState', 'That turn was skipped.')
+      }
+      if (pick.accepted === true) {
+        throw new DataLayerError(
+          'auctionState',
+          'That pick has already gone through.',
+        )
+      }
+      if (pick.managerId !== state.currentDraftManagerId) {
+        throw new DataLayerError(
+          'auctionState',
+          'That pick is not from the manager whose turn it is.',
+        )
+      }
+      const price = (await draftPoolPrices(leagueId)).get(pick.playerId)
+      if (price === undefined) {
+        throw new DataLayerError(
+          'auctionState',
+          'That player is no longer available.',
+        )
+      }
+      await assertCanBuy(leagueId, pick.managerId, price)
+      const before = await service.read<PlayerStatus>(
+        livePath(leagueId, 'playerStatus', pick.playerId),
+      )
+
+      const bidId = service.generateKey() as BidId
+      const update = await saleUpdate(
+        leagueId,
+        pick.playerId,
+        pick.managerId,
+        price,
+        {
+          bidId,
+          bidNumber: 1,
+          bid: price,
+          managerId: pick.managerId,
+          timestamp: Date.now(),
+        },
+        timelineEntry(leagueId, 'draftPick', {
+          managerId: pick.managerId,
+          playerId: pick.playerId,
+          basePrice: price,
+        }),
+      )
+      update[livePath(leagueId, 'draftPicks', String(turn), 'accepted')] = true
+      await service.update({
+        ...update,
+        ...resultEntry(leagueId, {
+          kind: 'draftPick',
+          playerId: pick.playerId,
+          managerId: pick.managerId,
+          amount: price,
+          turn,
+          bidId,
+          wasUnsold: before?.status === 'Unsold',
+        }),
+      })
+    },
+
+    /**
+     * **A manager's pick for their turn.** The manager is the caller, never an
+     * argument. Checked as far as it can be here — their turn, the player in
+     * the pool, budget and squad space — then **claimed**: written only if this
+     * turn has no pick yet, so a second pick, however it is sent, is refused.
+     * The auctioneer's browser makes the sale.
+     */
+    async submitDraftPick(
+      leagueId: LeagueId,
+      playerId: PlayerId,
+    ): Promise<void> {
+      await assertAuctionLeague(leagueId)
+      await assertManager(leagueId)
+      const uid = requireSession().uid as UserId
+      const state = await draftState(leagueId)
+      assertPhase(state, BETWEEN_ROUNDS, 'The draft is on hold.')
+      const turn = state.currentDraftTurn
+      if (turn === undefined || state.currentDraftManagerId !== uid) {
+        throw new DataLayerError('auctionState', "It isn't your turn.")
+      }
+      const price = (await draftPoolPrices(leagueId)).get(playerId)
+      if (price === undefined) {
+        throw new DataLayerError(
+          'auctionState',
+          'That player is not available in the draft.',
+        )
+      }
+      await assertCanBuy(leagueId, uid, price)
+
+      const won = await service.claim(
+        livePath(leagueId, 'draftPicks', String(turn)),
+        {
+          managerId: uid,
+          playerId,
+          submittedAt: Date.now(),
+        } satisfies DraftPick,
+      )
+      if (!won) {
+        const taken = await service.read<DraftPick>(
+          livePath(leagueId, 'draftPicks', String(turn)),
+        )
+        throw new DataLayerError(
+          'auctionState',
+          taken?.skipped === true
+            ? 'Your turn was skipped.'
+            : 'You have already picked this turn.',
+        )
+      }
+    },
+
+    /**
+     * **Skips the current manager's turn**, for one taking too long. A
+     * deliberate action of its own, separate from Next, so a double click can
+     * never skip anyone. Claims the turn like a pick does, so a pick and a
+     * skip landing together cannot both succeed: whichever is first wins.
+     */
+    async skipDraftTurn(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await draftState(leagueId)
+      assertPhase(state, BETWEEN_ROUNDS, 'The draft is on hold.')
+      const turn = state.currentDraftTurn
+      const managerId = state.currentDraftManagerId
+      if (turn === undefined || managerId === undefined) {
+        throw new DataLayerError('auctionState', 'Nobody is picking yet.')
+      }
+
+      const won = await service.claim(
+        livePath(leagueId, 'draftPicks', String(turn)),
+        {
+          managerId,
+          skipped: true,
+          submittedAt: Date.now(),
+        } satisfies DraftPick,
+      )
+      if (!won) {
+        throw new DataLayerError(
+          'auctionState',
+          'This turn is already settled — they have picked, or it was skipped.',
+        )
+      }
+      await service.update({
+        ...timelineEntry(leagueId, 'draftTurnSkipped', { managerId }),
+        ...resultEntry(leagueId, { kind: 'draftTurnSkipped', managerId, turn }),
+      })
+    },
+
+    /**
+     * **Every player left in the current bidding batch, marked unsold at
+     * once**, for testing — so the batches can be run through to the draft
+     * without putting each player up. Between rounds only, and refused in
+     * production. No timeline entries: one per player would bury the rest.
+     */
+    async markBatchUnsold(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+
+      if (service.environment === 'prod') {
+        throw new DataLayerError(
+          'forbidden',
+          'A batch cannot be skipped in production.',
+        )
+      }
+
+      const state = await liveState(leagueId)
+      const left = await eligibleInBatch(leagueId, state)
+
+      const update: Record<string, unknown> = {}
+      for (const playerId of left) {
+        update[livePath(leagueId, 'playerStatus', playerId)] = {
+          playerId,
+          status: 'Unsold',
+        }
+        update[
+          livePath(leagueId, 'playerWiseBiddingHistory', playerId, 'status')
+        ] = 'Unsold'
+      }
+      if (left.length === 0) return
+      await service.update({
+        ...update,
+        ...resultEntry(leagueId, {
+          kind: 'batchUnsold',
+          playerIds: left,
+          batch: biddingBatch(state),
+        }),
+      })
+    },
+
+    /**
+     * **Back to before Start auction**, for testing. The auction writes the
+     * live node and, on each sale, the league's squads; lineups and the
+     * leaderboard cache are built on those squads, so they go too. Members and
+     * the draft order come from joining and stay.
+     *
+     * One atomic update. Refused in production whoever asks.
+     */
+    async resetAuction(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+
+      if (service.environment === 'prod') {
+        throw new DataLayerError(
+          'forbidden',
+          'An auction cannot be reset in production.',
+        )
+      }
+
+      await service.update({
+        [paths.liveAuctions(leagueId)]: null,
+        [paths.squads(leagueId)]: null,
+        [paths.matchBasedLineups(leagueId)]: null,
+        [paths.gameWeekBasedLineups(leagueId)]: null,
+        [paths.leaderboards(leagueId)]: null,
+      })
+    },
+
+    // -----------------------------------------------------------------------
+    // The live auction: a manager's writes
+    // -----------------------------------------------------------------------
+
+    /**
+     * **Writes only the bidder's own field.** The manager is the caller, never
+     * an argument. Whether the bid is accepted — the price, the clock — is the
+     * auctioneer's to judge; this refuses only what could never be valid.
+     */
+    async submitBid(
+      leagueId: LeagueId,
+      playerId: PlayerId,
+      amount: number,
+    ): Promise<void> {
+      await assertAuctionLeague(leagueId)
+      await assertManager(leagueId)
+      const uid = requireSession().uid as UserId
+      assertPriceGrid(amount)
+
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding'], 'Bidding is not open.')
+      assertCurrent(state, playerId)
+
+      const [round, submittedNoBids] = await Promise.all([
+        service.read<AcceptedBidsForPlayer>(
+          livePath(leagueId, 'currentAcceptedBids', playerId),
+        ),
+        service.read<Partial<Record<string, true>>>(
+          livePath(leagueId, 'currentSubmittedBids', playerId, 'noBids'),
+        ),
+      ])
+      if (round?.currentLeadingManager === uid) {
+        throw new DataLayerError(
+          'auctionState',
+          "You're already the highest bidder.",
+        )
+      }
+      if (hasPassed(round, submittedNoBids, uid)) {
+        throw new DataLayerError('auctionState', 'You passed on this player.')
+      }
+      await assertCanBuy(leagueId, uid, amount)
+
+      await service.update({
+        [livePath(leagueId, 'currentSubmittedBids', playerId, 'bids', uid)]:
+          amount,
+      })
+    },
+
+    /** A pass, written to the passer's own field. **Irreversible.** */
+    async submitNoBid(leagueId: LeagueId, playerId: PlayerId): Promise<void> {
+      await assertAuctionLeague(leagueId)
+      await assertManager(leagueId)
+      const uid = requireSession().uid as UserId
+
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding', 'timeUp'], 'Bidding is not open.')
+      assertCurrent(state, playerId)
+
+      const [round, submittedNoBids] = await Promise.all([
+        service.read<AcceptedBidsForPlayer>(
+          livePath(leagueId, 'currentAcceptedBids', playerId),
+        ),
+        service.read<Partial<Record<string, true>>>(
+          livePath(leagueId, 'currentSubmittedBids', playerId, 'noBids'),
+        ),
+      ])
+      if (round?.currentLeadingManager === uid) {
+        throw new DataLayerError(
+          'auctionState',
+          "You're the highest bidder, so you can't pass.",
+        )
+      }
+      if (hasPassed(round, submittedNoBids, uid)) return // already out
+
+      await service.update({
+        [livePath(leagueId, 'currentSubmittedBids', playerId, 'noBids', uid)]:
+          true,
+      })
+    },
+
     async getMembers(leagueId: LeagueId): Promise<LeagueMemberSummary[]> {
       const members = await service.read<Partial<Record<string, LeagueMember>>>(
         paths.leagueMembers(leagueId),
@@ -3565,7 +6327,7 @@ export function createFirebaseApi(
         )
       }
 
-      await assertLegal(leagueId, lineup)
+      await assertLegal(leagueId, lineup, from.matchId)
 
       /*
         **What this submission costs, and what is left after it.**
@@ -3739,7 +6501,7 @@ export function createFirebaseApi(
         )
       }
 
-      await assertLegal(leagueId, lineup)
+      await assertLegal(leagueId, lineup, gameWeek.startMatchId)
 
       /*
         **A cap on each transition, measured from the team standing before this
@@ -3890,6 +6652,8 @@ export function createFirebaseApi(
             playerShortName: player.playerShortName,
             country: player.country,
             playerRole: player.playerRole,
+            ...(SAMPLE_AUCTION_VALUES[player.playerName] ??
+              SAMPLE_DEFAULT_AUCTION_VALUE),
             currentTeams:
               teamId === undefined ? {} : { [competitionId]: teamId },
           }
@@ -3901,6 +6665,269 @@ export function createFirebaseApi(
         skipped: result.skipped,
         teamsCreated,
         competitionName: competition.competitionName,
+      }
+    },
+
+    /**
+     * **Test data, and destructive.** Every player, team, tournament and
+     * league goes, with everything that points at them, and the IPL 2026 pool
+     * replaces them. User records, base tournaments, reference tables and the
+     * standards stay.
+     *
+     * **Refused in production**, whoever asks.
+     *
+     * **One atomic update.** The wiped nodes are set to null and the replaced
+     * ones written whole — `players`, `teams` and the standard auction details
+     * — because an update may not name a node and something beneath it
+     * together. Either the environment is reset and loaded, or untouched.
+     */
+    async populateSeedData(): Promise<SeedDataResult> {
+      await assertSystemAdmin()
+
+      if (service.environment === 'prod') {
+        throw new DataLayerError(
+          'forbidden',
+          'Seed data cannot be loaded into production.',
+        )
+      }
+
+      const [competitions, users] = await Promise.all([
+        api.getCompetitions(),
+        service.read<Record<string, unknown>>(paths.users()),
+      ])
+      const competitionIdOf = new Map(
+        competitions.map((c) => [c.competitionName, c.competitionId]),
+      )
+      const missing = new Set<string>()
+      const resolve = (names: readonly string[]): CompetitionId[] =>
+        names.flatMap((name) => {
+          const id = competitionIdOf.get(name)
+          if (id === undefined) missing.add(name)
+          return id === undefined ? [] : [id]
+        })
+
+      const iplCompetition = resolve([IPL_COMPETITION])
+      const intlCompetitions = resolve(
+        Object.values(FORMAT_COMPETITIONS).flat(),
+      )
+
+      // Teams, keyed so the players below can find them.
+      const teams: Record<string, Team & { teamId: TeamId }> = {}
+      const franchiseId = new Map<string, TeamId>()
+      const nationId = new Map<string, TeamId>()
+      const addTeam = (
+        teamName: string,
+        teamShortName: string,
+        competitionIds: readonly CompetitionId[],
+      ): TeamId => {
+        const teamId = service.generateKey() as TeamId
+        teams[teamId] = {
+          teamId,
+          teamName,
+          teamShortName,
+          competitionIds: Object.fromEntries(
+            competitionIds.map((id) => [id, true]),
+          ),
+          playerIds: {},
+        }
+        return teamId
+      }
+      for (const [code, name] of Object.entries(IPL_TEAMS)) {
+        franchiseId.set(code, addTeam(name, code, iplCompetition))
+      }
+      for (const [nation, code] of Object.entries(NATIONAL_TEAMS)) {
+        nationId.set(nation, addTeam(nation, code, intlCompetitions))
+      }
+
+      const players: Record<string, Player> = {}
+      const auctionDetails: Record<string, LeaguePlayerAuctionDetail> = {}
+      const shortNameList = shortNames(IPL_2026_PLAYERS.map(([name]) => name))
+
+      IPL_2026_PLAYERS.forEach(
+        ([playerName, franchise, country, role, formats], index) => {
+          const playerId = service.generateKey() as PlayerId
+          const currentTeams: Partial<Record<CompetitionId, TeamId>> = {}
+
+          const memberships: [readonly CompetitionId[], TeamId | undefined][] =
+            [[iplCompetition, franchiseId.get(franchise)]]
+          for (const format of formats.split(' ').filter(Boolean)) {
+            memberships.push([
+              resolve(FORMAT_COMPETITIONS[format as IntlFormat]),
+              nationId.get(country),
+            ])
+          }
+          for (const [competitionIds, teamId] of memberships) {
+            if (teamId === undefined) continue
+            for (const competitionId of competitionIds) {
+              currentTeams[competitionId] = teamId
+              const roster = (teams[teamId]!.playerIds[competitionId] ??= {})
+              roster[playerId] = true
+            }
+          }
+
+          players[playerId] = {
+            playerId,
+            playerName,
+            playerShortName: shortNameList[index]!,
+            country,
+            playerRole: ROLE_OF[role],
+            isRetired: false,
+            currentTeams,
+          }
+          auctionDetails[playerId] = auctionValueAt(index + 1)
+        },
+      )
+
+      const update: Record<string, unknown> = {
+        [paths.players()]: players,
+        [paths.teams()]: teams,
+        [paths.standardPlayerAuctionDetails()]: auctionDetails,
+      }
+      for (const node of [
+        paths.tournaments(),
+        paths.leagues(),
+        paths.leagueCodeToLeagueMapping(),
+        paths.matchBasedLineups(),
+        paths.gameWeekBasedLineups(),
+        paths.squads(),
+        paths.joinRequests(),
+        paths.bannedUsers(),
+        paths.transferProposals(),
+        paths.transferProposalsByManager(),
+        paths.liveAuctions(),
+        paths.leaderboards(),
+        paths.customPointsByMatch(),
+        paths.customPointsByPlayer(),
+        paths.standardPointsByMatch(),
+        paths.standardPointsByPlayer(),
+        paths.standardPointsUpdatedAt(),
+      ]) {
+        update[node] = null
+      }
+      const userIds = Object.keys(users ?? {})
+      for (const userId of userIds) {
+        update[service.path('users', userId, 'leagues')] = null
+        update[service.path('users', userId, 'archivedLeagues')] = null
+      }
+
+      await service.update(update)
+
+      return {
+        environment: service.root,
+        teamsCreated: Object.keys(teams).length,
+        playersCreated: Object.keys(players).length,
+        usersCleared: userIds.length,
+        missingCompetitions: [...missing],
+      }
+    },
+
+    /**
+     * **Test data: an unpublished IPL 2027 on the 2026 schedule.** Built from
+     * the same calls the tournament editor makes — create, participants,
+     * matches, rounds — so it is checked exactly as a hand-built one would be.
+     *
+     * **Not atomic across those calls.** A failure part way leaves an
+     * unpublished IPL 2027 behind, which Populate seed data clears.
+     *
+     * Needs the IPL teams by short name, so it follows Populate seed data.
+     */
+    async createSampleIplTournament(): Promise<SampleTournamentResult> {
+      await assertSystemAdmin()
+
+      if (service.environment === 'prod') {
+        throw new DataLayerError(
+          'forbidden',
+          'A sample tournament cannot be created in production.',
+        )
+      }
+
+      const tournamentName = 'IPL 2027'
+      const competition = (await api.getCompetitions()).find(
+        (c) => c.competitionName === IPL_COMPETITION,
+      )
+      if (competition === undefined) {
+        throw new DataLayerError(
+          'invalidConfig',
+          `There is no ${IPL_COMPETITION} base tournament. Press Set up basic system first.`,
+        )
+      }
+      const competitionId = competition.competitionId
+
+      const [existing, teams, players] = await Promise.all([
+        api.getTournaments({ competitionId, includeUnpublished: true }),
+        api.getTeams({ competitionId }),
+        api.getPlayers({ competitionId }),
+      ])
+
+      if (existing.some((t) => t.tournamentName === tournamentName)) {
+        throw new DataLayerError(
+          'invalidConfig',
+          `${tournamentName} already exists. Populate seed data clears it.`,
+        )
+      }
+
+      const teamIdOf = new Map(teams.map((t) => [t.teamShortName, t.teamId]))
+      const missing = Object.keys(IPL_TEAMS).filter((c) => !teamIdOf.has(c))
+      if (missing.length > 0) {
+        throw new DataLayerError(
+          'invalidConfig',
+          `No ${missing.join(', ')} in ${IPL_COMPETITION}. Press Populate seed data first.`,
+        )
+      }
+
+      const participants: Partial<Record<PlayerId, TeamId>> = {}
+      for (const player of players) {
+        const teamId = player.currentTeams?.[competitionId]
+        if (teamId !== undefined) participants[player.playerId] = teamId
+      }
+
+      const schedule = iplScheduleIn(2027)
+      const tournamentId = await api.createTournament({
+        tournamentName,
+        competitionId,
+        matchCount: schedule.length,
+      })
+
+      await api.updateTournamentParticipants(tournamentId, participants)
+
+      const created = await api.getTournament(tournamentId)
+      const matchIdOf = new Map(
+        Object.values(created.matches).map((m) => [m.matchNumber, m.matchId]),
+      )
+      await api.updateMatches(
+        tournamentId,
+        schedule.map(({ matchNumber, startTimestamp, fixture }) => {
+          const matchId = matchIdOf.get(matchNumber)
+          if (matchId === undefined) {
+            throw new DataLayerError(
+              'internal',
+              `The new tournament has no match ${matchNumber}.`,
+            )
+          }
+          // A playoff gets its date and nothing else: TBA vs TBA.
+          return {
+            matchId,
+            startTimestamp,
+            ...(fixture === undefined
+              ? {}
+              : {
+                  team1Id: teamIdOf.get(fixture.team1),
+                  team2Id: teamIdOf.get(fixture.team2),
+                  venue: fixture.venue,
+                }),
+          }
+        }),
+      )
+
+      await api.setRounds(tournamentId, IPL_ROUNDS)
+
+      return {
+        tournamentId,
+        tournamentName,
+        matches: schedule.length,
+        teams: new Set(Object.values(participants)).size,
+        players: Object.keys(participants).length,
+        rounds: IPL_ROUNDS.map((r) => r.roundName),
       }
     },
 

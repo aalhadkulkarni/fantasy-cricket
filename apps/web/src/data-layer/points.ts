@@ -22,6 +22,7 @@ import type {
   MatchId,
   MatchPlayers,
   Player,
+  MatchPlayerPoints,
   PlayerPoints,
   TournamentId,
   UserId,
@@ -39,6 +40,18 @@ export function getPlayerPointsForMatch(
   matchId: MatchId,
 ): Promise<PlayerPoints> {
   return getApi().getPlayerPointsForMatch(leagueId, matchId)
+}
+
+/**
+ * **Several matches in one request**, one entry per match in the order asked.
+ * What a gameweek's points should be read with: one round trip however many
+ * matches it holds.
+ */
+export function getPlayerPointsForMatches(
+  leagueId: LeagueId,
+  matchIds: readonly MatchId[],
+): Promise<MatchPlayerPoints[]> {
+  return getApi().getPlayerPointsForMatches(leagueId, matchIds)
 }
 
 // ---------------------------------------------------------------------------

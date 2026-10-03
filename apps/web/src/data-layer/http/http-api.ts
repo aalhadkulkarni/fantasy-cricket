@@ -18,7 +18,12 @@
 
 import type {
   Api,
+  AuctionCall,
+  AuctionPoolPlayer,
+  AuctionSettings,
+  DraftOrderEntry,
   Competition,
+  CompetitionConfig,
   CompetitionId,
   CreatePlayersResult,
   Environment,
@@ -40,6 +45,7 @@ import type {
   MatchConfig,
   MatchId,
   MatchLineup,
+  MatchPlayerPoints,
   MatchPlayers,
   OfficialLeagues,
   PeriodLeaderboard,
@@ -51,7 +57,11 @@ import type {
   PlayerRoleRecord,
   Round,
   SamplePlayersResult,
+  SampleTournamentResult,
   ScoringWatermark,
+  SeedDataResult,
+  Fixture,
+  SquadsView,
   SignInOutcome,
   SignedInIdentity,
   Subscriber,
@@ -119,6 +129,20 @@ export function createHttpApi(
 
     getCompetitions(): Promise<Competition[]> {
       return call('getCompetitions', []) as Promise<Competition[]>
+    },
+
+    createCompetition(config: CompetitionConfig): Promise<CompetitionId> {
+      return call('createCompetition', [config]) as Promise<CompetitionId>
+    },
+
+    updateCompetition(
+      competitionId: CompetitionId,
+      changes: Partial<CompetitionConfig>,
+    ): Promise<void> {
+      return call('updateCompetition', [
+        competitionId,
+        changes,
+      ]) as Promise<void>
     },
 
     getPlayerRoles(): Promise<PlayerRoleRecord[]> {
@@ -304,8 +328,8 @@ export function createHttpApi(
       return call('getGameWeeks', [leagueId]) as Promise<LeagueGameWeek[]>
     },
 
-    getFixtures(tournamentId: TournamentId): Promise<Match[]> {
-      return call('getFixtures', [tournamentId]) as Promise<Match[]>
+    getFixtures(tournamentId: TournamentId): Promise<Fixture[]> {
+      return call('getFixtures', [tournamentId]) as Promise<Fixture[]>
     },
 
     getPlayerPointsForMatch(
@@ -316,6 +340,15 @@ export function createHttpApi(
         leagueId,
         matchId,
       ]) as Promise<PlayerPoints>
+    },
+
+    getPlayerPointsForMatches(
+      leagueId: LeagueId,
+      matchIds: readonly MatchId[],
+    ): Promise<MatchPlayerPoints[]> {
+      return call('getPlayerPointsForMatches', [leagueId, matchIds]) as Promise<
+        MatchPlayerPoints[]
+      >
     },
 
     getPointsForMatch(
@@ -406,6 +439,166 @@ export function createHttpApi(
 
     getMembers(leagueId: LeagueId): Promise<LeagueMemberSummary[]> {
       return call('getMembers', [leagueId]) as Promise<LeagueMemberSummary[]>
+    },
+
+    getAuctionSettings(leagueId: LeagueId): Promise<AuctionSettings> {
+      return call('getAuctionSettings', [leagueId]) as Promise<AuctionSettings>
+    },
+
+    getDraftOrder(leagueId: LeagueId): Promise<DraftOrderEntry[]> {
+      return call('getDraftOrder', [leagueId]) as Promise<DraftOrderEntry[]>
+    },
+
+    getAuctionPlayerPool(leagueId: LeagueId): Promise<AuctionPoolPlayer[]> {
+      return call('getAuctionPlayerPool', [leagueId]) as Promise<
+        AuctionPoolPlayer[]
+      >
+    },
+
+    startAuction(leagueId: LeagueId): Promise<void> {
+      return call('startAuction', [leagueId]) as Promise<void>
+    },
+
+    nextBatch(leagueId: LeagueId): Promise<void> {
+      return call('nextBatch', [leagueId]) as Promise<void>
+    },
+
+    putUpPlayer(leagueId: LeagueId, playerId: PlayerId): Promise<void> {
+      return call('putUpPlayer', [leagueId, playerId]) as Promise<void>
+    },
+
+    putUpRandomPlayer(leagueId: LeagueId): Promise<void> {
+      return call('putUpRandomPlayer', [leagueId]) as Promise<void>
+    },
+
+    startBidding(leagueId: LeagueId): Promise<void> {
+      return call('startBidding', [leagueId]) as Promise<void>
+    },
+
+    acceptBid(
+      leagueId: LeagueId,
+      playerId: PlayerId,
+      managerId: UserId,
+      amount: number,
+    ): Promise<void> {
+      return call('acceptBid', [
+        leagueId,
+        playerId,
+        managerId,
+        amount,
+      ]) as Promise<void>
+    },
+
+    acceptNoBid(
+      leagueId: LeagueId,
+      playerId: PlayerId,
+      managerId: UserId,
+    ): Promise<void> {
+      return call('acceptNoBid', [
+        leagueId,
+        playerId,
+        managerId,
+      ]) as Promise<void>
+    },
+
+    announceCall(leagueId: LeagueId, which: AuctionCall): Promise<void> {
+      return call('announceCall', [leagueId, which]) as Promise<void>
+    },
+
+    markTimeUp(leagueId: LeagueId): Promise<void> {
+      return call('markTimeUp', [leagueId]) as Promise<void>
+    },
+
+    sellPlayer(leagueId: LeagueId): Promise<void> {
+      return call('sellPlayer', [leagueId]) as Promise<void>
+    },
+
+    sellPlayerManually(
+      leagueId: LeagueId,
+      managerId: UserId,
+      amount: number,
+    ): Promise<void> {
+      return call('sellPlayerManually', [
+        leagueId,
+        managerId,
+        amount,
+      ]) as Promise<void>
+    },
+
+    markPlayerUnsold(leagueId: LeagueId): Promise<void> {
+      return call('markPlayerUnsold', [leagueId]) as Promise<void>
+    },
+
+    getSquads(leagueId: LeagueId): Promise<SquadsView> {
+      return call('getSquads', [leagueId]) as Promise<SquadsView>
+    },
+
+    pauseAuction(leagueId: LeagueId): Promise<void> {
+      return call('pauseAuction', [leagueId]) as Promise<void>
+    },
+
+    resumeAuction(leagueId: LeagueId): Promise<void> {
+      return call('resumeAuction', [leagueId]) as Promise<void>
+    },
+
+    startRecovery(leagueId: LeagueId): Promise<void> {
+      return call('startRecovery', [leagueId]) as Promise<void>
+    },
+
+    rewindLastRound(leagueId: LeagueId): Promise<void> {
+      return call('rewindLastRound', [leagueId]) as Promise<void>
+    },
+
+    endRecovery(leagueId: LeagueId): Promise<void> {
+      return call('endRecovery', [leagueId]) as Promise<void>
+    },
+
+    endAuction(leagueId: LeagueId): Promise<void> {
+      return call('endAuction', [leagueId]) as Promise<void>
+    },
+
+    reopenAuction(leagueId: LeagueId): Promise<void> {
+      return call('reopenAuction', [leagueId]) as Promise<void>
+    },
+
+    addTimeToCurrentRound(leagueId: LeagueId, seconds: number): Promise<void> {
+      return call('addTimeToCurrentRound', [leagueId, seconds]) as Promise<void>
+    },
+
+    nextDraftManager(leagueId: LeagueId): Promise<void> {
+      return call('nextDraftManager', [leagueId]) as Promise<void>
+    },
+
+    acceptDraftPick(leagueId: LeagueId, turn: number): Promise<void> {
+      return call('acceptDraftPick', [leagueId, turn]) as Promise<void>
+    },
+
+    skipDraftTurn(leagueId: LeagueId): Promise<void> {
+      return call('skipDraftTurn', [leagueId]) as Promise<void>
+    },
+
+    resetAuction(leagueId: LeagueId): Promise<void> {
+      return call('resetAuction', [leagueId]) as Promise<void>
+    },
+
+    markBatchUnsold(leagueId: LeagueId): Promise<void> {
+      return call('markBatchUnsold', [leagueId]) as Promise<void>
+    },
+
+    submitBid(
+      leagueId: LeagueId,
+      playerId: PlayerId,
+      amount: number,
+    ): Promise<void> {
+      return call('submitBid', [leagueId, playerId, amount]) as Promise<void>
+    },
+
+    submitNoBid(leagueId: LeagueId, playerId: PlayerId): Promise<void> {
+      return call('submitNoBid', [leagueId, playerId]) as Promise<void>
+    },
+
+    submitDraftPick(leagueId: LeagueId, playerId: PlayerId): Promise<void> {
+      return call('submitDraftPick', [leagueId, playerId]) as Promise<void>
     },
 
     markLeagueFinished(leagueId: LeagueId): Promise<void> {
@@ -522,6 +715,17 @@ export function createHttpApi(
 
     createSamplePlayers(): Promise<SamplePlayersResult> {
       return call('createSamplePlayers', []) as Promise<SamplePlayersResult>
+    },
+
+    populateSeedData(): Promise<SeedDataResult> {
+      return call('populateSeedData', []) as Promise<SeedDataResult>
+    },
+
+    createSampleIplTournament(): Promise<SampleTournamentResult> {
+      return call(
+        'createSampleIplTournament',
+        [],
+      ) as Promise<SampleTournamentResult>
     },
   }
 }

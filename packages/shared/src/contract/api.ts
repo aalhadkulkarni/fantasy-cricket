@@ -29,8 +29,13 @@
 
 import type {
   ArchivedLeagueCard,
+  AuctionCall,
+  AuctionPoolPlayer,
+  AuctionSettings,
   Competition,
+  CompetitionConfig,
   CompetitionId,
+  DraftOrderEntry,
   FormatRecord,
   GameWeek,
   GameWeekId,
@@ -51,6 +56,8 @@ import type {
   LeagueMemberSummary,
   LeaderboardRow,
   ScoringWatermark,
+  Fixture,
+  SquadsView,
   MatchLineup,
   Player,
   PlayerConfig,
@@ -59,6 +66,7 @@ import type {
   PlayerPoints,
   PlayerRoleRecord,
   Round,
+  RoundId,
   Team,
   TeamConfig,
   TeamFilter,
@@ -110,21 +118,49 @@ export interface CreatePlayersResult {
   skipped: readonly string[]
 }
 
+/** One match's points, as `getPlayerPointsForMatches` returns them. */
+export interface MatchPlayerPoints {
+  matchId: MatchId
+  points: PlayerPoints
+}
+
 /**
  * Which official leagues to open alongside publishing a tournament.
  *
  * **The publisher owns and administers them but does not play them.** Being a
  * manager means having a fantasy team name, which is chosen when joining, so
- * the admin joins through the same door as everyone else.
+ * the admin joins through the same door as everyone else. In the auction
+ * league the publisher is also the auctioneer.
  *
- * Both are public, use standard points, and hold no auction — the whole point
- * is that anyone can walk in.
+ * All are public and use standard points — the whole point is that anyone can
+ * walk in.
  */
 export interface OfficialLeagues {
   /** Changes counted across the whole tournament. */
   matchBased?: boolean
-  /** One gameweek per round, so the impact sub exists wherever a round has more than one match. */
   gameWeekBased?: boolean
+
+  /**
+   * **How many matches make a gameweek, per round.** Required for every round
+   * whenever a gameweek league is asked for, and refused unless it divides that
+   * round's match count — gameweeks are equal length within a round.
+   *
+   * One set serves every gameweek league opened in the same publish. A length
+   * of one has no "during the gameweek", so the impact sub is off there.
+   */
+  gameWeekLengths?: Partial<Record<RoundId, number>>
+
+  /**
+   * **Present means open an official auction league.** Standard rules, public,
+   * six slots, and joining closes when the auction starts. Gameweek-based, so
+   * it needs `gameWeekLengths` too.
+   *
+   * The start is refused unless it is in the future and before the first
+   * match starts, since squads have to be won before teams can be picked.
+   */
+  auction?: {
+    auctionStartTime: number
+  }
 }
 
 /**
@@ -142,6 +178,32 @@ export interface SamplePlayersResult {
   teamsCreated: readonly string[]
   /** The base tournament they were all put in. */
   competitionName: string
+}
+
+/**
+ * What resetting an environment to the IPL 2026 test data did.
+ *
+ * **Base tournaments are matched by name**, so one renamed or never created is
+ * listed in `missingCompetitions` rather than failing the reset. The teams and
+ * players that would have joined it are written without that membership.
+ */
+export interface SeedDataResult {
+  environment: string
+  teamsCreated: number
+  playersCreated: number
+  /** Users whose league lists were cleared, so their home screen starts empty. */
+  usersCleared: number
+  missingCompetitions: readonly string[]
+}
+
+/** What creating the sample IPL tournament did. */
+export interface SampleTournamentResult {
+  tournamentId: TournamentId
+  tournamentName: string
+  matches: number
+  teams: number
+  players: number
+  rounds: readonly string[]
 }
 
 /** What seeding an environment did, so a caller can say more than "done". */
@@ -178,6 +240,23 @@ export interface Api {
 
   /** The interface calls these Base Tournaments and never "competitions". */
   getCompetitions(): Promise<Competition[]>
+
+  /**
+   * **System admins only.** Names are unique, ignoring case — the interface
+   * picks base tournaments from a list by name, so two called "IPL" could not be
+   * told apart.
+   */
+  createCompetition(config: CompetitionConfig): Promise<CompetitionId>
+
+  /**
+   * **System admins only.** A home nation of `''` clears it. Changing it
+   * reaches tournaments created afterwards and never one already created,
+   * which carries its own frozen copy.
+   */
+  updateCompetition(
+    competitionId: CompetitionId,
+    changes: Partial<CompetitionConfig>,
+  ): Promise<void>
 
   /**
    * The reference table. Display names live in the database rather than in the
@@ -438,7 +517,7 @@ export interface Api {
   getGameWeeks(leagueId: LeagueId): Promise<LeagueGameWeek[]>
 
   /** Every match in the tournament, in `matchNumber` order. */
-  getFixtures(tournamentId: TournamentId): Promise<Match[]>
+  getFixtures(tournamentId: TournamentId): Promise<Fixture[]>
 
   /**
    * What each player scored in one match.
@@ -457,6 +536,22 @@ export interface Api {
     leagueId: LeagueId,
     matchId: MatchId,
   ): Promise<PlayerPoints>
+
+  /**
+   * **The same, for several matches in one call** — a gameweek's, typically.
+   * One entry per match asked for, **in the order asked**, so a gameweek's
+   * fixtures come back in fixture order. A match with no points has an empty
+   * map rather than no entry.
+   *
+   * Exists because a gameweek's total was being built from one request per
+   * match: five round trips for a five-match gameweek, and twelve for an IPL
+   * one. Resolution is the same as the single call — the league's scoring flag
+   * decides the store, once, for every match.
+   */
+  getPlayerPointsForMatches(
+    leagueId: LeagueId,
+    matchIds: readonly MatchId[],
+  ): Promise<MatchPlayerPoints[]>
 
   /**
    * **One manager's score for one match**: their eleven for it, each player's
@@ -537,6 +632,202 @@ export interface Api {
    * admins, then by name.
    */
   getMembers(leagueId: LeagueId): Promise<LeagueMemberSummary[]>
+
+  // -- the auction, before it runs ------------------------------------------
+
+  /**
+   * **What a manager prepares from**: the start, the rules, the batch order and
+   * the auctioneer. Reads only the league, never the auction runtime, which
+   * does not exist before the auction starts.
+   *
+   * Open to any signed-in caller. Refused for a league that holds no auction.
+   */
+  getAuctionSettings(leagueId: LeagueId): Promise<AuctionSettings>
+
+  /**
+   * **Every draft position, 1 to the league's slots**, with the manager holding
+   * it or none — a position nobody has claimed yet reads as TBA. Positions are
+   * claimed as managers join.
+   */
+  getDraftOrder(leagueId: LeagueId): Promise<DraftOrderEntry[]>
+
+  /**
+   * Every player in the auction, with this league's frozen category and base
+   * price and the team they play for in this tournament. Ordered by category,
+   * then role, then name. The slow read on Auction Center, so it is its own.
+   */
+  getAuctionPlayerPool(leagueId: LeagueId): Promise<AuctionPoolPlayer[]>
+
+  // -- the auction, running: the auctioneer --------------------------------
+  //
+  // **Every one of these is the current auctioneer's alone**
+  // (`auctionDetails/primaryAuctioneer`), checked here; the panel showing them
+  // is convenience. Each writes authoritative state and its timeline entry in
+  // one atomic update.
+
+  /** **Creates the live auction**, with every manager on the full budget. */
+  startAuction(leagueId: LeagueId): Promise<void>
+
+  /**
+   * The next batch in the league's sequence — **in order only**, so it takes
+   * nothing to choose. Refused mid-round, and after the last batch.
+   */
+  nextBatch(leagueId: LeagueId): Promise<void>
+
+  /**
+   * Puts a player from the current batch up: "Current player is X", before
+   * bidding opens. Clears the previous player's round.
+   */
+  putUpPlayer(leagueId: LeagueId, playerId: PlayerId): Promise<void>
+
+  /** The same, for a player drawn at random from those left in the batch. */
+  putUpRandomPlayer(leagueId: LeagueId): Promise<void>
+
+  /** Opens bidding on the player up, at base price, with the clock running. */
+  startBidding(leagueId: LeagueId): Promise<void>
+
+  /**
+   * **Accepts one submitted bid**, after checking it again here: it must be
+   * the bid the manager actually submitted, at exactly the asking price, before
+   * the deadline by this service's clock, from someone who has not passed and
+   * can afford it. Moves the price up 0.5 and restarts the clock.
+   */
+  acceptBid(
+    leagueId: LeagueId,
+    playerId: PlayerId,
+    managerId: UserId,
+    amount: number,
+  ): Promise<void>
+
+  /** Records a manager's pass, which they submitted. Irreversible. */
+  acceptNoBid(
+    leagueId: LeagueId,
+    playerId: PlayerId,
+    managerId: UserId,
+  ): Promise<void>
+
+  /** A first, second or last call, onto the timeline. Changes no state. */
+  announceCall(leagueId: LeagueId, call: AuctionCall): Promise<void>
+
+  /** Closes bidding once the deadline has passed by this service's clock. */
+  markTimeUp(leagueId: LeagueId): Promise<void>
+
+  /**
+   * **Sells the player up to the leader at the leading bid**, both read here
+   * rather than passed in. One atomic write across status, budget, bid
+   * history and the buyer's squad for every match.
+   */
+  sellPlayer(leagueId: LeagueId): Promise<void>
+
+  /**
+   * **The last-resort sale**, to a chosen manager at a chosen price, for when
+   * something has broken. Keeps the bidding and adds the sale as the final bid.
+   */
+  sellPlayerManually(
+    leagueId: LeagueId,
+    managerId: UserId,
+    amount: number,
+  ): Promise<void>
+
+  markPlayerUnsold(leagueId: LeagueId): Promise<void>
+
+  /** Freezes the round. Bidding only. */
+  pauseAuction(leagueId: LeagueId): Promise<void>
+
+  /** Resumes a paused round with the clock reset to 30 seconds. */
+  resumeAuction(leagueId: LeagueId): Promise<void>
+
+  /**
+   * More time on the round, 1–60 seconds. After time up, reopens bidding with
+   * that much time from now.
+   */
+  addTimeToCurrentRound(leagueId: LeagueId, seconds: number): Promise<void>
+
+  /** Enters recovery, the only place a rewind is allowed. Between rounds. */
+  startRecovery(leagueId: LeagueId): Promise<void>
+
+  /**
+   * **Undoes the newest round result** — a sale, unsold, draft pick or skip —
+   * and moves the auction back to where it happened. Recovery only; repeated
+   * rewinds walk back to the start.
+   */
+  rewindLastRound(leagueId: LeagueId): Promise<void>
+
+  /** Leaves recovery. */
+  endRecovery(leagueId: LeagueId): Promise<void>
+
+  /** Ends the auction; team submission opens. Reversible. */
+  endAuction(leagueId: LeagueId): Promise<void>
+
+  /** Reopens an ended auction exactly as it was. */
+  reopenAuction(leagueId: LeagueId): Promise<void>
+
+  /**
+   * **Everything the Squads page shows**: every manager's squad, the price
+   * each player went for, and the eleven to highlight — your own saved XI,
+   * anyone else's latest locked one. Auction leagues only; squads are public.
+   */
+  getSquads(leagueId: LeagueId): Promise<SquadsView>
+
+  /**
+   * **The next turn in the draft**; the first call starts it. The order
+   * snakes, and anyone who can no longer pick is skipped. Refused while a pick
+   * is going through, and once nobody can pick.
+   */
+  nextDraftManager(leagueId: LeagueId): Promise<void>
+
+  /**
+   * **Sells the turn's pick at base price.** Called by the auctioneer's
+   * browser as a pick arrives; everything is re-checked here.
+   */
+  acceptDraftPick(leagueId: LeagueId, turn: number): Promise<void>
+
+  /**
+   * **Skips the current manager's turn**, for one taking too long. Separate
+   * from Next on purpose, so a double click never skips anyone; Next is
+   * refused until the turn has a pick or a skip.
+   */
+  skipDraftTurn(leagueId: LeagueId): Promise<void>
+
+  /**
+   * **Puts the league back to before Start auction**, for testing: the live
+   * auction, the squads it filled, and anything built on them — lineups and
+   * leaderboards — are deleted. Members and the draft order stay; they come
+   * from joining, not from the auction.
+   *
+   * **Refused in production.** The auctioneer only, in any phase.
+   */
+  resetAuction(leagueId: LeagueId): Promise<void>
+
+  /**
+   * **Marks everyone left in the current bidding batch unsold**, for testing,
+   * so the draft can be reached quickly. Between rounds only; the auctioneer
+   * only; refused in production.
+   */
+  markBatchUnsold(leagueId: LeagueId): Promise<void>
+
+  // -- the auction, running: a manager -------------------------------------
+
+  /**
+   * **A bid, written to the bidder's own field only** — the manager is the
+   * caller, never an argument. Refused for a player not up, after passing,
+   * when leading, over budget or with a full squad. Whether it is accepted is
+   * the auctioneer's to decide; an invalid one is silently ignored.
+   */
+  submitBid(
+    leagueId: LeagueId,
+    playerId: PlayerId,
+    amount: number,
+  ): Promise<void>
+
+  /** A pass on the player up. **Irreversible for the round.** */
+  submitNoBid(leagueId: LeagueId, playerId: PlayerId): Promise<void>
+
+  /**
+   * **A pick for the caller's turn in the draft.** One per turn: a second is
+   * refused. The auctioneer's browser makes the sale.
+   */
+  submitDraftPick(leagueId: LeagueId, playerId: PlayerId): Promise<void>
 
   /**
    * Sets `finishedAt`. Owner and admins only, and refused until the league's
@@ -652,4 +943,25 @@ export interface Api {
    * already in the catalogue.
    */
   createSamplePlayers(): Promise<SamplePlayersResult>
+
+  /**
+   * **Wipes the environment and loads the IPL 2026 test data.** Every player,
+   * team, tournament and league goes, with everything hanging off them; user
+   * records, base tournaments and the standards stay.
+   *
+   * **Refused in production.** One atomic update, so a failure leaves the
+   * environment as it was.
+   */
+  populateSeedData(): Promise<SeedDataResult>
+
+  /**
+   * **An unpublished IPL 2027 on the 2026 schedule**, so testing publish and
+   * everything after it does not start with entering 74 matches by hand.
+   *
+   * Every IPL team and every player in one, the 70 league fixtures with their
+   * dates and venues, the four playoffs dated but TBA vs TBA, and three rounds:
+   * League stage, Playoffs, Final. **Refused in production, and refused if an
+   * IPL 2027 already exists.**
+   */
+  createSampleIplTournament(): Promise<SampleTournamentResult>
 }

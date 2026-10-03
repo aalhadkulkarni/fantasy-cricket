@@ -21,24 +21,13 @@
  *
  * ---
  *
- * ## TODO — not yet wired into anything
+ * **Every implemented operation addresses the database through these
+ * builders** rather than composing strings of its own, which is what keeps the
+ * environment root impossible to bypass. The ones that are not built yet — the
+ * auction, transfers, membership admin — will do the same.
  *
- * **No function in this layer calls these paths yet, because Firebase is not
- * installed and nothing is implemented.** Every one of the 143 functions still
- * returns `notImplemented`.
- *
- * When implementation starts, each function reads and writes through these
- * builders rather than composing strings of its own. That is the whole point of
- * having them: the environment routing is in place first, so it never has to be
- * retrofitted across a layer that already works without it.
- *
- * The remaining pieces, in order:
- *
- * 1. Install the Firebase SDK and initialise the app.
- * 2. Hold the database handle on the service in `firebase-service.ts`.
- * 3. Implement the functions, addressing everything through `paths`.
- * 4. Fill in the three hostnames in `src/config/environments.ts` and clear the
- *    forced override — see G9.
+ * A few deeper paths are still built inline with `service.path(...)`, where a
+ * builder would only be used once.
  */
 
 import type {
@@ -124,6 +113,12 @@ export function createPaths(service: FirebaseService) {
     systemSetup: () => under('systemSetup'),
 
     standardAuctionConfig: () => under('standardAuctionConfig'),
+    /**
+     * Each player's standard category and base price, written with the player.
+     * A league copies the ones it needs when it is created.
+     */
+    standardPlayerAuctionDetails: (playerId?: PlayerId) =>
+      under('standardAuctionConfig', 'playerDetails', playerId),
     standardFantasyLineupRules: () => under('standardFantasyLineupRules'),
     standardFantasyLeagueTeamChangesDeadlineOffset: () =>
       under('standardFantasyLeagueTeamChangesDeadlineOffset'),

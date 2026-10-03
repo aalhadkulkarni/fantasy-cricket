@@ -232,7 +232,9 @@ all copied into the league at creation.** Points are not, and resolve
 dynamically instead. That looks inconsistent and is not.
 
 **Why the auction config is copied.** `standardAuctionConfig.playerDetails`
-holds a base price and category for **every player in the system**. A league
+holds a base price and category for **every player in the system** — written
+in the same atomic update that creates the player, so every player created
+from Milestone 4 onward has one. A league
 needs only the players actually participating in its tournament. So the copy is
 not a snapshot of the standard, it is a **projection of it onto one
 tournament** — a genuinely different and much smaller thing. Resolving
@@ -244,6 +246,11 @@ biting again.
 bid. If a system admin edited a standard base price mid-season and leagues
 resolved dynamically, a completed auction would retroactively appear to have run
 under prices nobody bid against.
+
+**The batch sequence is copied the same way.** `standardAuctionConfig.batchSequence`
+is the order an auction runs in — Marquee batsmen, bowlers, keepers and
+all-rounders, then the same for Star, then the draft — and each auction league
+freezes its own copy at creation, for the same reason as the prices.
 
 **Why points are not copied.** Points are corrected after the fact, and a
 correction must reach every league that opted in. Copying would mean applying
@@ -339,19 +346,27 @@ A reject-and-ban creates a membership record holding only that role, for someone
 who was never a member. That is consistent — membership already holds
 non-playing relationships, since spectators live there too.
 
-### Overseas is derived from the player's country
+### Overseas is derived from the player's country and the tournament
 
-**A player is overseas when `players/{playerId}/country` is not India.** There
-is no stored overseas flag, and nothing on the competition records what counts
-as home.
+**A player is overseas in a tournament when their `country` is not that
+tournament's `homeNation`.** There is no stored overseas flag.
+
+`homeNation` is an **optional field on a competition**, set by a system admin
+(IPL → India, BBL → Australia). It is **copied onto each tournament at
+creation and frozen there**, like its participants, so editing a competition
+never changes who is overseas in a tournament already running. **A tournament
+with no `homeNation` counts it as India** (`DEFAULT_HOME_NATION`, applied where
+it is read, never written). So there is no way to say "no overseas at all"; the
+user chose India as the default since nearly every league here is an Indian
+one.
 
 The overseas cap lives only in `auctionConfig`, as
 `maxOverseasPlayersAllowedInXI`. Regular leagues have no cap — that is
 deliberate, and recorded on `league001` in the example file.
 
-> **This hardcodes India**, which is correct for the IPL and wrong for any base
-> tournament that is not an Indian competition. It holds for Phase 1 because
-> the IPL is the only auction tournament in play.
+> **This replaced a hardcoded India**, which was correct for the IPL and made
+> the BBL unplayable: nearly every BBL player would have been overseas, and a
+> cap of four would have left nobody able to field a legal XI.
 
 ---
 
@@ -543,7 +558,7 @@ configurable. The auctioneer can add seconds to a round in progress.
 | **Game-week-keyed squads**    | Keying squads by gameweek rather than match, so a transfer takes effect only once the current gameweek ends. Independent of sparseness — either could be taken without the other.                                                                                                                                                                                                                                                                                                                                                                                       |
 | **Auctioneer presence**       | Detecting that an auctioneer has gone offline, and promoting the backup automatically. Phase 2. For now an admin reassigns manually.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | **Firebase security rules**   | Permissive in Phase 1. The data layer enforces access. **Do not write restrictive rules — they will break reads.**                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| **Materialised leaderboards** | Computing standings on write rather than read. Only worth it at a scale this will not reach in Phase 1, and the model supports it without reshaping.                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **Materialised leaderboards** | Computing standings on write rather than read. Still deferred, and **not the same thing as the leaderboard cache that now exists**: the cache is computed on read and thrown away whenever its points or members change, so a correction is still one edited number. Materialising would mean maintaining standings as part of every write.                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 ---
 

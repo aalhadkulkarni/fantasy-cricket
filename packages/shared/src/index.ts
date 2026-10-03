@@ -80,7 +80,20 @@ export {
   PLAYER_CATEGORIES,
   AUCTION_PHASES,
   TIMELINE_EVENTS,
+  MATCH_DURATION_MS,
 } from './reference.ts'
+
+// The two bidding constants, fixed for Phase 1 and needed on both sides.
+export {
+  AUCTION_CALLS,
+  BID_INCREMENT,
+  CALL_AT_SECONDS,
+  ROUND_SECONDS,
+  canStillPick,
+} from './live-auction.ts'
+
+// Who is not overseas when a tournament names nobody.
+export { DEFAULT_HOME_NATION } from './competition.ts'
 
 // ---------------------------------------------------------------------------
 // The contract between the browser and the service

@@ -1,4 +1,4 @@
-import type { LeaguePhase } from '@fantasy-cricket/shared'
+import type { AuctionPhase, LeaguePhase } from '@fantasy-cricket/shared'
 
 /**
  * A league's lifecycle phase.
@@ -12,7 +12,7 @@ import type { LeaguePhase } from '@fantasy-cricket/shared'
  * as a constant in source, so advancing a league needed a redeploy.
  *
  * **Not backend knowledge**, so it sits here rather than in `firebase/`. A REST
- * implementation would feed it the same four facts and get the same answer.
+ * implementation would feed it the same facts and get the same answer.
  */
 export function derivePhase(facts: {
   /** The admin asserting every point and correction is in. */
@@ -23,21 +23,29 @@ export function derivePhase(facts: {
 
   isAuctionEnabled: boolean
 
-  /** Auction leagues only. When bidding is scheduled to open. */
-  auctionStartTime: number | undefined
-
   /**
-   * Whether the auction runtime node exists. **Its absence is the normal
-   * pre-auction state**, not an error.
+   * The live auction's own phase, or absent when the auction has not been
+   * started. **Absence is the normal pre-auction state**, not an error.
    */
-  auctionHasStarted: boolean
+  auctionPhase: AuctionPhase | undefined
 
   now: number
 }): LeaguePhase {
   // A person decides this, and nothing overrides them.
   if (facts.finishedAt !== undefined) return 'finished'
 
-  // Once the cricket has started, the league is running whatever came before.
+  /*
+    **An auction league stays in its auction until the auctioneer closes it.**
+    Not the scheduled start, and not the first ball: squads are won before
+    teams are picked, so team submission opens only once the auction is
+    marked ended, whatever the clock or the fixtures say. An auction that
+    never runs leaves the league waiting for it.
+  */
+  if (facts.isAuctionEnabled && facts.auctionPhase !== 'ended') {
+    return facts.auctionPhase === undefined ? 'preAuction' : 'auction'
+  }
+
+  // Once the cricket has started, the league is running.
   if (
     facts.tournamentStartDate !== undefined &&
     facts.now >= facts.tournamentStartDate
@@ -45,19 +53,5 @@ export function derivePhase(facts: {
     return 'active'
   }
 
-  if (facts.isAuctionEnabled) {
-    // Squads are won before teams are picked, so team submission is what
-    // follows a finished auction rather than something running alongside it.
-    if (facts.auctionHasStarted) return 'teamSubmission'
-    if (
-      facts.auctionStartTime !== undefined &&
-      facts.now >= facts.auctionStartTime
-    ) {
-      return 'auction'
-    }
-    return 'preAuction'
-  }
-
-  // A regular league has nothing before team submission.
   return 'teamSubmission'
 }

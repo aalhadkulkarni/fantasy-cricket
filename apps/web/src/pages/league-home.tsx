@@ -121,12 +121,61 @@ export function LeagueLanding() {
 }
 
 const LANDING: Record<LeaguePhase, string> = {
-  // Auction Center is not built; its leagues cannot exist yet either.
-  preAuction: 'details',
-  auction: 'details',
+  // An auction league starts at its auction. A regular league never reaches
+  // either phase.
+  preAuction: 'auction-center',
+  auction: 'auction-center',
   teamSubmission: 'team',
   active: 'team',
   finished: 'leaderboard',
+}
+
+/**
+ * **Which sections this league has, decided in one place**, so the sidebar and
+ * the route guards cannot disagree.
+ *
+ * - Auction Center belongs to auction leagues.
+ * - Squads belongs to auction leagues **once the auction has ended** — before
+ *   then the auction page shows them — and goes again if it is reopened.
+ * - My Team is absent for a spectator, who has no team. In an auction league
+ *   it is present before the auction closes, and says that team submission
+ *   opens after it — the page decides that, not the sidebar.
+ */
+function hasSection(league: LeagueSummary, section: string): boolean {
+  const spectatorOnly =
+    league.myRoles.spectator === true && league.myRoles.manager !== true
+
+  switch (section) {
+    case 'auction-center':
+      return league.isAuctionEnabled
+    case 'squads':
+      return (
+        league.isAuctionEnabled &&
+        league.phase !== 'preAuction' &&
+        league.phase !== 'auction'
+      )
+    case 'team':
+      return !spectatorOnly
+    default:
+      return true
+  }
+}
+
+/**
+ * **A section this league does not have redirects to its default**, rather than
+ * showing an error — per `04-navigation.md`, these are absent, not forbidden.
+ * Anyone can type the URL, so the sidebar hiding the link is not enough.
+ */
+export function SectionGuard({
+  section,
+  children,
+}: {
+  section: string
+  children: ReactNode
+}) {
+  const { league } = useLeague()
+  if (hasSection(league, section)) return <>{children}</>
+  return <Navigate to={leaguePath(league.leagueId)} replace />
 }
 
 /**
@@ -372,15 +421,14 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
  * A column on a wide screen, one scrolling row of pills on a phone.
  */
 function Sidebar({ league }: { league: LeagueSummary }) {
-  const spectatorOnly =
-    league.myRoles.spectator === true && league.myRoles.manager !== true
-
   const items = [
+    { label: 'Auction center', section: 'auction-center' },
     { label: 'League details', section: 'details' },
-    ...(spectatorOnly ? [] : [{ label: 'My team', section: 'team' }]),
+    { label: 'My team', section: 'team' },
+    { label: 'Squads', section: 'squads' },
     { label: 'Leaderboard', section: 'leaderboard' },
     { label: 'Members', section: 'members' },
-  ]
+  ].filter((item) => hasSection(league, item.section))
 
   return (
     <nav

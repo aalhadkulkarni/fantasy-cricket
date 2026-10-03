@@ -36,9 +36,17 @@ only thing telling a manager whether their team is legal.
 - **Count of each role**, and **overseas count**, against their limits
 - **Illegal values highlighted**
 
-> **Overseas means the player's country is not India.** The cap exists in
-> auction leagues only; regular leagues have none, so the overseas count is not
-> shown there.
+> **Overseas means the player's country is not the tournament's home nation**
+> — India when none is set (`05-data-model.md`). The cap exists in auction
+> leagues only; regular leagues have none, so the overseas count is not shown
+> there.
+
+> **A saved team outside the squad does not count.** In an auction league, a
+> correction to the auction (a rewind after a reopen) can take a player out of
+> a squad. A lineup containing one is treated as absent — it scores nothing and
+> shows nowhere — and My Team opens empty, saying why, until a new one is
+> saved. Nothing is deleted, so a correction that restores the player brings
+> the lineup back.
 
 **An illegal team cannot be submitted.**
 
@@ -64,17 +72,23 @@ resumes normally.
 
 ## Existing team — match-based leagues
 
-**Which match is shown:** the current match, if it has not ended.
+**Which match is shown:** the current match, if it has not ended; otherwise
+the next; the last once every match has ended.
 
 > **Determining "ended":** end times are not stored. Start plus four hours for
-> T20, nine for ODI, five days and nine hours for a Test is close enough.
+> T20, nine for ODI, five days and nine hours for a Test is close enough —
+> **or the next match's start, if that is earlier** (two matches on one day).
+> Worked out in the layer (`Fixture.endsAt`). **It decides only which match
+> the page opens on**; the deadline is the scheduled start minus the league's
+> offset, and nothing else.
 > **Being slightly wrong here breaks nothing** — a rain delay just means the
 > user clicks "previous match", and that match is not editable anyway because
 > its deadline has passed. **Deadlines always come from the scheduled start time
 > and never shift with delays.**
 
-**Navigation:** previous and next, plus a dropdown to jump to any match. All
-matches are navigable **for viewing**.
+**Navigation:** previous and next, with no jump dropdown — the page opens on
+the period that matters, and stepping from there is enough. All matches are
+navigable **for viewing**.
 
 > **Editing is available only where the deadline has not passed.** Viewing is
 > unrestricted; editing is not. Editing a past match would invalidate changes at
@@ -95,9 +109,20 @@ matches are navigable **for viewing**.
 ## Existing team — gameweek-based leagues
 
 **Which gameweek is shown:** the current one if a gameweek is running, otherwise
-the next one.
+the next one; the last once every gameweek has ended.
 
-**Also show which round the gameweek belongs to.**
+> **A gameweek has ended** at the earlier of: its last match's start plus the
+> format's duration (as for match-based leagues above: four hours for T20,
+> nine for ODI, five days and nine hours for a Test); or the next gameweek's
+> first match's start — several matches can fall on one day, especially in
+> ODIs. Worked out in the layer (`LeagueGameWeek.endsAt`). **It decides only
+> which gameweek the page opens on.** The deadline is the gameweek's first
+> match's start minus the league's offset, and nothing else.
+
+**The round is not shown beside the gameweek.** It was, and "Game week 1 ·
+Round 1 · 5 matches" read as though the team were for the whole round, when a
+team applies from this gameweek until changed. The gameweek's match count is
+shown instead, and tapping it lists that gameweek's fixtures.
 
 **Navigation:** previous and next gameweek, **up to next gameweek only**.
 

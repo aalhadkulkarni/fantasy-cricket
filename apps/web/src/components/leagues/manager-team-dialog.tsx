@@ -33,6 +33,8 @@ export interface LockedPeriod {
   /** The fixture line under the title. */
   subline: string
   matchIds: readonly MatchId[]
+  /** "M2 · IND v AUS", one per match, in the same order as `matchIds`. */
+  matchLabels: readonly string[]
   /** A gameweek's cap on changes going into it. Absent means unlimited. */
   changeCap?: number
 }
@@ -68,6 +70,9 @@ export function ManagerTeamDialog({
   const [team, setTeam] = useState<SavedTeam | undefined>(undefined)
   const [baseline, setBaseline] = useState<SavedTeam | undefined>(undefined)
   const [points, setPoints] = useState<PlayerPoints>({})
+  const [breakdown, setBreakdown] = useState<
+    { label: string; points: PlayerPoints }[]
+  >([])
   // Which period the team above was loaded for. Until it matches, the team is
   // unknown rather than absent.
   const [loadedFor, setLoadedFor] = useState<string | undefined>(undefined)
@@ -112,7 +117,13 @@ export function ManagerTeamDialog({
 
         setTeam(toSaved(theirs))
         setBaseline(toSaved(before))
-        setPoints(scored)
+        setPoints(scored.total)
+        setBreakdown(
+          scored.byMatch.map((entry, i) => ({
+            label: period.matchLabels[i] ?? 'Match',
+            points: entry.points,
+          })),
+        )
         setError(undefined)
         setLoadedFor(period.id)
       } catch (e) {
@@ -148,6 +159,7 @@ export function ManagerTeamDialog({
             selectedId={selectedId}
             reachable={reachable}
             onSelect={setSelectedId}
+            jump
           />
         )}
 
@@ -175,6 +187,7 @@ export function ManagerTeamDialog({
               rules={rules}
               allowances={allowances}
               isGameWeek={league.isGameWeeksEnabled}
+              breakdown={breakdown}
             />
           )}
         </div>

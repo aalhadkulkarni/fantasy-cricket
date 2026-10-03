@@ -19,16 +19,29 @@
  */
 
 import type {
+  AcceptedBidsForPlayer,
   AuctionManagerStatus,
   AuctionPoolPlayer,
+  AuctionSettings,
   AuctionState,
   DraftOrderEntry,
+  DraftPick,
   LeagueId,
   Player,
+  ManagerAuctionStatus,
   PlayerBiddingHistory,
   PlayerId,
+  PlayerStatus,
   TimelineMessage,
+  UserId,
 } from '@fantasy-cricket/shared'
+import { getApi } from './api'
+import {
+  listenToChildrenAdded,
+  listenToServerTimeOffset,
+  listenToValue,
+  readValue,
+} from './firebase/realtime'
 import { notImplemented } from './not-implemented'
 import type {
   Subscriber,
@@ -55,11 +68,25 @@ export function getAuctionState(
   return notImplemented('getAuctionState', { leagueId })
 }
 
-/** Every player up for auction, with this league's category and base price. */
+/**
+ * **What a manager prepares from**: the start, the rules, the batch order and
+ * the auctioneer. Reads only the league, so it works for weeks before the
+ * auction exists.
+ */
+export function getAuctionSettings(
+  leagueId: LeagueId,
+): Promise<AuctionSettings> {
+  return getApi().getAuctionSettings(leagueId)
+}
+
+/**
+ * Every player up for auction, with this league's category and base price.
+ * The slow read on Auction Center, so it is fetched on its own.
+ */
 export function getAuctionPlayerPool(
   leagueId: LeagueId,
 ): Promise<AuctionPoolPlayer[]> {
-  return notImplemented('getAuctionPlayerPool', { leagueId })
+  return getApi().getAuctionPlayerPool(leagueId)
 }
 
 export function getSoldPlayers(leagueId: LeagueId): Promise<Player[]> {
@@ -87,12 +114,13 @@ export function getManagerStatuses(
 }
 
 /**
- * Generated at the very start, before any bidding, because a manager's strategy
- * depends on where they sit. **It snakes** — 1 to 6, then 6 back to 1,
- * repeating. Empty until the auctioneer generates it.
+ * **Every position, held or not.** A position is claimed when a manager joins,
+ * so the order is known before any bidding — a manager's strategy depends on
+ * where they sit. One nobody holds yet has no manager, and reads as TBA. **It
+ * snakes** — 1 to 6, then 6 back to 1, repeating.
  */
 export function getDraftOrder(leagueId: LeagueId): Promise<DraftOrderEntry[]> {
-  return notImplemented('getDraftOrder', { leagueId })
+  return getApi().getDraftOrder(leagueId)
 }
 
 /**
@@ -101,11 +129,18 @@ export function getDraftOrder(leagueId: LeagueId): Promise<DraftOrderEntry[]> {
  * **Never fetched with the page.** The full history for every player is the
  * entire auction, so it is read one player at a time, when asked for.
  */
-export function getPlayerBiddingHistory(
+export async function getPlayerBiddingHistory(
   leagueId: LeagueId,
   playerId: PlayerId,
-): Promise<PlayerBiddingHistory> {
-  return notImplemented('getPlayerBiddingHistory', { leagueId, playerId })
+): Promise<PlayerBiddingHistory | undefined> {
+  // Straight from the database, like the rest of the live auction. Absent for
+  // a player nobody has bid on yet.
+  return readValue<PlayerBiddingHistory>([
+    'liveAuctions',
+    leagueId,
+    'playerWiseBiddingHistory',
+    playerId,
+  ])
 }
 
 // ---------------------------------------------------------------------------
@@ -120,15 +155,16 @@ export function getPlayerBiddingHistory(
  * regardless of the player's value. Neither the increment nor the thirty-second
  * round timer is configurable in Phase 1.
  *
- * **Rejected** if the bidder has already passed on this player, or if the bid
- * would overdraw their budget.
+ * **Refused** for a player not up, after passing, when leading, over budget or
+ * with a full squad. Whether it is accepted — the price, the clock — is the
+ * auctioneer's to judge, and an invalid bid is silently ignored.
  */
 export function submitBid(
   leagueId: LeagueId,
   playerId: PlayerId,
   amount: number,
 ): Promise<void> {
-  return notImplemented('submitBid', { leagueId, playerId, amount })
+  return getApi().submitBid(leagueId, playerId, amount)
 }
 
 /**
@@ -144,24 +180,160 @@ export function submitNoBid(
   leagueId: LeagueId,
   playerId: PlayerId,
 ): Promise<void> {
-  return notImplemented('submitNoBid', { leagueId, playerId })
+  return getApi().submitNoBid(leagueId, playerId)
+}
+
+/**
+ * **A pick for your turn in the draft.** One per turn; a second is refused.
+ * The auctioneer's browser makes the sale.
+ */
+export function submitDraftPick(
+  leagueId: LeagueId,
+  playerId: PlayerId,
+): Promise<void> {
+  return getApi().submitDraftPick(leagueId, playerId)
 }
 
 // ---------------------------------------------------------------------------
 // Subscriptions
 // ---------------------------------------------------------------------------
 
-/** The shared display's live feed. Everything authoritative arrives here. */
+/**
+ * The shared display's live feed. Everything authoritative arrives here.
+ *
+ * **Read straight from the database**, not through the service: the auction
+ * changes several times a second for everyone watching. Read-only — every
+ * write still goes through the service.
+ *
+ * **`undefined` until the auctioneer starts the auction**, and that is the
+ * normal pre-auction state, not an error.
+ */
 export function onAuctionStateChanged(
   leagueId: LeagueId,
-  callback: Subscriber<AuctionState>,
+  callback: Subscriber<AuctionState | undefined>,
   onError?: SubscriptionErrorHandler,
 ): Unsubscribe {
-  return notImplemented('onAuctionStateChanged', {
-    leagueId,
+  return listenToValue<AuctionState>(
+    ['liveAuctions', leagueId, 'auctionState'],
     callback,
     onError,
-  })
+  )
+}
+
+/**
+ * **Every manager's budget and holdings**, live. Empty until the auction is
+ * started — the page fills the managers table from the league until then.
+ */
+export function onManagerStatusesChanged(
+  leagueId: LeagueId,
+  callback: Subscriber<Partial<Record<UserId, ManagerAuctionStatus>>>,
+  onError?: SubscriptionErrorHandler,
+): Unsubscribe {
+  return listenToValue<Partial<Record<UserId, ManagerAuctionStatus>>>(
+    ['liveAuctions', leagueId, 'managerStatus'],
+    (value) => callback(value ?? {}),
+    onError,
+  )
+}
+
+/**
+ * **What has become of each player** — sold, unsold or pending — live. A
+ * player with no entry has not gone up yet, which counts as remaining.
+ */
+export function onPlayerStatusesChanged(
+  leagueId: LeagueId,
+  callback: Subscriber<Partial<Record<PlayerId, PlayerStatus>>>,
+  onError?: SubscriptionErrorHandler,
+): Unsubscribe {
+  return listenToValue<Partial<Record<PlayerId, PlayerStatus>>>(
+    ['liveAuctions', leagueId, 'playerStatus'],
+    (value) => callback(value ?? {}),
+    onError,
+  )
+}
+
+/**
+ * **The current player's round, as the auctioneer accepted it**: the leading
+ * bid and who holds it, the asking price, the deadline, every accepted bid and
+ * pass. Keyed by player, so a page listens to the one that is up and moves
+ * when the next one goes up.
+ */
+export function onCurrentRoundChanged(
+  leagueId: LeagueId,
+  playerId: PlayerId,
+  callback: Subscriber<AcceptedBidsForPlayer | undefined>,
+  onError?: SubscriptionErrorHandler,
+): Unsubscribe {
+  return listenToValue<AcceptedBidsForPlayer>(
+    ['liveAuctions', leagueId, 'currentAcceptedBids', playerId],
+    callback,
+    onError,
+  )
+}
+
+/**
+ * **What every manager has bid on the current player**, as they wrote it —
+ * keyed by manager, so a manager's newer bid replaces their older one. The
+ * auctioneer's browser reads this and decides what to accept.
+ */
+export function onSubmittedBids(
+  leagueId: LeagueId,
+  playerId: PlayerId,
+  callback: Subscriber<Partial<Record<UserId, number>>>,
+  onError?: SubscriptionErrorHandler,
+): Unsubscribe {
+  return listenToValue<Partial<Record<UserId, number>>>(
+    ['liveAuctions', leagueId, 'currentSubmittedBids', playerId, 'bids'],
+    (value) => callback(value ?? {}),
+    onError,
+  )
+}
+
+/**
+ * **The pick for one turn of the draft**, if made. `undefined` until the
+ * manager picks; `accepted` once the sale is made.
+ */
+export function onDraftPick(
+  leagueId: LeagueId,
+  turn: number,
+  callback: Subscriber<DraftPick | undefined>,
+  onError?: SubscriptionErrorHandler,
+): Unsubscribe {
+  return listenToValue<DraftPick>(
+    ['liveAuctions', leagueId, 'draftPicks', String(turn)],
+    callback,
+    onError,
+  )
+}
+
+/**
+ * **Who has passed on the current player**, as written by the managers
+ * themselves. Passing is irreversible for the round, so a manager's own entry
+ * is what tells their panel to say so.
+ */
+export function onSubmittedNoBids(
+  leagueId: LeagueId,
+  playerId: PlayerId,
+  callback: Subscriber<Partial<Record<UserId, true>>>,
+  onError?: SubscriptionErrorHandler,
+): Unsubscribe {
+  return listenToValue<Partial<Record<UserId, true>>>(
+    ['liveAuctions', leagueId, 'currentSubmittedBids', playerId, 'noBids'],
+    (value) => callback(value ?? {}),
+    onError,
+  )
+}
+
+/**
+ * **This device's clock against the database's**, in milliseconds. The
+ * countdown is computed from server time, never the local clock: the server's
+ * now is `Date.now()` plus this.
+ */
+export function onServerTimeOffset(
+  callback: Subscriber<number>,
+  onError?: SubscriptionErrorHandler,
+): Unsubscribe {
+  return listenToServerTimeOffset(callback, onError)
 }
 
 /**
@@ -179,5 +351,10 @@ export function onTimelineEvent(
   callback: Subscriber<TimelineMessage>,
   onError?: SubscriptionErrorHandler,
 ): Unsubscribe {
-  return notImplemented('onTimelineEvent', { leagueId, callback, onError })
+  // Every entry so far, then each new one, in the order they were written.
+  return listenToChildrenAdded<TimelineMessage>(
+    ['liveAuctions', leagueId, 'timeline'],
+    callback,
+    onError,
+  )
 }
