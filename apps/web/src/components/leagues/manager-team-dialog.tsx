@@ -159,6 +159,7 @@ export function ManagerTeamDialog({
             selectedId={selectedId}
             reachable={reachable}
             onSelect={setSelectedId}
+            jump
           />
         )}
 

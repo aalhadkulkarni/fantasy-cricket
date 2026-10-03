@@ -64,6 +64,7 @@ import type {
   CompetitionConfig,
   CompetitionId,
   DraftOrderEntry,
+  Format,
   FormatRecord,
   GameWeek,
   GameWeekId,
@@ -81,6 +82,7 @@ import type {
   LineupRules,
   LineupSubmission,
   ManagerAuctionStatus,
+  Fixture,
   Match,
   MatchConfig,
   MatchId,
@@ -89,6 +91,8 @@ import type {
   MatchSide,
   LeagueDetails,
   LeagueMemberSummary,
+  ManagerSquadView,
+  SquadsView,
   RoundDetails,
   PeriodLeaderboard,
   LeaderboardRow,
@@ -130,6 +134,7 @@ import {
   DataLayerError,
   DEFAULT_HOME_NATION,
   FORMATS,
+  MATCH_DURATION_MS,
   PLAYER_CATEGORIES,
   PLAYER_ROLES,
   ROUND_SECONDS,
@@ -1417,33 +1422,148 @@ export function createFirebaseApi(
     }
   }
 
-  /** A manager's stored team for a match, resolved. No visibility check. */
+  // -------------------------------------------------------------------------
+  // Squads: what an auction league's manager may field
+  // -------------------------------------------------------------------------
+
+  async function isAuctionLeague(leagueId: LeagueId): Promise<boolean> {
+    return (
+      (await service.read<boolean>(
+        service.path('leagues', leagueId, 'isAuctionEnabled'),
+      )) === true
+    )
+  }
+
+  /**
+   * **How long a match in this tournament is taken to last**, from its base
+   * tournament's format. One with no format on record is taken as T20, the
+   * shortest. Only for deciding what My Team opens on, never a deadline.
+   */
+  async function matchDuration(tournamentId: TournamentId): Promise<number> {
+    const competitionId = await service.read<CompetitionId>(
+      service.path('tournaments', tournamentId, 'competitionId'),
+    )
+    const format =
+      competitionId === undefined
+        ? undefined
+        : await service.read<Format>(
+            service.path('competitions', competitionId, 'formatId'),
+          )
+    return MATCH_DURATION_MS[format ?? 't20']
+  }
+
+  /** The tournament's home nation, **India when none is set**. */
+  async function leagueHomeNation(leagueId: LeagueId): Promise<string> {
+    const tournamentId = await service.read<TournamentId>(
+      service.path('leagues', leagueId, 'tournamentId'),
+    )
+    const homeNation =
+      tournamentId === undefined
+        ? undefined
+        : await service.read<string>(
+            service.path('tournaments', tournamentId, 'homeNation'),
+          )
+    return homeNation ?? DEFAULT_HOME_NATION
+  }
+
+  /**
+   * **A manager's squad at one match**, as a set of ids. Written per match on
+   * every sale; the same at every match until transfers exist.
+   */
+  async function squadAt(
+    leagueId: LeagueId,
+    managerId: UserId,
+    matchId: MatchId,
+  ): Promise<Set<string>> {
+    const ids = await service.read<PlayerId[] | Record<string, PlayerId>>(
+      paths.squads(leagueId, managerId, matchId),
+    )
+    // Stored as an array, which RTDB may hand back as an object.
+    return new Set(Object.values(ids ?? {}))
+  }
+
+  /** The first match of a gameweek, which its squad is taken at. */
+  async function gameWeekStart(
+    leagueId: LeagueId,
+    gameWeekId: GameWeekId,
+  ): Promise<MatchId | undefined> {
+    const { rounds } = await leagueFixtures(leagueId)
+    return Object.values(rounds)
+      .flatMap((round) => Object.values(round.gameWeeks ?? {}))
+      .find((gw) => gw.gameWeekId === gameWeekId)?.startMatchId
+  }
+
+  /**
+   * **Whether a saved lineup has fallen outside the squad** — in an auction
+   * league, a player in it the manager no longer owns at that match, as after
+   * a rewind following a reopen. Such a lineup is **treated as absent**: it
+   * scores nothing and shows nowhere, until a new one is saved. Nothing is
+   * deleted, so a correction that restores the player brings it back.
+   */
+  async function outsideSquad(
+    leagueId: LeagueId,
+    managerId: UserId,
+    ids: readonly PlayerId[],
+    matchId: MatchId | undefined,
+  ): Promise<boolean> {
+    if (matchId === undefined || !(await isAuctionLeague(leagueId))) {
+      return false
+    }
+    const squad = await squadAt(leagueId, managerId, matchId)
+    return ids.some((id) => !squad.has(id))
+  }
+
+  /**
+   * A manager's stored team for a match, resolved. No visibility check.
+   *
+   * **A lineup outside the squad is absent**, unless `keepDiscarded` — the
+   * manager's own read — when it comes back marked, so My Team can say why.
+   */
   async function readMatchTeam(
     leagueId: LeagueId,
     userId: UserId,
     matchId: MatchId,
+    keepDiscarded = false,
   ): Promise<MatchLineup | undefined> {
     const stored = await service.read<StoredLineup>(
       service.path('matchBasedLineups', leagueId, userId, matchId),
     )
     if (stored === undefined) return undefined
 
+    const discarded = await outsideSquad(
+      leagueId,
+      userId,
+      stored.lineup,
+      matchId,
+    )
+    if (discarded && !keepDiscarded) return undefined
+
     return {
       ...stored,
       lineup: await resolvePlayers(stored.lineup, leagueId),
+      ...(discarded ? { discarded: true as const } : {}),
     }
   }
 
-  /** A manager's stored team for a gameweek, resolved. No visibility check. */
+  /** A manager's stored team for a gameweek, as `readMatchTeam`. */
   async function readGameWeekTeam(
     leagueId: LeagueId,
     userId: UserId,
     gameWeekId: GameWeekId,
+    keepDiscarded = false,
   ): Promise<GameWeekLineup | undefined> {
     const stored = await service.read<StoredGameWeekLineup>(
       service.path('gameWeekBasedLineups', leagueId, userId, gameWeekId),
     )
     if (stored === undefined) return undefined
+
+    const discarded = await outsideSquad(
+      leagueId,
+      userId,
+      [...stored.startingLineup, ...(stored.postImpactSubLineup ?? [])],
+      await gameWeekStart(leagueId, gameWeekId),
+    )
+    if (discarded && !keepDiscarded) return undefined
 
     const [startingLineup, postImpactSubLineup] = await Promise.all([
       resolvePlayers(stored.startingLineup, leagueId),
@@ -1460,6 +1580,7 @@ export function createFirebaseApi(
         ? {}
         : { impactSub: stored.impactSub }),
       ...(postImpactSubLineup === undefined ? {} : { postImpactSubLineup }),
+      ...(discarded ? { discarded: true as const } : {}),
     }
   }
 
@@ -1566,6 +1687,50 @@ export function createFirebaseApi(
   }
 
   /**
+   * **Every manager's lineups less those outside their squad**, with the
+   * league's squads read in one go (or one manager's, for `only`).
+   */
+  async function withoutDiscarded(
+    leagueId: LeagueId,
+    lineups: Scoring['lineups'],
+    startOf: (period: string) => MatchId | undefined,
+    only?: UserId,
+  ): Promise<Scoring['lineups']> {
+    type Squads = Record<string, PlayerId[] | Record<string, PlayerId>>
+    const squads: Partial<Record<string, Squads>> =
+      only === undefined
+        ? ((await service.read<Record<string, Squads>>(
+            paths.squads(leagueId),
+          )) ?? {})
+        : {
+            [only]:
+              (await service.read<Squads>(paths.squads(leagueId, only))) ?? {},
+          }
+
+    const kept: Scoring['lineups'] = {}
+    for (const [managerId, periods] of Object.entries(lineups)) {
+      if (periods === undefined) continue
+      const mine = squads[managerId] ?? {}
+      kept[managerId as UserId] = Object.fromEntries(
+        Object.entries(periods).filter(([period, stored]) => {
+          const matchId = startOf(period)
+          if (matchId === undefined) return true
+          const squad = new Set(Object.values(mine[matchId] ?? {}))
+          const ids =
+            'startingLineup' in stored
+              ? [
+                  ...stored.startingLineup,
+                  ...(stored.postImpactSubLineup ?? []),
+                ]
+              : stored.lineup
+          return ids.every((id) => squad.has(id))
+        }),
+      )
+    }
+    return kept
+  }
+
+  /**
    * **Three subtree reads, not one per manager**: the league's lineups, the
    * points node, and its members. `only` narrows the lineups and members to one
    * manager, for the single-manager reads.
@@ -1574,7 +1739,7 @@ export function createFirebaseApi(
     leagueId: LeagueId,
     only?: UserId,
   ): Promise<Scoring> {
-    const [fixtures, isCustom, isGameWeeks] = await Promise.all([
+    const [fixtures, isCustom, isGameWeeks, isAuction] = await Promise.all([
       leagueFixtures(leagueId),
       service.read<boolean>(
         service.path('leagues', leagueId, 'isCustomScoringSystem'),
@@ -1582,6 +1747,7 @@ export function createFirebaseApi(
       service.read<boolean>(
         service.path('leagues', leagueId, 'isGameWeeksEnabled'),
       ),
+      isAuctionLeague(leagueId),
     ])
 
     const node =
@@ -1617,13 +1783,27 @@ export function createFirebaseApi(
           ),
     ])
 
+    // **A lineup outside the squad scores nothing**, so it is dropped here —
+    // in an auction league, against the squad at the period's first match.
+    const counted = isAuction
+      ? await withoutDiscarded(
+          leagueId,
+          lineups ?? {},
+          (period) =>
+            isGameWeeks === true
+              ? weeks.find((w) => w.gameWeek.gameWeekId === period)?.matchIds[0]
+              : (period as MatchId),
+          only,
+        )
+      : (lineups ?? {})
+
     return {
       matches: fixtures.matches,
       offset: fixtures.offset,
       isGameWeeks: isGameWeeks === true,
       weeks,
       points: points ?? {},
-      lineups: lineups ?? {},
+      lineups: counted,
       members: members ?? {},
       watermark: watermarkOf(
         fixtures.matches,
@@ -2005,17 +2185,19 @@ export function createFirebaseApi(
   async function assertLegal(
     leagueId: LeagueId,
     submission: LineupSubmission,
+    /** The match the squad is taken at: the period's first. */
+    atMatchId: MatchId,
   ): Promise<void> {
-    const { lineup, captainId, viceCaptainId } = submission
+    const { captainId, viceCaptainId } = submission
 
-    if (lineup.length !== 11) {
+    if (submission.lineup.length !== 11) {
       throw new DataLayerError(
         'illegalLineup',
-        `A team is eleven players. This one has ${lineup.length}.`,
+        `A team is eleven players. This one has ${submission.lineup.length}.`,
       )
     }
 
-    const ids = new Set(lineup.map((player) => player.playerId))
+    const ids = new Set(submission.lineup.map((player) => player.playerId))
     if (ids.size !== 11) {
       throw new DataLayerError(
         'illegalLineup',
@@ -2035,11 +2217,58 @@ export function createFirebaseApi(
       )
     }
 
-    const rules = await api.getLineupRules(leagueId)
+    // **The stored players, not the ones sent.** A role or country in the
+    // request is the client's word; the catalogue is the authority.
+    const [rules, everyone] = await Promise.all([
+      api.getLineupRules(leagueId),
+      service.read<Record<string, Player>>(paths.players()),
+    ])
+    const lineup = [...ids].map((id) => everyone?.[id])
+    if (lineup.some((player) => player === undefined)) {
+      throw new DataLayerError(
+        'illegalLineup',
+        'That team has an unknown player.',
+      )
+    }
+    const players = lineup as Player[]
+
+    // **An auction league fields only its squad, under the overseas cap.**
+    if (await isAuctionLeague(leagueId)) {
+      const uid = requireSession().uid as UserId
+      const [squad, cap, homeNation] = await Promise.all([
+        squadAt(leagueId, uid, atMatchId),
+        service.read<number>(
+          service.path(
+            'leagues',
+            leagueId,
+            'auctionDetails',
+            'auctionConfig',
+            'maxOverseasPlayersAllowedInXI',
+          ),
+        ),
+        leagueHomeNation(leagueId),
+      ])
+      const outside = players.filter((p) => !squad.has(p.playerId))
+      if (outside.length > 0) {
+        throw new DataLayerError(
+          'illegalLineup',
+          `${outside.map((p) => p.playerName).join(', ')} ${
+            outside.length === 1 ? 'is' : 'are'
+          } not in your squad.`,
+        )
+      }
+      const overseas = players.filter((p) => p.country !== homeNation).length
+      if (cap !== undefined && overseas > cap) {
+        throw new DataLayerError(
+          'illegalLineup',
+          `This league allows at most ${cap} overseas players. You have ${overseas}.`,
+        )
+      }
+    }
 
     for (const [role, rule] of Object.entries(rules)) {
       if (rule === undefined) continue
-      const count = lineup.filter((p) => p.playerRole === role).length
+      const count = players.filter((p) => p.playerRole === role).length
 
       if (count < rule.min) {
         throw new DataLayerError(
@@ -3675,9 +3904,12 @@ export function createFirebaseApi(
     async getGameWeeks(leagueId: LeagueId): Promise<LeagueGameWeek[]> {
       const { tournamentId, matches, rounds } = await leagueFixtures(leagueId)
 
-      const tournamentRounds = await service.read<Record<string, Round>>(
-        paths.tournamentRounds(tournamentId),
-      )
+      const [tournamentRounds, duration] = await Promise.all([
+        service.read<Record<string, Round>>(
+          paths.tournamentRounds(tournamentId),
+        ),
+        matchDuration(tournamentId),
+      ])
 
       const numberOf = (matchId: MatchId) =>
         matches.find((m) => m.matchId === matchId)?.matchNumber ?? 0
@@ -3720,6 +3952,29 @@ export function createFirebaseApi(
         round starts" allowance, and one inside the same round by its "between
         gameweeks" allowance. Absent in either means unlimited.
       */
+      /*
+        **When each gameweek is over**: its last match's start plus the
+        format's duration, or the next gameweek's first start if that comes
+        sooner — on a day with several matches it does.
+      */
+      for (const [index, entry] of entries.entries()) {
+        const spanned = entry.week.matchIds.map((id) =>
+          matches.find((m) => m.matchId === id),
+        )
+        const lastStart = spanned.at(-1)?.startTimestamp
+        if (
+          lastStart === undefined ||
+          spanned.some((m) => m?.startTimestamp === undefined)
+        ) {
+          continue
+        }
+        const nextStart = entries[index + 1]?.week.startsAt
+        entry.week = {
+          ...entry.week,
+          endsAt: Math.min(lastStart + duration, nextStart ?? Infinity),
+        }
+      }
+
       return entries.map(({ roundId, week }, index) => {
         if (index === 0) return week
 
@@ -3772,14 +4027,33 @@ export function createFirebaseApi(
       return undefined
     },
 
-    async getFixtures(tournamentId: TournamentId): Promise<Match[]> {
-      const stored = await service.read<Record<string, Match>>(
-        paths.tournamentMatches(tournamentId),
-      )
+    /**
+     * In match order, **each with when it counts as over**: its start plus the
+     * format's duration, or the next match's start if sooner. Only for
+     * choosing which match My Team opens on; deadlines never use it.
+     */
+    async getFixtures(tournamentId: TournamentId): Promise<Fixture[]> {
+      const [stored, duration] = await Promise.all([
+        service.read<Record<string, Match>>(
+          paths.tournamentMatches(tournamentId),
+        ),
+        matchDuration(tournamentId),
+      ])
 
-      return Object.values(stored ?? {}).sort(
+      const matches = Object.values(stored ?? {}).sort(
         (a, b) => a.matchNumber - b.matchNumber,
       )
+      return matches.map((match, index) => {
+        if (match.startTimestamp === undefined) return match
+        const nextStart = matches[index + 1]?.startTimestamp
+        return {
+          ...match,
+          endsAt: Math.min(
+            match.startTimestamp + duration,
+            nextStart ?? Infinity,
+          ),
+        }
+      })
     },
 
     /**
@@ -4233,13 +4507,22 @@ export function createFirebaseApi(
      */
     async getSelectablePlayers(
       leagueId: LeagueId,
-      _matchId: MatchId,
+      matchId: MatchId,
     ): Promise<Player[]> {
       const tournamentId = await service.read<TournamentId>(
         service.path('leagues', leagueId, 'tournamentId'),
       )
       if (tournamentId === undefined) {
         throw new DataLayerError('notFound', 'That league no longer exists.')
+      }
+
+      // **The one place the two kinds of league diverge**: an auction league
+      // picks only from the caller's squad, as it stood at that match.
+      if (await isAuctionLeague(leagueId)) {
+        const uid = requireSession().uid as UserId
+        const squad = await squadAt(leagueId, uid, matchId)
+        const players = await resolvePlayers([...squad] as PlayerId[], leagueId)
+        return players.sort((a, b) => a.playerName.localeCompare(b.playerName))
       }
 
       const [teamOf, everyone] = await Promise.all([
@@ -4259,7 +4542,7 @@ export function createFirebaseApi(
       matchId: MatchId,
     ): Promise<MatchLineup | undefined> {
       const session = requireSession()
-      return readMatchTeam(leagueId, session.uid as UserId, matchId)
+      return readMatchTeam(leagueId, session.uid as UserId, matchId, true)
     },
 
     async getMyTeamForGameWeek(
@@ -4267,7 +4550,7 @@ export function createFirebaseApi(
       gameWeekId: GameWeekId,
     ): Promise<GameWeekLineup | undefined> {
       const session = requireSession()
-      return readGameWeekTeam(leagueId, session.uid as UserId, gameWeekId)
+      return readGameWeekTeam(leagueId, session.uid as UserId, gameWeekId, true)
     },
 
     async getTeamForMatch(
@@ -4430,6 +4713,156 @@ export function createFirebaseApi(
      * **Field by field, never `auctionConfig` whole**, which carries a price
      * for every player in the tournament — the pool is its own read.
      */
+    /**
+     * **Everything the Squads page shows, in one read**: every manager's squad
+     * at the current match, with what each player went for, and the eleven to
+     * highlight. Squads are public; the eleven follows the visibility rule —
+     * yours is your saved XI for the current period, anyone else's only their
+     * latest locked one. A lineup outside the squad shows for nobody.
+     */
+    async getSquads(leagueId: LeagueId): Promise<SquadsView> {
+      await assertAuctionLeague(leagueId)
+      const uid = requireSession().uid as UserId
+
+      const [
+        members,
+        settings,
+        lineupRules,
+        current,
+        isGameWeeks,
+        statuses,
+        squads,
+        everyone,
+        teamOf,
+        fixtures,
+      ] = await Promise.all([
+        api.getMembers(leagueId),
+        api.getAuctionSettings(leagueId),
+        api.getLineupRules(leagueId),
+        api.getCurrentMatch(leagueId),
+        service.read<boolean>(
+          service.path('leagues', leagueId, 'isGameWeeksEnabled'),
+        ),
+        service.read<Partial<Record<string, ManagerAuctionStatus>>>(
+          livePath(leagueId, 'managerStatus'),
+        ),
+        service.read<
+          Record<string, Record<string, PlayerId[] | Record<string, PlayerId>>>
+        >(paths.squads(leagueId)),
+        service.read<Record<string, Player>>(paths.players()),
+        leagueTeams(leagueId),
+        leagueFixtures(leagueId),
+      ])
+
+      // **Which eleven to highlight**, by period: yours for the current one,
+      // everyone else's for the latest locked one.
+      type Highlight = ManagerSquadView['xi']
+      let highlight: (managerId: UserId) => Promise<Highlight>
+      if (isGameWeeks === true) {
+        const weeks = await api.getGameWeeks(leagueId)
+        const currentWeek = weeks.find((w) =>
+          w.matchIds.includes(current.matchId),
+        )
+        const lockedWeek = [...weeks].reverse().find((w) =>
+          isLocked(
+            fixtures.matches.find((m) => m.matchId === w.matchIds[0]),
+            fixtures.offset,
+          ),
+        )
+        highlight = async (managerId) => {
+          const week = managerId === uid ? currentWeek : lockedWeek
+          if (week === undefined) return undefined
+          const id = week.gameWeek.gameWeekId
+          const team =
+            managerId === uid
+              ? await readGameWeekTeam(leagueId, uid, id)
+              : await api.getTeamForGameWeek(leagueId, managerId, id)
+          if (team === undefined) return undefined
+          return {
+            playerIds: (team.postImpactSubLineup ?? team.startingLineup).map(
+              (p) => p.playerId,
+            ),
+            captainId: team.captainId,
+            viceCaptainId: team.viceCaptainId,
+            periodName: week.gameWeek.gameWeekName,
+          }
+        }
+      } else {
+        const lockedMatch = [...fixtures.matches]
+          .reverse()
+          .find((m) => isLocked(m, fixtures.offset))
+        highlight = async (managerId) => {
+          const match = managerId === uid ? current : lockedMatch
+          if (match === undefined) return undefined
+          const team =
+            managerId === uid
+              ? await readMatchTeam(leagueId, uid, match.matchId)
+              : await api.getTeamForMatch(leagueId, managerId, match.matchId)
+          if (team === undefined) return undefined
+          return {
+            playerIds: team.lineup.map((p) => p.playerId),
+            captainId: team.captainId,
+            viceCaptainId: team.viceCaptainId,
+            periodName: `Match ${match.matchNumber}`,
+          }
+        }
+      }
+
+      const views = await Promise.all(
+        members
+          .filter((member) => member.leagueRoles.manager === true)
+          .map(async (member): Promise<ManagerSquadView> => {
+            const ids = Object.values(
+              squads?.[member.userId]?.[current.matchId] ?? {},
+            )
+            const paid = statuses?.[member.userId]?.playerList ?? {}
+            const players = ids
+              .map((id) => everyone?.[id])
+              .filter((player): player is Player => player !== undefined)
+              .map((player) => ({
+                player: withTeam(player, teamOf),
+                ...(paid[player.playerId] === undefined
+                  ? {}
+                  : { pricePaid: paid[player.playerId] }),
+              }))
+              .sort(
+                (a, b) =>
+                  PLAYER_ROLES.indexOf(a.player.playerRole) -
+                    PLAYER_ROLES.indexOf(b.player.playerRole) ||
+                  a.player.playerName.localeCompare(b.player.playerName),
+              )
+            const xi = await highlight(member.userId)
+            return {
+              userId: member.userId,
+              userName: member.userName,
+              teamName: member.fantasyTeamName ?? member.userName,
+              players,
+              ...(xi === undefined ? {} : { xi }),
+            }
+          }),
+      )
+
+      const isMine = (view: ManagerSquadView) => view.userId === uid
+      views.sort(
+        (a, b) =>
+          Number(isMine(b)) - Number(isMine(a)) ||
+          a.teamName.localeCompare(b.teamName),
+      )
+
+      return {
+        managers: views,
+        ...(views.some(isMine) ? { mine: uid } : {}),
+        homeNation: settings.homeNation,
+        ...(settings.maxOverseasPlayersAllowedInXI === undefined
+          ? {}
+          : {
+              maxOverseasPlayersAllowedInXI:
+                settings.maxOverseasPlayersAllowedInXI,
+            }),
+        lineupRules,
+      }
+    },
+
     async getAuctionSettings(leagueId: LeagueId): Promise<AuctionSettings> {
       await assertAuctionLeague(leagueId)
 
@@ -5236,6 +5669,10 @@ export function createFirebaseApi(
         [livePath(leagueId, 'auctionState', 'rewoundInRecovery')]:
           (state.rewoundInRecovery ?? 0) + 1,
         ...timelineEntry(leagueId, 'roundRewound', { result }),
+        // A squad change can void a saved lineup, so the cached standings
+        // must not outlive it.
+        [service.path('leaderboards', leagueId, 'membersUpdatedAt')]:
+          Date.now(),
       }
 
       // The player as if never put up: no status, no history, no round.
@@ -5871,7 +6308,7 @@ export function createFirebaseApi(
         )
       }
 
-      await assertLegal(leagueId, lineup)
+      await assertLegal(leagueId, lineup, from.matchId)
 
       /*
         **What this submission costs, and what is left after it.**
@@ -6045,7 +6482,7 @@ export function createFirebaseApi(
         )
       }
 
-      await assertLegal(leagueId, lineup)
+      await assertLegal(leagueId, lineup, gameWeek.startMatchId)
 
       /*
         **A cap on each transition, measured from the team standing before this

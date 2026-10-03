@@ -135,6 +135,8 @@ const LANDING: Record<LeaguePhase, string> = {
  * the route guards cannot disagree.
  *
  * - Auction Center belongs to auction leagues.
+ * - Squads belongs to auction leagues **once the auction has ended** — before
+ *   then the auction page shows them — and goes again if it is reopened.
  * - My Team is absent for a spectator, who has no team. In an auction league
  *   it is present before the auction closes, and says that team submission
  *   opens after it — the page decides that, not the sidebar.
@@ -146,6 +148,12 @@ function hasSection(league: LeagueSummary, section: string): boolean {
   switch (section) {
     case 'auction-center':
       return league.isAuctionEnabled
+    case 'squads':
+      return (
+        league.isAuctionEnabled &&
+        league.phase !== 'preAuction' &&
+        league.phase !== 'auction'
+      )
     case 'team':
       return !spectatorOnly
     default:
@@ -417,6 +425,7 @@ function Sidebar({ league }: { league: LeagueSummary }) {
     { label: 'Auction center', section: 'auction-center' },
     { label: 'League details', section: 'details' },
     { label: 'My team', section: 'team' },
+    { label: 'Squads', section: 'squads' },
     { label: 'Leaderboard', section: 'leaderboard' },
     { label: 'Members', section: 'members' },
   ].filter((item) => hasSection(league, item.section))

@@ -1,4 +1,6 @@
 import { PLAYER_ROLES } from '@fantasy-cricket/shared'
+
+import { overseasCount, type OverseasRule } from './lineup-rules'
 import type {
   LineupRules,
   Player,
@@ -18,19 +20,23 @@ const XI = 11
  * It closes with a sentence saying what is still wrong, because a column of
  * numbers makes someone work out the answer that the panel already knows.
  *
- * **Overseas is not shown.** It means the player's country is not India, and
- * the cap exists in auction leagues only, so a count against no limit is noise.
+ * **Overseas is shown only where there is a cap** — auction leagues. Overseas
+ * means a country other than the tournament's home nation; a regular league
+ * has no cap, so a count there would be noise.
  */
 export function LineupSummary({
   selected,
   rules,
   captainId,
   viceCaptainId,
+  overseas,
 }: {
   selected: readonly Player[]
   rules: LineupRules
   captainId: PlayerId | undefined
   viceCaptainId: PlayerId | undefined
+  /** Auction leagues only. */
+  overseas?: OverseasRule
 }) {
   const nameOf = (id: PlayerId | undefined) =>
     selected.find((p) => p.playerId === id)?.playerShortName
@@ -57,6 +63,12 @@ export function LineupSummary({
             rule={rules[role]}
           />
         ))}
+        {overseas !== undefined && (
+          <OverseasRow
+            count={overseasCount(selected, overseas.homeNation)}
+            cap={overseas.cap}
+          />
+        )}
       </dl>
 
       <dl className="mt-4 grid gap-2.5 border-t pt-4 text-[15px]">
@@ -75,7 +87,7 @@ export function LineupSummary({
       </dl>
 
       <p className="mt-4 text-sm text-subtle-foreground">
-        {verdict(selected, rules, captainId, viceCaptainId)}
+        {verdict(selected, rules, captainId, viceCaptainId, overseas)}
       </p>
     </aside>
   )
@@ -108,12 +120,30 @@ function RoleCount({
   )
 }
 
+function OverseasRow({ count, cap }: { count: number; cap?: number }) {
+  const over = cap !== undefined && count > cap
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt>Overseas</dt>
+      <dd className="flex items-baseline gap-2.5 font-mono text-sm">
+        <span className={over ? 'text-destructive' : ''}>{count}</span>
+        {cap !== undefined && (
+          <span className={over ? 'text-destructive' : 'text-muted-foreground'}>
+            max {cap}
+          </span>
+        )}
+      </dd>
+    </div>
+  )
+}
+
 /** One sentence saying what is still wrong, or that nothing is. */
 function verdict(
   selected: readonly Player[],
   rules: LineupRules,
   captainId: PlayerId | undefined,
   viceCaptainId: PlayerId | undefined,
+  overseas: OverseasRule | undefined,
 ): string {
   const short = PLAYER_ROLES.filter((role) => {
     const rule = rules[role]
@@ -137,6 +167,25 @@ function verdict(
     parts.push(
       `You need at least ${rule.min} ${LABEL[role].toLowerCase()}, and you have ${have}.`,
     )
+  }
+
+  for (const role of PLAYER_ROLES) {
+    const max = rules[role]?.max
+    const have = selected.filter((p) => p.playerRole === role).length
+    if (max !== undefined && have > max) {
+      parts.push(
+        `At most ${max} ${LABEL[role].toLowerCase()} are allowed, and you have ${have}.`,
+      )
+    }
+  }
+
+  if (overseas?.cap !== undefined) {
+    const have = overseasCount(selected, overseas.homeNation)
+    if (have > overseas.cap) {
+      parts.push(
+        `At most ${overseas.cap} overseas players are allowed, and you have ${have}.`,
+      )
+    }
   }
 
   if (captainId === undefined || viceCaptainId === undefined) {

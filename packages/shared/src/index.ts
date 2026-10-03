@@ -80,6 +80,7 @@ export {
   PLAYER_CATEGORIES,
   AUCTION_PHASES,
   TIMELINE_EVENTS,
+  MATCH_DURATION_MS,
 } from './reference.ts'
 
 // The two bidding constants, fixed for Phase 1 and needed on both sides.

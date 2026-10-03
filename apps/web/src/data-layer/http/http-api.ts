@@ -60,6 +60,8 @@ import type {
   SampleTournamentResult,
   ScoringWatermark,
   SeedDataResult,
+  Fixture,
+  SquadsView,
   SignInOutcome,
   SignedInIdentity,
   Subscriber,
@@ -326,8 +328,8 @@ export function createHttpApi(
       return call('getGameWeeks', [leagueId]) as Promise<LeagueGameWeek[]>
     },
 
-    getFixtures(tournamentId: TournamentId): Promise<Match[]> {
-      return call('getFixtures', [tournamentId]) as Promise<Match[]>
+    getFixtures(tournamentId: TournamentId): Promise<Fixture[]> {
+      return call('getFixtures', [tournamentId]) as Promise<Fixture[]>
     },
 
     getPlayerPointsForMatch(
@@ -525,6 +527,10 @@ export function createHttpApi(
 
     markPlayerUnsold(leagueId: LeagueId): Promise<void> {
       return call('markPlayerUnsold', [leagueId]) as Promise<void>
+    },
+
+    getSquads(leagueId: LeagueId): Promise<SquadsView> {
+      return call('getSquads', [leagueId]) as Promise<SquadsView>
     },
 
     pauseAuction(leagueId: LeagueId): Promise<void> {

@@ -273,7 +273,7 @@ the whole app clicked through with the rules denying clients.
 
 ## Milestone 4 — the auction
 
-**Status: in progress.** Phases A–C merged (#74, #75, #78), plus live reads (#79). Phase D merged (#80). Phase E under way.
+**Status: in progress.** Phases A–C merged (#74, #75, #78), plus live reads (#79). D merged (#80), E (#83), F (#84), G (#85). Phase H under way.
 
 **Goal:** a live auction for an **official auction league**, end to end — from
 publishing the tournament that opens the league to managers picking an XI from
@@ -331,9 +331,17 @@ together.
   decide anything; a rewind also moves the auction back to that round's batch
   or draft turn. One `roundRewound` entry per rewind.
 - **Ending the auction is reversible**: Reopen auction restores it as it was.
-  **Lineups saved between an end and a reopen are left alone; Phase H must
-  validate a lineup against the manager's current squad and discard one that
-  falls outside it.**
+  **Lineups saved between an end and a reopen are left alone.** A lineup with a
+  player outside the manager's current squad is **treated as absent** (Phase
+  H): it scores nothing and shows nowhere until a new one is saved; nothing is
+  deleted.
+- **Squads page** after End only, hidden again on a reopen. One read,
+  `getSquads`. Your own squad highlights your saved XI for the current period;
+  others only their locked XI.
+- **An auction league's XI** comes only from the manager's squad at the
+  period's first match, under the role rules and the overseas cap — refused in
+  the service, and Save is disabled in My Team. Roles are re-read from the
+  stored players rather than trusted from the request.
 - **Pause** resets the clock to 30 seconds on resume. **+10 seconds** works
   while bidding and after time up, when it reopens bidding.
 - **Team submission begins only when the auctioneer ends the auction.** An

@@ -71,6 +71,14 @@ export interface MatchLineup {
   changesRemaining?: number
   captainChangesRemaining?: number
   viceCaptainChangesRemaining?: number
+
+  /**
+   * **Saved, but no longer counts**: in an auction league, a player in it is
+   * no longer in the manager's squad (a rewind after a reopen). Only the
+   * manager's own read carries it; everywhere else, scoring included, such a
+   * lineup is simply absent.
+   */
+  discarded?: true
 }
 
 /**
@@ -121,6 +129,9 @@ export interface GameWeekLineup {
 
   /** Absent until a sub is made. Otherwise the eleven from `applicableFromMatch` on. */
   postImpactSubLineup?: Player[]
+
+  /** As on `MatchLineup`: saved, but outside the squad, so it does not count. */
+  discarded?: true
 }
 
 /**
