@@ -206,6 +206,23 @@ export interface SampleTournamentResult {
   rounds: readonly string[]
 }
 
+/** What refreshing the standards wrote. */
+export interface StandardsRefreshResult {
+  environment: string
+  /** The nodes written, `standardAuctionConfig` field by field. */
+  written: readonly string[]
+}
+
+/** Which environment this is, and whether it has gone live. */
+export interface SystemStatus {
+  environment: string
+  /**
+   * Set by hand when the environment goes live. Until then the testing tools
+   * work here, production included; once true they are refused.
+   */
+  released: boolean
+}
+
 /** What seeding an environment did, so a caller can say more than "done". */
 export interface SystemSetupResult {
   status: 'seeded' | 'alreadyDone'
@@ -964,4 +981,14 @@ export interface Api {
    * IPL 2027 already exists.**
    */
   createSampleIplTournament(): Promise<SampleTournamentResult>
+
+  /**
+   * **Rewrites the reference tables and the standards** from the seed data,
+   * leaving every player, team, tournament and league alone. System owner only;
+   * refused once the environment is released.
+   */
+  refreshStandards(): Promise<StandardsRefreshResult>
+
+  /** Which environment this is, and whether it has been released. */
+  getSystemStatus(): Promise<SystemStatus>
 }

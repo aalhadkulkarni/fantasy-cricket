@@ -178,4 +178,6 @@ export const API_METHODS: Readonly<Record<WireMethod, MethodSpec>> = {
   createSamplePlayers: { verb: 'post', params: [] },
   populateSeedData: { verb: 'post', params: [] },
   createSampleIplTournament: { verb: 'post', params: [] },
+  refreshStandards: { verb: 'post', params: [] },
+  getSystemStatus: { verb: 'get', params: [] },
 }

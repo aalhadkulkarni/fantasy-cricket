@@ -139,11 +139,29 @@ circulation without destroying anything that references it:
 > **This screen is deliberately not user-friendly.** Its only user is the person
 > who built it, so a slightly awkward workaround beats a destructive button.
 
-### The exception: Populate seed data, outside production
+### The exception: `/setup`, until the environment is released
+
+**Development tools live on their own page, `/setup`**, not on the admin
+panel. **System owner only** — every other account is sent home — and **linked
+from nowhere**. They work on **every environment, production included, until
+it is released**: `systemReleased` at the environment's root, set by hand in
+the console when the system goes live. Once it is true the service refuses
+every testing tool there, even for the system owner — these three, and the
+auction's Reset and Mark batch unsold.
+
+#### Refresh standards
+
+**Rewrites the reference tables and the standards** from the seed data — roles,
+formats, auction phases, timeline events; the auction config, lineup rules and
+deadline offset a new league inherits. For an environment seeded before they
+changed, since Set up basic system runs only once. Players, teams, tournaments,
+leagues and base tournaments are left alone, and **every player's auction
+values survive** (the auction config is written field by field).
+
+#### Populate seed data
 
 **A testing tool, not a delete.** It resets a whole environment to known data
-rather than removing one record, so nothing is left dangling. **Not shown in
-production, and the service refuses it there** regardless of who asks.
+rather than removing one record, so nothing is left dangling.
 
 Two taps: the first arms it and says what will go, the second runs it. **One
 atomic update**, so a failure changes nothing.
@@ -167,11 +185,11 @@ atomic update**, so a failure changes nothing.
 - **Base tournaments are matched by name.** One not found is reported, and no
   one is put in it.
 
-### Create sample IPL 2027, outside production
+#### Create sample IPL 2027
 
 **Test data, for testing publish and everything after it** without entering a
-tournament by hand. Same production rule as above. Needs Populate seed data
-first, since it finds the IPL teams by short name.
+tournament by hand. Needs Populate seed data first, since it finds the IPL
+teams by short name.
 
 - **IPL 2027, unpublished**, in the IPL base tournament.
 - **Every IPL team, and every player** with an IPL team.

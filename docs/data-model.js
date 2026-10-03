@@ -99,6 +99,15 @@ const dataModel = {
     completedAt: 1788940000000,
   },
 
+  /*
+    WHETHER THIS ENVIRONMENT HAS GONE LIVE. Set by hand in the console; absent
+    means not yet. Until it is true, the testing tools — refresh standards,
+    populate seed data, sample tournament, reset auction, mark batch unsold —
+    work here, production included. Once true, the service refuses them all,
+    even for the system owner.
+  */
+  systemReleased: false,
+
   standardAuctionConfig: {
     // Written for each player IN THE SAME ATOMIC UPDATE that creates them, so
     // every player created from Milestone 4 onward has a category and base

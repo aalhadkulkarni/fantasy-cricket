@@ -888,12 +888,14 @@ with its timeline entry.
 > the testing button's whole batch at once — written in the same update that
 > makes it. A rewind pops the newest. It exists because the timeline is
 > display-only and is never read to decide anything.
-- `resetAuction(leagueId)` — **refused in production.** A testing fallback:
+- `resetAuction(leagueId)` — **refused once the environment is released**
+  (`systemReleased`). A testing fallback:
   puts the league back to before Start auction by deleting the live auction,
   the league's squads, and the lineups and leaderboard built on them, in one
   update. Members and the draft order stay. The auctioneer only, in any phase
   once the auction exists. *(Built early, in Phase E, for testing.)*
-- `markBatchUnsold(leagueId)` — **refused in production.** Marks everyone left
+- `markBatchUnsold(leagueId)` — **refused once the environment is released.**
+  Marks everyone left
   in the current bidding batch unsold, between rounds, so the draft can be
   reached without bidding. No timeline entries. *(Testing, Phase F.)*
 - `nextDraftManager(leagueId)` — the next turn in the draft; **the first call
@@ -1039,3 +1041,22 @@ browser only
 
 > **These are marked open deliberately.** Do not pick one and proceed — raise it
 > and we decide together, per `docs/02-working-with-me.md`.
+
+---
+
+## Setup — `/setup`, system owner only
+
+- `getSystemStatus()` — the environment, and whether it is released. Any
+  signed-in caller; the auction page reads it to decide whether to offer its
+  testing tools.
+- `refreshStandards()` — rewrites the reference tables and the standards from
+  the seed data; the auction config field by field, so players' auction values
+  survive.
+- `populateSeedData()`, `createSampleIplTournament()` — as on
+  `08-pages/system-admin.md`.
+
+> **System owner only, and refused once the environment is released.**
+> `systemReleased` at the environment's root, set by hand in the console, locks
+> every testing tool — these three and the auction's `resetAuction` and
+> `markBatchUnsold` — even for the owner. Until then they work everywhere,
+> production included.

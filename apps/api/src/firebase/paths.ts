@@ -7,7 +7,7 @@
  * means there is no way to address the database without the environment prefix
  * coming with it.
  *
- * One entry per top-level node in `docs/data-model.js`, thirty-one of them,
+ * One entry per top-level node in `docs/data-model.js`, thirty-two of them,
  * with their deeper segments typed by the branded id that keys them. Passing
  * nothing gives the node itself, which is what a subtree read wants.
  *
@@ -111,6 +111,13 @@ export function createPaths(service: FirebaseService) {
      * a marker saying this environment has been seeded.
      */
     systemSetup: () => under('systemSetup'),
+
+    /**
+     * **Whether this environment has gone live.** Set by hand in the console
+     * when it does; absent means not yet. Until then the testing tools work
+     * here, production included; once true they are refused, whoever asks.
+     */
+    systemReleased: () => under('systemReleased'),
 
     standardAuctionConfig: () => under('standardAuctionConfig'),
     /**

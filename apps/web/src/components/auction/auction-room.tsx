@@ -12,6 +12,7 @@ import {
   getLineupRules,
   getMembers,
 } from '@/data-layer'
+import { getSystemStatus } from '@/data-layer/system-setup'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import type { LeagueSummary } from '@fantasy-cricket/shared'
 
@@ -57,15 +58,25 @@ export function AuctionRoom({ league }: { league: LeagueSummary }) {
     void (async () => {
       store.setState({ staticError: undefined })
       try {
-        const [settings, pool, members, draftOrder, rules] = await Promise.all([
-          getAuctionSettings(league.leagueId),
-          getAuctionPlayerPool(league.leagueId),
-          getMembers(league.leagueId),
-          getDraftOrder(league.leagueId),
-          getLineupRules(league.leagueId),
-        ])
+        const [settings, pool, members, draftOrder, rules, system] =
+          await Promise.all([
+            getAuctionSettings(league.leagueId),
+            getAuctionPlayerPool(league.leagueId),
+            getMembers(league.leagueId),
+            getDraftOrder(league.leagueId),
+            getLineupRules(league.leagueId),
+            getSystemStatus(),
+          ])
         if (cancelled) return
-        const data = { league, settings, pool, members, draftOrder, rules }
+        const data = {
+          league,
+          settings,
+          pool,
+          members,
+          draftOrder,
+          rules,
+          released: system.released,
+        }
 
         const viewer = viewerFor(data, userId)
         store.setState({ static: data, viewer })
