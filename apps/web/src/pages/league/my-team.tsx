@@ -6,6 +6,10 @@ import {
   type Allowances,
   type SavedTeam,
 } from '@/components/leagues/changes-summary'
+import {
+  breaksRules,
+  type OverseasRule,
+} from '@/components/leagues/lineup-rules'
 import { LineupSummary } from '@/components/leagues/lineup-summary'
 import { LockedTeam } from '@/components/leagues/locked-team'
 import { PeriodNav, type Period } from '@/components/leagues/period-nav'
@@ -28,6 +32,7 @@ import {
   SelectTrigger,
 } from '@/components/ui/select'
 import {
+  getAuctionSettings,
   getCurrentMatch,
   getFixtures,
   getGameWeeks,
@@ -42,6 +47,7 @@ import {
 } from '@/data-layer'
 import { useLeague } from '@/hooks/use-league'
 import type {
+  Fixture,
   GameWeekId,
   LeagueGameWeek,
   LineupRules,
@@ -129,13 +135,23 @@ function TeamSelection() {
 
   const [pool, setPool] = useState<Player[]>([])
   const [rules, setRules] = useState<LineupRules>({})
+  // Auction leagues only: the overseas cap and who counts as overseas.
+  const [overseasRule, setOverseasRule] = useState<OverseasRule | undefined>(
+    undefined,
+  )
+  /*
+    **A saved team that no longer counts**: in an auction league, a player in
+    it has left the squad. The form starts empty and says why, rather than
+    offering a team the layer will not score.
+  */
+  const [discarded, setDiscarded] = useState(false)
   const [teams, setTeams] = useState<Team[]>([])
 
   /*
     The whole schedule, loaded once. Navigation walks it, so fetching one period
     at a time would mean not knowing what is either side of you.
   */
-  const [matches, setMatches] = useState<Match[]>([])
+  const [matches, setMatches] = useState<Fixture[]>([])
   const [gameWeeks, setGameWeeks] = useState<LeagueGameWeek[]>([])
   const [currentId, setCurrentId] = useState<string | undefined>(undefined)
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
@@ -189,7 +205,7 @@ function TeamSelection() {
       try {
         const current = await getCurrentMatch(league.leagueId)
 
-        const [fixtures, weeks, players, lineupRules, allTeams] =
+        const [fixtures, weeks, players, lineupRules, allTeams, settings] =
           await Promise.all([
             getFixtures(league.tournamentId),
             league.isGameWeeksEnabled
@@ -199,9 +215,23 @@ function TeamSelection() {
             getLineupRules(league.leagueId),
             // For the fixture on the subline. Ids only live on a match.
             getTeams(),
+            league.isAuctionEnabled
+              ? getAuctionSettings(league.leagueId)
+              : Promise.resolve(undefined),
           ])
 
         if (cancelled) return
+
+        setOverseasRule(
+          settings === undefined
+            ? undefined
+            : {
+                homeNation: settings.homeNation,
+                ...(settings.maxOverseasPlayersAllowedInXI === undefined
+                  ? {}
+                  : { cap: settings.maxOverseasPlayersAllowedInXI }),
+              },
+        )
 
         setMatches(fixtures)
         setGameWeeks(weeks)
@@ -209,12 +239,20 @@ function TeamSelection() {
         setRules(lineupRules)
         setTeams(allTeams)
 
-        // Where you land: the gameweek holding the current match, or the match
-        // itself. Both are the first thing still open.
+        /*
+          **Where you land: the period still going.** The first gameweek, or
+          match, not yet over (`endsAt`) — the current one while it is being
+          played, the next once nothing is — or the last once every one has
+          ended. Only where the page opens: deadlines never use it.
+        */
+        const at = Date.now()
+        const notOver = (endsAt: number | undefined) =>
+          endsAt === undefined || endsAt > at
         const landing = league.isGameWeeksEnabled
-          ? weeks.find((w) => w.matchIds.includes(current.matchId))?.gameWeek
+          ? (weeks.find((w) => notOver(w.endsAt)) ?? weeks.at(-1))?.gameWeek
               .gameWeekId
-          : current.matchId
+          : (fixtures.find((m) => notOver(m.endsAt)) ?? fixtures.at(-1))
+              ?.matchId
 
         setCurrentId(landing)
         setSelectedId(landing)
@@ -229,7 +267,12 @@ function TeamSelection() {
     return () => {
       cancelled = true
     }
-  }, [league.leagueId, league.tournamentId, league.isGameWeeksEnabled])
+  }, [
+    league.leagueId,
+    league.tournamentId,
+    league.isGameWeeksEnabled,
+    league.isAuctionEnabled,
+  ])
 
   /*
     Everything below follows from the selection. A gameweek league selects a
@@ -287,7 +330,7 @@ function TeamSelection() {
           the layer finds it. A match is measured from the match before, which
           is always stored because match lineups are written densely.
         */
-        const [mine, previous, scored] = await Promise.all([
+        const [found, previous, scored, squad] = await Promise.all([
           teamFor(selectedId),
           league.isGameWeeksEnabled
             ? getMyTeamBeforeGameWeek(league.leagueId, selectedId as GameWeekId)
@@ -299,9 +342,18 @@ function TeamSelection() {
             league.leagueId,
             gameWeek?.matchIds ?? [match.matchId],
           ),
+          // An auction league's squad is per match: ask for this period's.
+          league.isAuctionEnabled
+            ? getSelectablePlayers(league.leagueId, match.matchId)
+            : Promise.resolve(undefined),
         ])
 
         if (cancelled) return
+
+        // A discarded team is no team: the form starts empty and says why.
+        const mine = found?.discarded === true ? undefined : found
+        setDiscarded(found?.discarded === true)
+        if (squad !== undefined) setPool(squad)
 
         const eleven =
           mine === undefined
@@ -332,6 +384,7 @@ function TeamSelection() {
   }, [
     league.leagueId,
     league.isGameWeeksEnabled,
+    league.isAuctionEnabled,
     selectedId,
     previousId,
     match,
@@ -431,7 +484,11 @@ function TeamSelection() {
 
   const locked = deadline !== undefined && now > deadline
 
-  const canSubmit = complete && captaincyOk && !saving && !locked
+  // **An illegal team cannot be submitted** — role limits and the overseas
+  // cap, as the summary shows them. The layer refuses one regardless.
+  const legal = !breaksRules(selected, rules, overseasRule)
+
+  const canSubmit = complete && captaincyOk && legal && !saving && !locked
 
   const breakdown = byMatch.map((entry) => ({
     label: matchLabel(
@@ -537,7 +594,9 @@ function TeamSelection() {
       <section>
         <h2 className="text-base font-semibold">My Team</h2>
         <p className="mt-5 text-sm text-subtle-foreground">
-          This tournament has no players yet, so there is nothing to pick from.
+          {league.isAuctionEnabled
+            ? 'Your squad is empty, so there is nothing to pick from.'
+            : 'This tournament has no players yet, so there is nothing to pick from.'}
         </p>
       </section>
     )
@@ -591,7 +650,9 @@ function TeamSelection() {
           </div>
         </div>
 
-        {snapshot === undefined ? (
+        {discarded ? (
+          <DiscardedNote />
+        ) : snapshot === undefined ? (
           <p className="mt-6 max-w-prose text-sm text-subtle-foreground">
             You did not submit a team for this one. You score nothing for it and
             resume normally — a missed deadline never removes you from a league,
@@ -637,6 +698,7 @@ function TeamSelection() {
               setShowingFixtures(true),
             )}
           </p>
+          {discarded && <DiscardedNote />}
         </div>
 
         <div className="flex flex-wrap gap-2.5">
@@ -706,6 +768,7 @@ function TeamSelection() {
             rules={rules}
             captainId={captainId}
             viceCaptainId={viceCaptainId}
+            overseas={overseasRule}
           />
 
           {/*
@@ -910,5 +973,19 @@ function Captaincy({
           ))}
       </SelectContent>
     </Select>
+  )
+}
+
+/**
+ * **Why a saved team is gone.** In an auction league, a lineup with a player
+ * no longer in the squad — after a correction to the auction — does not count,
+ * and scores nothing until a new one is saved.
+ */
+function DiscardedNote() {
+  return (
+    <p className="mt-3 max-w-prose rounded-md border border-destructive/40 px-3 py-2 text-sm text-destructive">
+      Your saved XI included players no longer in your squad, so it doesn't
+      count. Pick a new one.
+    </p>
   )
 }

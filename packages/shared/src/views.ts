@@ -537,6 +537,63 @@ export interface DraftOrderEntry {
  * rules, in what order, and who is running it. The fast part of the page — the
  * player pool is its own read, because it is the slow one.
  */
+/**
+ * **A match, with when it counts as over** — for opening My Team on the one
+ * that matters, never for a deadline.
+ */
+export interface Fixture extends Match {
+  /**
+   * The start plus the format's duration, or the next match's start if that is
+   * sooner. Absent while undated.
+   */
+  endsAt?: number
+}
+
+/** One player in a manager's squad, as the Squads page shows them. */
+export interface SquadEntry {
+  /** With `teamShortName` for this tournament. */
+  player: Player
+  /** What they went for at auction. */
+  pricePaid?: number
+}
+
+/** One manager's squad, and the eleven to highlight in it. */
+export interface ManagerSquadView {
+  userId: UserId
+  userName: string
+  teamName: string
+  /** Role, then name. */
+  players: SquadEntry[]
+  /**
+   * **The eleven to highlight.** Your own saved XI for the current period;
+   * for anyone else, their latest **locked** XI — an unlocked selection is
+   * never shown. Absent when there is none to show.
+   */
+  xi?: {
+    playerIds: PlayerId[]
+    captainId: PlayerId
+    viceCaptainId: PlayerId
+    /** "Gameweek 3", or the match it is for. */
+    periodName: string
+  }
+}
+
+/**
+ * **Everything the Squads page shows, in one read.** Squads are public, so
+ * every manager's is here; only the highlighted XI follows the visibility
+ * rule.
+ */
+export interface SquadsView {
+  /** The caller first when they manage a team here; then by team name. */
+  managers: ManagerSquadView[]
+  /** The caller, when one of `managers` is theirs. */
+  mine?: UserId
+  homeNation: string
+  /** Absent means no cap. */
+  maxOverseasPlayersAllowedInXI?: number
+  lineupRules: LineupRules
+}
+
 export interface AuctionSettings {
   auctionStartTime: number
   totalBudget: number
@@ -730,6 +787,14 @@ export interface LeagueGameWeek {
   matchIds: readonly MatchId[]
   /** The first match's start. The deadline is this minus the league's offset. */
   startsAt?: number
+
+  /**
+   * **When the gameweek counts as over**, for opening My Team on the one that
+   * matters: its last match's start plus the format's duration, or the next
+   * gameweek's first start, whichever is earlier — several matches can fall on
+   * one day. Absent while a match in it is undated.
+   */
+  endsAt?: number
 
   /**
    * The most players that may change **going into this gameweek**, from the one

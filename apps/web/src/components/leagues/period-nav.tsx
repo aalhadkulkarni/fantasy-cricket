@@ -36,8 +36,9 @@ export interface Period {
  * alone, so you can see what is one step away without taking the step. The
  * current one sits between them and does not move.
  *
- * **A jump appears once walking would be tedious.** Three matches need no
- * dropdown; sixty-four do, and `my-team.md` asks for one.
+ * **A jump dropdown, where asked for with `jump`**, once walking would be
+ * tedious — more than five periods. My Team does without: it opens on the
+ * period that matters, and stepping from there is enough.
  *
  * `reachable` is what stops a gameweek league offering more than the next one.
  * Matches are all reachable for viewing; editing is a separate question decided
@@ -48,12 +49,15 @@ export function PeriodNav({
   selectedId,
   reachable,
   onSelect,
+  jump = false,
 }: {
   periods: readonly Period[]
   selectedId: string
   /** Ids that may be opened. Anything else is shown but not offered. */
   reachable: ReadonlySet<string>
   onSelect: (id: string) => void
+  /** Offer a jump dropdown when there are more than five periods. */
+  jump?: boolean
 }) {
   const index = periods.findIndex((p) => p.id === selectedId)
   const current = periods[index]
@@ -109,7 +113,7 @@ export function PeriodNav({
       </div>
 
       {/* Below the row on a phone, at the far right beside it from `sm`. */}
-      {periods.length > 5 && (
+      {jump && periods.length > 5 && (
         <div className="mt-2.5 flex justify-center sm:absolute sm:inset-y-0 sm:right-0 sm:mt-0 sm:items-center">
           <Select value={selectedId} onValueChange={onSelect}>
             <SelectTrigger className="w-36" aria-label="Jump to">

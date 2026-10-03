@@ -9,7 +9,7 @@
 
 import type {
   JoinableLeague,
-  Match,
+  Fixture,
   Player,
   Round,
   Team,
@@ -67,7 +67,7 @@ export function getTournament(tournamentId: TournamentId): Promise<Tournament> {
  * sort by creation time, so anything asking "is this match inside that round"
  * compares numbers.
  */
-export function getFixtures(tournamentId: TournamentId): Promise<Match[]> {
+export function getFixtures(tournamentId: TournamentId): Promise<Fixture[]> {
   return getApi().getFixtures(tournamentId)
 }
 

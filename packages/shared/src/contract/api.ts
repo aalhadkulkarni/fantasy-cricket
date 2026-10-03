@@ -56,6 +56,8 @@ import type {
   LeagueMemberSummary,
   LeaderboardRow,
   ScoringWatermark,
+  Fixture,
+  SquadsView,
   MatchLineup,
   Player,
   PlayerConfig,
@@ -515,7 +517,7 @@ export interface Api {
   getGameWeeks(leagueId: LeagueId): Promise<LeagueGameWeek[]>
 
   /** Every match in the tournament, in `matchNumber` order. */
-  getFixtures(tournamentId: TournamentId): Promise<Match[]>
+  getFixtures(tournamentId: TournamentId): Promise<Fixture[]>
 
   /**
    * What each player scored in one match.
@@ -759,6 +761,13 @@ export interface Api {
 
   /** Reopens an ended auction exactly as it was. */
   reopenAuction(leagueId: LeagueId): Promise<void>
+
+  /**
+   * **Everything the Squads page shows**: every manager's squad, the price
+   * each player went for, and the eleven to highlight — your own saved XI,
+   * anyone else's latest locked one. Auction leagues only; squads are public.
+   */
+  getSquads(leagueId: LeagueId): Promise<SquadsView>
 
   /**
    * **The next turn in the draft**; the first call starts it. The order

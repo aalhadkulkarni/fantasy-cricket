@@ -66,6 +66,8 @@ export const ROUTES = {
   leagueMembers: '/leagues/:leagueId/members',
   /** Auction leagues only. The auction as an event: what to prepare from. */
   leagueAuctionCenter: '/leagues/:leagueId/auction-center',
+  /** Auction leagues, once the auction has ended. Every manager's squad. */
+  leagueSquads: '/leagues/:leagueId/squads',
 
   /**
    * **The live auction, outside the league's layout.** It opens in a new tab,

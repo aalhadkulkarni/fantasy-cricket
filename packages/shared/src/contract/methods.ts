@@ -132,6 +132,7 @@ export const API_METHODS: Readonly<Record<WireMethod, MethodSpec>> = {
     params: ['leagueId', 'managerId', 'amount'],
   },
   markPlayerUnsold: { verb: 'post', params: ['leagueId'] },
+  getSquads: { verb: 'get', params: ['leagueId'] },
   pauseAuction: { verb: 'post', params: ['leagueId'] },
   resumeAuction: { verb: 'post', params: ['leagueId'] },
   addTimeToCurrentRound: { verb: 'post', params: ['leagueId', 'seconds'] },

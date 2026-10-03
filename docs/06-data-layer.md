@@ -556,9 +556,9 @@ allowances, and the full auction configuration.
 - `getMyTeamForGameWeek(leagueId, gameWeekId)` — the lineup per match, plus the
   impact sub
 - `getMyTeamForMatch(leagueId, matchId)`
-- `getSquad(leagueId, matchId)` — auction leagues; what may be selected
-- `getSelectablePlayers(leagueId, matchId)` — regular leagues; the tournament
-  pool
+- `getSelectablePlayers(leagueId, matchId)` — **one call for both kinds of
+  league**, diverging only here: a regular league gets the tournament pool, an
+  auction league the caller's squad at that match. My Team asks per period.
 - `getPlayerPointsForMatch(leagueId, matchId)` — reads custom **or** standard
   according to the league's `isCustomScoringSystem` flag. **Not a fallback
   chain:** a custom-scoring league never reads standard points, so a match its
@@ -639,13 +639,26 @@ allowances, and the full auction configuration.
 
 **Reads**
 
-- `getSquad(leagueId, matchId)` — your own
-- `getAllSquads(leagueId, matchId)`
-- `getTeamForGameWeek(leagueId, managerId, gameWeekId)` — for the XI
-  highlighting; the same visibility rule gives only the locked XI
+- `getSquads(leagueId)` — **one read for the page**: every manager's squad at
+  the current match, the price each player went for, and the eleven to
+  highlight. Replaces a planned `getSquad`, `getAllSquads` and a
+  `getTeamForGameWeek` per manager, which was N+1 round trips for one page.
 
-> Squads are always public. Only the **locked** XI is highlighted for other
-> managers.
+> Squads are always public. **Your own squad highlights the XI you have saved
+> for the current period; anyone else's only their latest locked XI**, through
+> the same visibility rule as everywhere else. A lineup outside its squad is
+> highlighted for nobody.
+
+> **The rules a save is checked against, in an auction league** (in the
+> service, on both `updateTeamForGameWeek` and `updateTeamForMatch`): every
+> player in the caller's squad at the period's first match, and no more
+> overseas than `maxOverseasPlayersAllowedInXI`. Roles and countries are read
+> from the stored players, never taken from the request.
+
+> **A lineup outside the squad is treated as absent** wherever it is read —
+> visibility reads, scoring, the leaderboard — except the manager's own read,
+> which returns it marked `discarded` so My Team can say why. A rewind bumps
+> the leaderboard cache stamp, since it can change which lineups count.
 
 ---
 
@@ -1017,7 +1030,7 @@ browser only
 | **Subscription error handling** | `(error, data)` or a separate error callback. Pick one and apply it everywhere.                                                                     |
 | **Unsubscribe shape**           | Returned handle, or a matching `off` call. A returned handle fits React cleanup better.                                                             |
 | **Timeline construction**       | Whether the timeline is derived in the UI from the event subscription, or read as its own list.                                                     |
-| **Squad derivation**            | Whether a squad is computed from auction wins plus transfers, or materialised and mutated. Decides whether the match parameter filters or looks up. |
+| **Squad derivation**            | **Settled (Milestone 4):** materialised, written per match on every sale and rewind, so the match parameter looks up.                               |
 | **Auctioneer presence**         | No calls specified — Phase 2. For now an admin reassigns manually.                                                                                  |
 
 > **These are marked open deliberately.** Do not pick one and proceed — raise it

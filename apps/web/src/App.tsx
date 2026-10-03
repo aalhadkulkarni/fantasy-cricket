@@ -13,6 +13,7 @@ import { LeagueDetails } from './pages/league/league-details'
 import { Leaderboard } from './pages/league/leaderboard'
 import { Members } from './pages/league/members'
 import { MyTeam } from './pages/league/my-team'
+import { Squads } from './pages/league/squads'
 import { Auction } from './pages/auction'
 import { AuctionCenter } from './pages/league/auction-center'
 import { LeagueHome, LeagueLanding, SectionGuard } from './pages/league-home'
@@ -89,6 +90,14 @@ function App() {
                     element={
                       <SectionGuard section="team">
                         <MyTeam />
+                      </SectionGuard>
+                    }
+                  />
+                  <Route
+                    path="squads"
+                    element={
+                      <SectionGuard section="squads">
+                        <Squads />
                       </SectionGuard>
                     }
                   />
