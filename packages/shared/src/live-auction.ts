@@ -95,7 +95,40 @@ export interface AuctionState {
 
   /** Whose turn it is during the draft. Absent outside the draft. */
   currentDraftManagerId?: UserId
+
+  /**
+   * **The draft's turn counter**, from 0, moving on with every Next in draft
+   * order — skipped managers included. A pick is keyed by it, which is what
+   * makes "already picked" mean *this* turn rather than this manager ever.
+   * Absent until the draft starts.
+   */
+  currentDraftTurn?: number
 }
+
+/**
+ * **What became of one turn of the draft**, at `draftPicks/{turn}`: a pick,
+ * or a skip. Written once — whichever lands first, a manager's pick or the
+ * auctioneer's skip, claims the turn and the other is refused.
+ *
+ * A pick is marked accepted when the auctioneer's browser makes the sale. A
+ * skip is the auctioneer's deliberate action for a manager taking too long.
+ * Narrow on `skipped`.
+ */
+export type DraftPick =
+  | {
+      managerId: UserId
+      playerId: PlayerId
+      submittedAt: number
+      accepted?: true
+      skipped?: never
+    }
+  | {
+      managerId: UserId
+      skipped: true
+      submittedAt: number
+      playerId?: never
+      accepted?: never
+    }
 
 /**
  * Per-manager budget and holdings during the auction.
@@ -255,6 +288,7 @@ export interface TimelineEventData {
   draftStarted: Record<string, never>
   nextDraftManager: { managerId: UserId }
   draftPick: { managerId: UserId; playerId: PlayerId; basePrice: number }
+  draftTurnSkipped: { managerId: UserId }
   firstCall: { timeRemaining: number }
   secondCall: { timeRemaining: number }
   lastCall: { timeRemaining: number }

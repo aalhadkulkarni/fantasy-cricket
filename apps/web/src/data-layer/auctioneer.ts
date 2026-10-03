@@ -152,6 +152,14 @@ export function resetAuction(leagueId: LeagueId): Promise<void> {
   return getApi().resetAuction(leagueId)
 }
 
+/**
+ * **Everyone left in the current bidding batch, marked unsold**, for testing.
+ * Refused in production.
+ */
+export function markBatchUnsold(leagueId: LeagueId): Promise<void> {
+  return getApi().markBatchUnsold(leagueId)
+}
+
 /** Freezes the timer. It resets on resume rather than continuing. */
 export function pauseAuction(leagueId: LeagueId): Promise<void> {
   return notImplemented('pauseAuction', { leagueId })
@@ -182,23 +190,34 @@ export function rewindLastRound(leagueId: LeagueId): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Turn-based rather than concurrent, and different from the auction proper.
- * **All draft picks go at base price.**
+ * **The next turn in the draft**; the first call starts it. Turn-based rather
+ * than concurrent, and **all draft picks go at base price.**
  *
  * **No round limit.** It continues while valid choices remain, so a single
  * manager with budget and squad space keeps picking after everyone else is
  * done. **A manager who can no longer pick is skipped, not blocked on.**
  */
-export function startDraft(leagueId: LeagueId): Promise<void> {
-  return notImplemented('startDraft', { leagueId })
+export function nextDraftManager(leagueId: LeagueId): Promise<void> {
+  return getApi().nextDraftManager(leagueId)
 }
 
+/**
+ * Sells the turn's pick at base price. **Called by the processor in the
+ * auctioneer's browser** as a pick arrives, never by hand.
+ */
 export function acceptDraftPick(
   leagueId: LeagueId,
-  playerId: PlayerId,
-  managerId: UserId,
+  turn: number,
 ): Promise<void> {
-  return notImplemented('acceptDraftPick', { leagueId, playerId, managerId })
+  return getApi().acceptDraftPick(leagueId, turn)
+}
+
+/**
+ * **Skips the current manager's turn**, for one taking too long. Deliberate
+ * and separate from Next, so a double click never skips anyone.
+ */
+export function skipDraftTurn(leagueId: LeagueId): Promise<void> {
+  return getApi().skipDraftTurn(leagueId)
 }
 
 // ---------------------------------------------------------------------------

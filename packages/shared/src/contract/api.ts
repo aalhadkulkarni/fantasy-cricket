@@ -730,6 +730,26 @@ export interface Api {
   markPlayerUnsold(leagueId: LeagueId): Promise<void>
 
   /**
+   * **The next turn in the draft**; the first call starts it. The order
+   * snakes, and anyone who can no longer pick is skipped. Refused while a pick
+   * is going through, and once nobody can pick.
+   */
+  nextDraftManager(leagueId: LeagueId): Promise<void>
+
+  /**
+   * **Sells the turn's pick at base price.** Called by the auctioneer's
+   * browser as a pick arrives; everything is re-checked here.
+   */
+  acceptDraftPick(leagueId: LeagueId, turn: number): Promise<void>
+
+  /**
+   * **Skips the current manager's turn**, for one taking too long. Separate
+   * from Next on purpose, so a double click never skips anyone; Next is
+   * refused until the turn has a pick or a skip.
+   */
+  skipDraftTurn(leagueId: LeagueId): Promise<void>
+
+  /**
    * **Puts the league back to before Start auction**, for testing: the live
    * auction, the squads it filled, and anything built on them — lineups and
    * leaderboards — are deleted. Members and the draft order stay; they come
@@ -738,6 +758,13 @@ export interface Api {
    * **Refused in production.** The auctioneer only, in any phase.
    */
   resetAuction(leagueId: LeagueId): Promise<void>
+
+  /**
+   * **Marks everyone left in the current bidding batch unsold**, for testing,
+   * so the draft can be reached quickly. Between rounds only; the auctioneer
+   * only; refused in production.
+   */
+  markBatchUnsold(leagueId: LeagueId): Promise<void>
 
   // -- the auction, running: a manager -------------------------------------
 
@@ -755,6 +782,12 @@ export interface Api {
 
   /** A pass on the player up. **Irreversible for the round.** */
   submitNoBid(leagueId: LeagueId, playerId: PlayerId): Promise<void>
+
+  /**
+   * **A pick for the caller's turn in the draft.** One per turn: a second is
+   * refused. The auctioneer's browser makes the sale.
+   */
+  submitDraftPick(leagueId: LeagueId, playerId: PlayerId): Promise<void>
 
   /**
    * Sets `finishedAt`. Owner and admins only, and refused until the league's

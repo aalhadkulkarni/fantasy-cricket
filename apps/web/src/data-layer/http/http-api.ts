@@ -527,8 +527,24 @@ export function createHttpApi(
       return call('markPlayerUnsold', [leagueId]) as Promise<void>
     },
 
+    nextDraftManager(leagueId: LeagueId): Promise<void> {
+      return call('nextDraftManager', [leagueId]) as Promise<void>
+    },
+
+    acceptDraftPick(leagueId: LeagueId, turn: number): Promise<void> {
+      return call('acceptDraftPick', [leagueId, turn]) as Promise<void>
+    },
+
+    skipDraftTurn(leagueId: LeagueId): Promise<void> {
+      return call('skipDraftTurn', [leagueId]) as Promise<void>
+    },
+
     resetAuction(leagueId: LeagueId): Promise<void> {
       return call('resetAuction', [leagueId]) as Promise<void>
+    },
+
+    markBatchUnsold(leagueId: LeagueId): Promise<void> {
+      return call('markBatchUnsold', [leagueId]) as Promise<void>
     },
 
     submitBid(
@@ -541,6 +557,10 @@ export function createHttpApi(
 
     submitNoBid(leagueId: LeagueId, playerId: PlayerId): Promise<void> {
       return call('submitNoBid', [leagueId, playerId]) as Promise<void>
+    },
+
+    submitDraftPick(leagueId: LeagueId, playerId: PlayerId): Promise<void> {
+      return call('submitDraftPick', [leagueId, playerId]) as Promise<void>
     },
 
     markLeagueFinished(leagueId: LeagueId): Promise<void> {

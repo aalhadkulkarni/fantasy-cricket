@@ -1732,6 +1732,14 @@ const dataModel = {
       timelineEventDescription: 'Current manager made a draft pick',
       params: ['managerId', 'playerId', 'basePrice'],
     },
+    // The auctioneer skipping a manager who is taking too long. A deliberate
+    // action of its own, separate from Next, so a double click cannot skip.
+    draftTurnSkipped: {
+      timelineEventId: 'draftTurnSkipped',
+      timelineEventType: 'DraftTurnSkipped',
+      timelineEventDescription: "Current manager's draft turn was skipped",
+      params: ['managerId'],
+    },
     /*
       The three calls are TIME-DRIVEN, not auctioneer buttons. The auctioneer's
       client emits them at 20, 10 and 5 seconds remaining on the round timer,
@@ -1835,6 +1843,25 @@ const dataModel = {
         // the draft ORDER itself lives in leagues/{lid}/auctionDetails/draftOrder,
         // since it is settled configuration rather than live state.
         currentDraftManagerId: null,
+        // the draft's turn counter, from 0, moving on with every "Next in
+        // draft order" (skipped managers included). Picks are keyed by it.
+        currentDraftTurn: null,
+      },
+
+      // RESOLVED (Milestone 4, Phase F): where a submitted draft pick lives.
+      // One entry per turn, keyed by currentDraftTurn — not per manager, since
+      // a manager picks many times in one draft. Written by the service for
+      // the manager whose turn it is, and only if the turn has no pick yet
+      // (a transactional claim), so a second pick is refused however it is
+      // sent. The auctioneer's browser listens to the current turn and
+      // accepts; the service re-checks and makes the sale, setting accepted.
+      draftPicks: {
+        3: {
+          managerId: 'user004',
+          playerId: 'player009',
+          submittedAt: 1730000000000,
+          accepted: true,
+        },
       },
 
       managerStatus: {

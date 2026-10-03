@@ -158,6 +158,7 @@ export const TIMELINE_EVENTS = [
   'draftStarted',
   'nextDraftManager',
   'draftPick',
+  'draftTurnSkipped',
   'firstCall',
   'secondCall',
   'lastCall',

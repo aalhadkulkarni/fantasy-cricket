@@ -81,6 +81,12 @@ export function timelineText(
       const { managerId, playerId, basePrice } = message.timelineEventData
       return `${who(managerId)} picked ${words.playerName(playerId)} for ${price(basePrice)}`
     }
+    case 'draftTurnSkipped': {
+      const { managerId } = message.timelineEventData
+      return managerId === words.viewerId
+        ? 'Your turn was skipped'
+        : `${words.teamName(managerId)}'s turn was skipped`
+    }
     case 'firstCall':
       return `First call: ${message.timelineEventData.timeRemaining} seconds left`
     case 'secondCall':

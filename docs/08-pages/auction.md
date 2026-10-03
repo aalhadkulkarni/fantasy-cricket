@@ -221,7 +221,11 @@ remaining players and their roles.
 - **Pause / resume** — freezes the timer; it resets on resume
 - **Add extra seconds** _(good to have, not essential)_
 - **Start recovery / End recovery**, and **Rewind** inside it — see below
-- **Next manager**, and **accept a draft pick** when a manager takes their turn
+- **Start draft**, then **Next in draft order**. Picks are accepted
+  automatically, in the auctioneer's browser. **Next stays disabled until the
+  turn is settled**; for a manager taking too long, a separate **Skip <team>'s
+  turn** button settles it — two buttons, so a double click never skips
+  anyone
 - **End auction** — the system prompts when the end looks reached, but the
   auctioneer decides
 - **Hand off** — always to the backup auctioneer
@@ -269,8 +273,11 @@ proper:
   6 · Bangalore
   ```
 
-- The manager whose turn it is picks a player and confirms; the auctioneer
-  accepts
+- The auctioneer's **Start draft**, then **Next in draft order**, moves the
+  turn on. The manager whose turn it is picks a player and confirms; the
+  auctioneer's browser accepts the pick as it arrives, and the service
+  re-checks it before the sale. **One pick per turn** — a second is refused.
+  Picks are keyed by turn, since a manager picks many times in one draft
 - **All draft picks go at base price**, with budget deducted
 - **Unsold players re-enter here.** Everyone unsold during Marquee and Star is
   available in the draft, and should be **visibly marked as previously unsold**
@@ -278,7 +285,7 @@ proper:
   manager with budget and squad space keeps picking after everyone else is
   finished
 - **A manager who can no longer pick is skipped, not blocked on.** The
-  auctioneer's **Next manager** moves past them. The draft proceeds with a
+  auctioneer's **Next in draft order** moves past them. The draft proceeds with a
   shrinking set of eligible pickers and ends when nobody is eligible
 
 > The draft currently happens over WhatsApp. This is new, not preserved
