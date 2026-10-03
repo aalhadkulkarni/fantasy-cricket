@@ -176,6 +176,7 @@ export const API_METHODS: Readonly<Record<WireMethod, MethodSpec>> = {
   },
   setUpBasicSystem: { verb: 'post', params: [] },
   createSamplePlayers: { verb: 'post', params: [] },
+  resetEnvironment: { verb: 'post', params: [] },
   populateSeedData: { verb: 'post', params: [] },
   createSampleIplTournament: { verb: 'post', params: [] },
   refreshStandards: { verb: 'post', params: [] },

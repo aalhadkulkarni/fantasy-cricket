@@ -7,6 +7,8 @@ import {
   getSystemStatus,
   populateSeedData,
   refreshStandards,
+  resetEnvironment,
+  type ResetEnvironmentResult,
   type SampleTournamentResult,
   type SeedDataResult,
   type StandardsRefreshResult,
@@ -17,8 +19,8 @@ import {
  * Setup — `/setup`. **System owner only, and linked from nowhere.**
  *
  * The tools for setting an environment up while the system is in development:
- * refresh its standards, wipe and reload it with the IPL 2026 pool, and build
- * a sample tournament. They work on every environment, production included,
+ * refresh its standards, wipe it, load the IPL 2026 pool into it, and build a
+ * sample tournament. They work on every environment, production included,
  * **until it is released** — `systemReleased`, set by hand in the console —
  * after which the service refuses them, even for the owner.
  */
@@ -70,6 +72,7 @@ export function Setup() {
         )}
 
         <RefreshStandards disabled={locked} />
+        <ResetEnvironment disabled={locked} />
         <PopulateSeedData disabled={locked} />
         <CreateSampleIplTournament disabled={locked} />
       </PageContainer>
@@ -148,18 +151,112 @@ function RefreshStandards({ disabled }: { disabled: boolean }) {
   )
 }
 
-type SeedState =
+type ResetState =
   | { status: 'idle' }
   | { status: 'armed' }
+  | { status: 'running' }
+  | { status: 'done'; result: ResetEnvironmentResult }
+  | { status: 'failed'; message: string }
+
+/**
+ * **Wipes the environment**: every player, team, tournament and league, and
+ * everything hanging off them. Users, base tournaments and the standards stay.
+ *
+ * Two taps: the first arms it and says what will go, the second runs it.
+ */
+function ResetEnvironment({ disabled }: { disabled: boolean }) {
+  const [state, setState] = useState<ResetState>({ status: 'idle' })
+
+  async function run() {
+    setState({ status: 'running' })
+    try {
+      setState({ status: 'done', result: await resetEnvironment() })
+    } catch (error) {
+      setState({
+        status: 'failed',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  return (
+    <div className="floodlit mt-4 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
+      <h2 className="text-base font-semibold">Reset environment</h2>
+      <p className="mt-2 text-sm text-muted-foreground">
+        Deletes the catalogue and everything built on it, leaving users, base
+        tournaments and the standards — ready for Populate seed data or a real
+        catalogue.
+      </p>
+
+      {state.status === 'armed' ? (
+        <div className="mt-5">
+          <p className="text-sm font-semibold text-destructive">
+            Deletes every player, team, tournament and league in this
+            environment, with all lineups, squads, auctions and points. Users
+            and base tournaments stay.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              variant="destructive"
+              onClick={() => void run()}
+              disabled={disabled}
+            >
+              Delete everything
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setState({ status: 'idle' })}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-5">
+          <Button
+            variant="outline"
+            onClick={() => setState({ status: 'armed' })}
+            disabled={disabled || state.status === 'running'}
+          >
+            {state.status === 'running' ? 'Resetting…' : 'Reset environment'}
+          </Button>
+        </div>
+      )}
+
+      {state.status === 'failed' && (
+        <div className="mt-5 text-sm">
+          <p className="font-semibold text-destructive">Could not reset</p>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">
+            {state.message}
+          </p>
+          <p className="mt-2 text-xs text-subtle-foreground">
+            Nothing was changed. The reset is one atomic update.
+          </p>
+        </div>
+      )}
+      {state.status === 'done' && (
+        <div className="mt-5 text-sm">
+          <p className="font-semibold text-settled">
+            Reset {state.result.environment}.
+          </p>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">
+            users whose leagues were cleared · {state.result.usersCleared}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+type SeedState =
+  | { status: 'idle' }
   | { status: 'running' }
   | { status: 'done'; result: SeedDataResult }
   | { status: 'failed'; message: string }
 
 /**
- * **Wipes the environment and loads the IPL 2026 test data.** The service
- * refuses it for anyone but the system owner, and once released.
- *
- * Two taps: the first arms it and says what will go, the second runs it.
+ * **Loads the IPL 2026 pool into an empty environment.** Deletes nothing, so
+ * one tap; the service refuses it while any players or teams exist.
  */
 function PopulateSeedData({ disabled }: { disabled: boolean }) {
   const [state, setState] = useState<SeedState>({ status: 'idle' })
@@ -180,84 +277,45 @@ function PopulateSeedData({ disabled }: { disabled: boolean }) {
     <div className="floodlit mt-4 rounded-lg border bg-card p-5 text-card-foreground sm:p-6">
       <h2 className="text-base font-semibold">Populate seed data</h2>
       <p className="mt-2 text-sm text-muted-foreground">
-        Resets this environment to the IPL 2026 pool: the ten franchises,
-        thirteen national teams and 250 players with their auction categories
-        and base prices.
+        Loads the IPL 2026 pool: the ten franchises, thirteen national teams and
+        250 players with their auction categories and base prices. Needs an
+        empty environment — reset it first.
       </p>
 
-      {state.status === 'armed' ? (
-        <div className="mt-5">
-          <p className="text-sm font-semibold text-destructive">
-            Deletes every player, team, tournament and league in this
-            environment, with all lineups, squads, auctions and points. Users
-            and base tournaments stay.
+      <div className="mt-5">
+        <Button
+          variant="outline"
+          onClick={() => void run()}
+          disabled={disabled || state.status === 'running'}
+        >
+          {state.status === 'running' ? 'Populating…' : 'Populate seed data'}
+        </Button>
+      </div>
+
+      {state.status === 'failed' && (
+        <div className="mt-5 text-sm">
+          <p className="font-semibold text-destructive">Could not populate</p>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">
+            {state.message}
           </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button
-              variant="destructive"
-              onClick={() => void run()}
-              disabled={disabled}
-            >
-              Delete everything and populate
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => setState({ status: 'idle' })}
-            >
-              Cancel
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="mt-5">
-          <Button
-            variant="outline"
-            onClick={() => setState({ status: 'armed' })}
-            disabled={disabled || state.status === 'running'}
-          >
-            {state.status === 'running' ? 'Populating…' : 'Populate seed data'}
-          </Button>
         </div>
       )}
-
-      <SeedOutcome state={state} />
-    </div>
-  )
-}
-
-function SeedOutcome({ state }: { state: SeedState }) {
-  if (state.status === 'failed') {
-    return (
-      <div className="mt-5 text-sm">
-        <p className="font-semibold text-destructive">Could not populate</p>
-        <p className="mt-1 font-mono text-xs text-muted-foreground">
-          {state.message}
-        </p>
-        <p className="mt-2 text-xs text-subtle-foreground">
-          Nothing was changed. The reset is one atomic update.
-        </p>
-      </div>
-    )
-  }
-  if (state.status !== 'done') return null
-
-  const { result } = state
-
-  return (
-    <div className="mt-5 text-sm">
-      <p className="font-semibold text-settled">
-        Reset {result.environment} and populated it.
-      </p>
-      <ul className="mt-2 space-y-0.5 font-mono text-xs text-muted-foreground">
-        <li>teams · {result.teamsCreated}</li>
-        <li>players · {result.playersCreated}</li>
-        <li>users whose leagues were cleared · {result.usersCleared}</li>
-      </ul>
-      {result.missingCompetitions.length > 0 && (
-        <p className="mt-2 text-xs text-destructive">
-          Base tournaments not found, so no one was put in them:{' '}
-          {result.missingCompetitions.join(', ')}
-        </p>
+      {state.status === 'done' && (
+        <div className="mt-5 text-sm">
+          <p className="font-semibold text-settled">
+            Populated {state.result.environment}.
+          </p>
+          <ul className="mt-2 space-y-0.5 font-mono text-xs text-muted-foreground">
+            <li>teams · {state.result.teamsCreated}</li>
+            <li>players · {state.result.playersCreated}</li>
+          </ul>
+          {state.result.missingCompetitions.length > 0 && (
+            <p className="mt-2 text-xs text-destructive">
+              Base tournaments not found, so no one was put in them:{' '}
+              {state.result.missingCompetitions.join(', ')}
+            </p>
+          )}
+        </div>
       )}
     </div>
   )

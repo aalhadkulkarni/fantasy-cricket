@@ -59,6 +59,7 @@ import type {
   SamplePlayersResult,
   SampleTournamentResult,
   ScoringWatermark,
+  ResetEnvironmentResult,
   SeedDataResult,
   StandardsRefreshResult,
   SystemStatus,
@@ -717,6 +718,10 @@ export function createHttpApi(
 
     createSamplePlayers(): Promise<SamplePlayersResult> {
       return call('createSamplePlayers', []) as Promise<SamplePlayersResult>
+    },
+
+    resetEnvironment(): Promise<ResetEnvironmentResult> {
+      return call('resetEnvironment', []) as Promise<ResetEnvironmentResult>
     },
 
     populateSeedData(): Promise<SeedDataResult> {

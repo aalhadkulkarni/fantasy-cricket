@@ -36,6 +36,7 @@ import type {
   CreatePlayersResult,
   SamplePlayersResult,
   SampleTournamentResult,
+  ResetEnvironmentResult,
   SeedDataResult,
   StandardsRefreshResult,
   SystemStatus,
@@ -2193,6 +2194,45 @@ export function createFirebaseApi(
         'Only the system owner can do that.',
       )
     }
+  }
+
+  /**
+   * **Everything Reset environment deletes, as paths** — every player, team,
+   * tournament and league, everything hanging off them, and every user's
+   * league lists. Users, base tournaments, reference tables and the standards
+   * are not in it. The one list, so it cannot drift.
+   */
+  function resetUpdate(userIds: readonly string[]): Record<string, unknown> {
+    const update: Record<string, unknown> = {}
+    for (const node of [
+      paths.players(),
+      paths.teams(),
+      paths.standardPlayerAuctionDetails(),
+      paths.tournaments(),
+      paths.leagues(),
+      paths.leagueCodeToLeagueMapping(),
+      paths.matchBasedLineups(),
+      paths.gameWeekBasedLineups(),
+      paths.squads(),
+      paths.joinRequests(),
+      paths.bannedUsers(),
+      paths.transferProposals(),
+      paths.transferProposalsByManager(),
+      paths.liveAuctions(),
+      paths.leaderboards(),
+      paths.customPointsByMatch(),
+      paths.customPointsByPlayer(),
+      paths.standardPointsByMatch(),
+      paths.standardPointsByPlayer(),
+      paths.standardPointsUpdatedAt(),
+    ]) {
+      update[node] = null
+    }
+    for (const userId of userIds) {
+      update[service.path('users', userId, 'leagues')] = null
+      update[service.path('users', userId, 'archivedLeagues')] = null
+    }
+    return update
   }
 
   /**
@@ -6693,26 +6733,51 @@ export function createFirebaseApi(
     },
 
     /**
-     * **Test data, and destructive.** Every player, team, tournament and
-     * league goes, with everything that points at them, and the IPL 2026 pool
-     * replaces them. User records, base tournaments, reference tables and the
-     * standards stay.
+     * **Wipes the environment**: every player, team, tournament and league,
+     * and everything that points at them. User records, base tournaments,
+     * reference tables and the standards stay.
      *
-     * **Refused in production**, whoever asks.
+     * One atomic update, so a failure changes nothing. System owner only, and
+     * refused once the environment is released.
+     */
+    async resetEnvironment(): Promise<ResetEnvironmentResult> {
+      await assertSystemOwner()
+      await assertNotReleased()
+
+      const users = await service.read<Record<string, unknown>>(paths.users())
+      const userIds = Object.keys(users ?? {})
+      await service.update(resetUpdate(userIds))
+
+      return { environment: service.root, usersCleared: userIds.length }
+    },
+
+    /**
+     * **Loads the IPL 2026 pool into an empty environment**: the ten
+     * franchises, thirteen national teams and 250 players with their standard
+     * auction values. **Refused unless there are no players and no teams** —
+     * Reset environment first — since loading over existing data would leave
+     * tournaments and leagues pointing at players that are gone.
      *
-     * **One atomic update.** The wiped nodes are set to null and the replaced
-     * ones written whole — `players`, `teams` and the standard auction details
-     * — because an update may not name a node and something beneath it
-     * together. Either the environment is reset and loaded, or untouched.
+     * One atomic update. System owner only, and refused once released.
      */
     async populateSeedData(): Promise<SeedDataResult> {
       await assertSystemOwner()
       await assertNotReleased()
 
-      const [competitions, users] = await Promise.all([
+      const [competitions, existingPlayers, existingTeams] = await Promise.all([
         api.getCompetitions(),
-        service.read<Record<string, unknown>>(paths.users()),
+        service.read<Record<string, unknown>>(paths.players()),
+        service.read<Record<string, unknown>>(paths.teams()),
       ])
+      if (
+        Object.keys(existingPlayers ?? {}).length > 0 ||
+        Object.keys(existingTeams ?? {}).length > 0
+      ) {
+        throw new DataLayerError(
+          'invalidConfig',
+          'This environment already has players or teams. Reset the environment first.',
+        )
+      }
       const competitionIdOf = new Map(
         competitions.map((c) => [c.competitionName, c.competitionId]),
       )
@@ -6796,45 +6861,16 @@ export function createFirebaseApi(
         },
       )
 
-      const update: Record<string, unknown> = {
+      await service.update({
         [paths.players()]: players,
         [paths.teams()]: teams,
         [paths.standardPlayerAuctionDetails()]: auctionDetails,
-      }
-      for (const node of [
-        paths.tournaments(),
-        paths.leagues(),
-        paths.leagueCodeToLeagueMapping(),
-        paths.matchBasedLineups(),
-        paths.gameWeekBasedLineups(),
-        paths.squads(),
-        paths.joinRequests(),
-        paths.bannedUsers(),
-        paths.transferProposals(),
-        paths.transferProposalsByManager(),
-        paths.liveAuctions(),
-        paths.leaderboards(),
-        paths.customPointsByMatch(),
-        paths.customPointsByPlayer(),
-        paths.standardPointsByMatch(),
-        paths.standardPointsByPlayer(),
-        paths.standardPointsUpdatedAt(),
-      ]) {
-        update[node] = null
-      }
-      const userIds = Object.keys(users ?? {})
-      for (const userId of userIds) {
-        update[service.path('users', userId, 'leagues')] = null
-        update[service.path('users', userId, 'archivedLeagues')] = null
-      }
-
-      await service.update(update)
+      })
 
       return {
         environment: service.root,
         teamsCreated: Object.keys(teams).length,
         playersCreated: Object.keys(players).length,
-        usersCleared: userIds.length,
         missingCompetitions: [...missing],
       }
     },

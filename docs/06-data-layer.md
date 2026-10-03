@@ -1052,11 +1052,14 @@ browser only
 - `refreshStandards()` — rewrites the reference tables and the standards from
   the seed data; the auction config field by field, so players' auction values
   survive.
-- `populateSeedData()`, `createSampleIplTournament()` — as on
-  `08-pages/system-admin.md`.
+- `resetEnvironment()` — wipes every player, team, tournament and league and
+  everything built on them; users, base tournaments and the standards stay.
+- `populateSeedData()` — loads the IPL 2026 pool; **refused unless there are
+  no players and no teams**.
+- `createSampleIplTournament()` — as on `08-pages/system-admin.md`.
 
 > **System owner only, and refused once the environment is released.**
 > `systemReleased` at the environment's root, set by hand in the console, locks
-> every testing tool — these three and the auction's `resetAuction` and
+> every testing tool — these four and the auction's `resetAuction` and
 > `markBatchUnsold` — even for the owner. Until then they work everywhere,
 > production included.

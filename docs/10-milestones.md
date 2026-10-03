@@ -391,11 +391,11 @@ together.
   is its auctioneer, and **cannot play in it**: an auctioneer is never a
   manager, and the service refuses their join.
 
-- **Testing runs on the IPL 2026 pool**, loaded by Populate seed data, which
-  resets an environment and replaces the old sample data. See
-  `08-pages/system-admin.md`.
+- **Testing runs on the IPL 2026 pool**: Reset environment, then Populate seed
+  data, which replaced the old sample data. See `08-pages/system-admin.md`.
 - **Development tools are on `/setup`, not tied to an environment.** System
-  owner only, linked from nowhere: Refresh standards, Populate seed data,
+  owner only, linked from nowhere: Refresh standards, Reset environment,
+  Populate seed data (load-only, refused unless the environment is empty), and
   Create sample IPL 2027. They, and the auction's Reset and Mark batch unsold,
   work everywhere — production included — **until `systemReleased` is set** at
   the environment's root, after which the service refuses them all.
