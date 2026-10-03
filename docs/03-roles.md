@@ -25,7 +25,8 @@ _in league A_, an owner _in league B_, and nothing in league C.
 
 **Roles are additive.** A person routinely holds several in the same league — a
 league owner who also plays is the common case, not an edge case. Nothing may
-assume the roles are exclusive.
+assume the roles are exclusive — **with one exception: an auctioneer is never a
+manager** (see Auctioneer).
 
 **Auctioneer and spectator only carry meaning in an auction league**, but they
 are still granted at league level.
@@ -210,8 +211,10 @@ The role that plays.
 
 ## Auctioneer
 
-Runs a live auction. **Must be an admin or the owner** — an ordinary manager
-cannot be made auctioneer.
+Runs a live auction. **Must be an admin or the owner, and never a manager.**
+Someone running the auction cannot also bid in it: the auction page is either
+the room's controls or a bidder's panel, never both. This holds for the backup
+auctioneer too.
 
 **Exactly one auctioneer at a time.** The owner is the auctioneer by default at
 league creation, and can change the auctioneer or the backup at any time,
@@ -244,8 +247,9 @@ immediately and revokes the previous auctioneer's control.
 **Not in Phase 1:** autopilot, where the system advances rounds automatically
 and the auctioneer only monitors.
 
-**An auctioneer may also be a manager and bid** — nothing prevents it, though
-usually they are a non-playing admin.
+**An auctioneer cannot be a manager.** The service refuses a join from either
+auctioneer, and any assignment or handover must go to someone who is not
+playing.
 
 ---
 

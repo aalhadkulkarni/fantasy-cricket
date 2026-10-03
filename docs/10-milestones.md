@@ -273,7 +273,7 @@ the whole app clicked through with the rules denying clients.
 
 ## Milestone 4 — the auction
 
-**Status: in progress.** Phases A–C merged (#74, #75, #78), plus live reads (#79). D merged (#80), E (#83), F (#84), G (#85). Phase H under way.
+**Status: complete, 3 October 2026.** Phases A–C merged (#74, #75, #78), plus live reads (#79); D (#80), E (#83), F (#84), G (#85), H (#86).
 
 **Goal:** a live auction for an **official auction league**, end to end — from
 publishing the tournament that opens the league to managers picking an XI from
@@ -388,25 +388,28 @@ together.
 - **The official auction league** is created at publish: public, six slots,
   standard auction rules, join deadline equal to the auction start. The start
   must be in the future and before the first match. The publisher owns it and
-  is its auctioneer, but does not play unless they join.
+  is its auctioneer, and **cannot play in it**: an auctioneer is never a
+  manager, and the service refuses their join.
 
 - **Testing runs on the IPL 2026 pool**, loaded by the admin panel's Populate
   seed data, which resets a non-production environment and replaces the old
   sample data. See `08-pages/system-admin.md`.
 
-### Phase E must also
+### Done in Phase E, as Phase D required
 
-- **Write the timeline in the typed shape** `TimelineEventData` in
-  `packages/shared/src/live-auction.ts` fixes, with a `timestamp`.
-- **Write `auctionState` in its Phase D shape**: `currentBatch` is an
-  `AuctionBatch` (`kind: 'draft'` for the draft); a selected player has no
+- The timeline is written in the typed shape `TimelineEventData` fixes, with a
+  `timestamp`.
+- `auctionState` is written in its Phase D shape: `currentBatch` is an
+  `AuctionBatch` (`kind: 'draft'` for the draft), and a selected player has no
   round until bidding starts.
 
-### Open
+### Resolved
 
-| Item                                                   | State                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Scheduled start passed, auction not started**        | What the league shows. Decided at implementation.                                                                                                                                                                                                                                                                                                                                                               |
+- **Scheduled start passed, auction not started**: the auction is simply not
+  started. The scheduled start is informative — it tells everyone when to come
+  to the auction — and **the auction's state depends only on the auctioneer
+  pressing Start**. The league stays pre-auction until then, which is what
+  `league-phase.ts` already derives.
 
 ---
 
@@ -453,6 +456,14 @@ together.
 ## Backlog
 
 Small items logged instead of fixed. None blocks anything.
+
+- **The auction, decided and not yet built** (3 October 2026):
+  - **"cr" on every price** in the auction and Auction Center, not only some.
+  - **"Managers out of bidding" includes** anyone whose squad is full or whose
+    budget is below the asking price, not only those who passed.
+  - **Tell the auctioneer when every manager has acted** — all passed, or one
+    leads and every other has passed or cannot bid — so they need not wait out
+    the 30 seconds before selling or marking unsold.
 
 - **A dedicated bid processor**, if the auctioneer's browser proves fragile: one
   always-on Cloud Run instance (exactly one, CPU always allocated), separate

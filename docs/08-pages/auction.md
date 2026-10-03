@@ -74,8 +74,9 @@ Then, top to bottom:
   bid**, and **managers out of bidding** (everyone who has passed). Between
   players it carries the headline instead.
 
-Then the viewer's panel — the auctioneer's controls, a manager's bid panel, or
-both for an auctioneer who plays — directly under it where a thumb is. Below
+Then the viewer's panel — the auctioneer's controls or a manager's bid panel,
+never both, since an auctioneer cannot play — directly under it where a thumb
+is. Below
 them, **Timeline · Managers · Players as tabs on a phone**, so the stage stays
 near the top; **as columns on a wide screen**, with the timeline beside the
 stage. Only one arrangement is mounted at a time.

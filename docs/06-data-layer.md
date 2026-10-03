@@ -406,7 +406,11 @@ of managers it was out of. It is computed once, ever, at migration.
 
 **Writes**
 
-- `joinLeague(leagueId, teamName)` — public leagues
+- `joinLeague(leagueId, teamName)` — public leagues. **Refused for either of
+  the league's auctioneers**, who cannot play (`forbidden`). Its other refusals
+  carry their own codes: no such league `notFound`, a closed league
+  `closedLeague`, the join deadline passed or the auction started
+  `joinDeadlinePassed`, already playing `alreadyMember`, full `leagueFull`.
 - `requestToJoin(leagueId, teamName)` — closed leagues
 
 > **In an auction league, joining as a manager also claims a draft position** —
@@ -909,10 +913,10 @@ with its timeline entry.
   through. The league moves to team submission. **Reversible**:
   `reopenAuction(leagueId)` puts it back exactly as it was, for an accidental
   end or an error found later. *(Phase G)*
-- `handOffAuctioneerRole(leagueId)` — **always to the backup.** **One atomic
-  multi-path write** covering both the auctioneer roles on the membership
-  records and the `primaryAuctioneer` field on the auction config. *(Not in
-  Milestone 4.)*
+- `handOffAuctioneerRole(leagueId)` — **always to the backup**, who, like any
+  auctioneer, cannot be a manager. **One atomic multi-path write** covering
+  both the auctioneer roles on the membership records and the
+  `primaryAuctioneer` field on the auction config. *(Not in Milestone 4.)*
 
 **Subscriptions** — read straight from the database, in the auctioneer's
 browser only
