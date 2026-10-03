@@ -208,8 +208,8 @@ new — it currently happens over WhatsApp. It is not preserved behaviour.
 | Data       | Firebase Realtime Database, accessed only through the data layer |
 | Auth       | Firebase Google auth                                             |
 
-Routing and state management libraries are not yet chosen. One hard
-requirement on state: **live auction updates must not re-render unrelated
+Routing is react-router; state management is Zustand, on the live auction page
+only — every other page fetches what it shows. One hard requirement on state: **live auction updates must not re-render unrelated
 components.** Plain React Context re-renders every consumer on any change,
 which is a real problem for a screen updating several times a second.
 

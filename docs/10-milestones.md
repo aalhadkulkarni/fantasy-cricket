@@ -416,6 +416,13 @@ together.
   `AuctionBatch` (`kind: 'draft'` for the draft), and a selected player has no
   round until bidding starts.
 
+### Not yet exercised
+
+- **Rewinding a real round.** Recovery, end, reopen, pause and extra time were
+  tested by hand; rewind was tried only on an auction whose sales predate the
+  results log, so it correctly found nothing to undo. Rewinding rounds played
+  after Phase G has not been run yet.
+
 ### Resolved
 
 - **Scheduled start passed, auction not started**: the auction is simply not

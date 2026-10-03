@@ -190,7 +190,7 @@ Two more worth knowing:
 | Data       | Firebase Realtime Database, reached only by the API service |
 | Auth       | Firebase Google auth in the browser; the service verifies its token |
 
-**Routing is not yet chosen. State management is Zustand, on the live auction
+**Routing is react-router. State management is Zustand, on the live auction
 page only** — every other page fetches what it shows. One hard requirement on
 state: **live auction updates must not re-render unrelated components.** Plain React Context re-renders every consumer on any change, which
 is a real problem for a screen updating several times a second.
