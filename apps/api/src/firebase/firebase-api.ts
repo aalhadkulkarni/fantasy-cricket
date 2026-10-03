@@ -2922,7 +2922,7 @@ export function createFirebaseApi(
       ])
 
       if (league === undefined) {
-        throw new DataLayerError('banned', 'That league no longer exists.')
+        throw new DataLayerError('notFound', 'That league no longer exists.')
       }
       if (banned !== undefined) {
         throw new DataLayerError(
@@ -2932,13 +2932,13 @@ export function createFirebaseApi(
       }
       if (league.leagueEntry !== 'Open') {
         throw new DataLayerError(
-          'joinDeadlinePassed',
+          'closedLeague',
           'This league is closed, so joining needs its admin to approve you. Requesting to join is not built yet.',
         )
       }
       if (Date.now() > league.fantasyLeagueJoinDeadline) {
         throw new DataLayerError(
-          'alreadyMember',
+          'joinDeadlinePassed',
           'The deadline to join this league has passed.',
         )
       }
@@ -2965,6 +2965,25 @@ export function createFirebaseApi(
         throw new DataLayerError(
           'alreadyMember',
           'You are already playing in this league.',
+        )
+      }
+
+      // **Whoever runs the auction cannot play in it** — primary or backup.
+      // The auction page has no way to be both the room and a bidder in it.
+      const details =
+        'auctionDetails' in league ? league.auctionDetails : undefined
+      const auctioneers = [
+        details?.primaryAuctioneer,
+        details?.secondaryAuctioneer,
+      ]
+      if (
+        mine?.leagueRoles?.primaryAuctioneer === true ||
+        mine?.leagueRoles?.secondaryAuctioneer === true ||
+        auctioneers.includes(userId)
+      ) {
+        throw new DataLayerError(
+          'forbidden',
+          "You run this league's auction, so you cannot also play in it.",
         )
       }
 

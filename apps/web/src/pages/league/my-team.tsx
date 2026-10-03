@@ -545,6 +545,26 @@ function TeamSelection() {
     }
   }
 
+  // **Whoever runs the auction cannot play in it**, so they are not offered
+  // a join they would be refused.
+  const runsAuction =
+    league.myRoles.primaryAuctioneer === true ||
+    league.myRoles.secondaryAuctioneer === true
+
+  if (!playing && runsAuction) {
+    return (
+      <section className="floodlit rounded-xl border bg-card p-5 text-card-foreground sm:p-7">
+        <h2 className="text-xl font-bold tracking-tight sm:text-2xl">
+          You are not playing in this league
+        </h2>
+        <p className="mt-2 max-w-prose text-sm text-muted-foreground">
+          You run this league&apos;s auction, and an auctioneer cannot also play
+          in it.
+        </p>
+      </section>
+    )
+  }
+
   if (!playing) {
     return (
       <section className="floodlit rounded-xl border bg-card p-5 text-card-foreground sm:p-7">

@@ -192,8 +192,8 @@ function Body() {
 
   const panels = (
     <>
-      {isAuctioneer && <AuctioneerPanel />}
-      {isManager && <BidderPanel />}
+      {/* An auctioneer never plays, so a viewer has one panel or none. */}
+      {isAuctioneer ? <AuctioneerPanel /> : isManager ? <BidderPanel /> : null}
     </>
   )
 
