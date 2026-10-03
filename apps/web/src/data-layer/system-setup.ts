@@ -15,6 +15,7 @@
 import type {
   SamplePlayersResult,
   SampleTournamentResult,
+  ResetEnvironmentResult,
   SeedDataResult,
   StandardsRefreshResult,
   SystemSetupResult,
@@ -25,6 +26,7 @@ import { getApi } from './api'
 export type {
   SamplePlayersResult,
   SampleTournamentResult,
+  ResetEnvironmentResult,
   SeedDataResult,
   StandardsRefreshResult,
   SystemSetupResult,
@@ -53,6 +55,10 @@ export function createSamplePlayers(): Promise<SamplePlayersResult> {
  * **Wipes this environment and loads the IPL 2026 test data**: the ten
  * franchises, thirteen national teams and 250 players. Refused in production.
  */
+export function resetEnvironment(): Promise<ResetEnvironmentResult> {
+  return getApi().resetEnvironment()
+}
+
 export function populateSeedData(): Promise<SeedDataResult> {
   return getApi().populateSeedData()
 }

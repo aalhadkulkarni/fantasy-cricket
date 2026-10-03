@@ -191,9 +191,14 @@ export interface SeedDataResult {
   environment: string
   teamsCreated: number
   playersCreated: number
+  missingCompetitions: readonly string[]
+}
+
+/** What resetting an environment cleared. */
+export interface ResetEnvironmentResult {
+  environment: string
   /** Users whose league lists were cleared, so their home screen starts empty. */
   usersCleared: number
-  missingCompetitions: readonly string[]
 }
 
 /** What creating the sample IPL tournament did. */
@@ -962,12 +967,16 @@ export interface Api {
   createSamplePlayers(): Promise<SamplePlayersResult>
 
   /**
-   * **Wipes the environment and loads the IPL 2026 test data.** Every player,
-   * team, tournament and league goes, with everything hanging off them; user
-   * records, base tournaments and the standards stay.
-   *
-   * **Refused in production.** One atomic update, so a failure leaves the
-   * environment as it was.
+   * **Wipes the environment**: every player, team, tournament and league,
+   * with everything that points at them. Users, base tournaments and the
+   * standards stay. System owner only; refused once released.
+   */
+  resetEnvironment(): Promise<ResetEnvironmentResult>
+
+  /**
+   * **Loads the IPL 2026 pool into an empty environment.** Refused if any
+   * players or teams exist — reset first. System owner only; refused once
+   * released.
    */
   populateSeedData(): Promise<SeedDataResult>
 

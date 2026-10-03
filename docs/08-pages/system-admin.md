@@ -146,7 +146,7 @@ panel. **System owner only** — every other account is sent home — and **link
 from nowhere**. They work on **every environment, production included, until
 it is released**: `systemReleased` at the environment's root, set by hand in
 the console when the system goes live. Once it is true the service refuses
-every testing tool there, even for the system owner — these three, and the
+every testing tool there, even for the system owner — these four, and the
 auction's Reset and Mark batch unsold.
 
 #### Refresh standards
@@ -158,13 +158,11 @@ changed, since Set up basic system runs only once. Players, teams, tournaments,
 leagues and base tournaments are left alone, and **every player's auction
 values survive** (the auction config is written field by field).
 
-#### Populate seed data
+#### Reset environment
 
-**A testing tool, not a delete.** It resets a whole environment to known data
-rather than removing one record, so nothing is left dangling.
-
-Two taps: the first arms it and says what will go, the second runs it. **One
-atomic update**, so a failure changes nothing.
+**A whole environment cleared, not a record deleted**, so nothing is left
+dangling. Two taps: the first arms it and says what will go, the second runs
+it. **One atomic update**, so a failure changes nothing.
 
 - **Deletes:** every player, team, tournament and league, and everything that
   hangs off them — lineups, squads, join requests, bans, transfers, live
@@ -172,6 +170,13 @@ atomic update**, so a failure changes nothing.
   values, and every user's league lists.
 - **Keeps:** user records, base tournaments, the reference tables and the
   standards.
+
+#### Populate seed data
+
+**Loads the IPL 2026 pool into an empty environment.** It deletes nothing, so
+one tap — and the service **refuses it while any players or teams exist**:
+Reset environment first. One atomic update.
+
 - **Loads:**
   - **the ten IPL franchises**, in the IPL base tournament;
   - **thirteen national teams**, each in every international base tournament;
