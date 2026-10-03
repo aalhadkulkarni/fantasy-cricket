@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { FilterBox } from '@/components/admin/filter-box'
+import { teamMatches } from '@/components/admin/catalogue-filter'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -62,6 +64,8 @@ export function TeamsPanel({
   const [playersById, setPlayersById] = useState<Record<string, Player>>({})
   const [error, setError] = useState<string | undefined>(undefined)
   const [editing, setEditing] = useState<Team | 'new' | undefined>(undefined)
+  // Narrows the list in the browser; nothing is fetched as you type.
+  const [query, setQuery] = useState('')
 
   /*
     Bumped to reload. The fetch lives inside the effect rather than in a
@@ -117,8 +121,17 @@ export function TeamsPanel({
         <Button onClick={() => setEditing('new')}>Create team</Button>
       </div>
 
+      {teams !== undefined && teams.length > 0 && (
+        <FilterBox
+          value={query}
+          onChange={setQuery}
+          placeholder="Filter by name, base tournament or format — e.g. ipl, odi"
+        />
+      )}
+
       <Body
         teams={teams}
+        query={query}
         error={error}
         competitions={competitions}
         playersById={playersById}
@@ -145,12 +158,14 @@ export function TeamsPanel({
 
 function Body({
   teams,
+  query,
   error,
   competitions,
   playersById,
   onEdit,
 }: {
   teams: Team[] | undefined
+  query: string
   error: string | undefined
   competitions: Competition[]
   playersById: Record<string, Player>
@@ -177,9 +192,18 @@ function Body({
     )
   }
 
+  const shown = teams.filter((t) => teamMatches(t, query, competitions))
+  if (shown.length === 0) {
+    return (
+      <p className="mt-5 text-sm text-subtle-foreground">
+        No teams match “{query.trim()}”.
+      </p>
+    )
+  }
+
   return (
-    <ul className="mt-5 divide-y border-t">
-      {teams.map((team) => (
+    <ul className="mt-5 divide-y border-t border-b sm:max-h-[28rem] sm:overflow-y-auto">
+      {shown.map((team) => (
         <li key={team.teamId}>
           {/*
             The whole row is the control, per rule 5 in the design system:
