@@ -729,6 +729,37 @@ export interface Api {
 
   markPlayerUnsold(leagueId: LeagueId): Promise<void>
 
+  /** Freezes the round. Bidding only. */
+  pauseAuction(leagueId: LeagueId): Promise<void>
+
+  /** Resumes a paused round with the clock reset to 30 seconds. */
+  resumeAuction(leagueId: LeagueId): Promise<void>
+
+  /**
+   * More time on the round, 1–60 seconds. After time up, reopens bidding with
+   * that much time from now.
+   */
+  addTimeToCurrentRound(leagueId: LeagueId, seconds: number): Promise<void>
+
+  /** Enters recovery, the only place a rewind is allowed. Between rounds. */
+  startRecovery(leagueId: LeagueId): Promise<void>
+
+  /**
+   * **Undoes the newest round result** — a sale, unsold, draft pick or skip —
+   * and moves the auction back to where it happened. Recovery only; repeated
+   * rewinds walk back to the start.
+   */
+  rewindLastRound(leagueId: LeagueId): Promise<void>
+
+  /** Leaves recovery. */
+  endRecovery(leagueId: LeagueId): Promise<void>
+
+  /** Ends the auction; team submission opens. Reversible. */
+  endAuction(leagueId: LeagueId): Promise<void>
+
+  /** Reopens an ended auction exactly as it was. */
+  reopenAuction(leagueId: LeagueId): Promise<void>
+
   /**
    * **The next turn in the draft**; the first call starts it. The order
    * snakes, and anyone who can no longer pick is skipped. Refused while a pick

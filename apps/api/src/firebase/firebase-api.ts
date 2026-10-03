@@ -47,6 +47,7 @@ import type { Session } from '../auth.ts'
 import type {
   AcceptedBidsForPlayer,
   DraftPick,
+  RoundResult,
   ArchivedLeagueCard,
   ArchivedLeagueIndexEntry,
   AuctionBatch,
@@ -125,6 +126,7 @@ import {
   AUCTION_CALLS,
   BID_INCREMENT,
   CALL_AT_SECONDS,
+  canStillPick,
   DataLayerError,
   DEFAULT_HOME_NATION,
   FORMATS,
@@ -1063,6 +1065,27 @@ export function createFirebaseApi(
     }
   }
 
+  /**
+   * **One round's result onto the log**, as paths, for the update that makes
+   * it. A rewind pops the newest; push keys keep them in order.
+   */
+  function resultEntry(
+    leagueId: LeagueId,
+    result: RoundResult,
+  ): Record<string, unknown> {
+    return {
+      [livePath(leagueId, 'roundResults', service.generateKey())]: result,
+    }
+  }
+
+  /** The bidding batch a result belongs to. Always set while a player is up. */
+  function biddingBatch(state: AuctionState): AuctionBatch {
+    if (state.currentBatch?.kind !== 'auction') {
+      throw new DataLayerError('auctionState', 'No bidding batch is running.')
+    }
+    return state.currentBatch
+  }
+
   /** Prices move in steps of 0.5, so a bid must sit on that grid. */
   function assertPriceGrid(amount: unknown): asserts amount is number {
     if (
@@ -1299,6 +1322,28 @@ export function createFirebaseApi(
       }
     }
     return prices
+  }
+
+  /**
+   * **Refuses while a draft pick is going through** — submitted, not yet
+   * accepted. Recovery and ending wait for it, so a sale cannot land halfway
+   * through either.
+   */
+  async function assertNoPickInFlight(
+    leagueId: LeagueId,
+    state: AuctionState,
+  ): Promise<void> {
+    if (state.currentBatch?.kind !== 'draft') return
+    if (state.currentDraftTurn === undefined) return
+    const pick = await service.read<DraftPick>(
+      livePath(leagueId, 'draftPicks', String(state.currentDraftTurn)),
+    )
+    if (pick !== undefined && pick.skipped !== true && pick.accepted !== true) {
+      throw new DataLayerError(
+        'auctionState',
+        'A draft pick is still going through. Wait for it.',
+      )
+    }
   }
 
   /** The live state, refusing outside the draft. */
@@ -4961,9 +5006,16 @@ export function createFirebaseApi(
         )
       }
       await assertCanBuy(leagueId, leader, amount)
-      await service.update(
-        await saleUpdate(leagueId, playerId, leader, amount, winning),
-      )
+      await service.update({
+        ...(await saleUpdate(leagueId, playerId, leader, amount, winning)),
+        ...resultEntry(leagueId, {
+          kind: 'sold',
+          playerId,
+          managerId: leader,
+          amount,
+          batch: biddingBatch(state),
+        }),
+      })
     },
 
     /**
@@ -5018,9 +5070,16 @@ export function createFirebaseApi(
               managerId,
               timestamp: Date.now(),
             }
-      await service.update(
-        await saleUpdate(leagueId, playerId, managerId, amount, winning),
-      )
+      await service.update({
+        ...(await saleUpdate(leagueId, playerId, managerId, amount, winning)),
+        ...resultEntry(leagueId, {
+          kind: 'sold',
+          playerId,
+          managerId,
+          amount,
+          batch: biddingBatch(state),
+        }),
+      })
     },
 
     async markPlayerUnsold(leagueId: LeagueId): Promise<void> {
@@ -5042,6 +5101,263 @@ export function createFirebaseApi(
         [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: false,
         [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: false,
         ...timelineEntry(leagueId, 'unsold', { playerId }),
+        ...resultEntry(leagueId, {
+          kind: 'unsold',
+          playerId,
+          batch: biddingBatch(state),
+        }),
+      })
+    },
+
+    // -----------------------------------------------------------------------
+    // The live auction: running the room
+    // -----------------------------------------------------------------------
+
+    /**
+     * **Freezes the round.** Bids, calls and time up all refuse outside
+     * `bidding`, so pausing is just the phase.
+     */
+    async pauseAuction(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding'], 'Only bidding can be paused.')
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'phase')]: 'paused',
+        [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: false,
+        [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: false,
+        ...timelineEntry(leagueId, 'paused', {}),
+      })
+    },
+
+    /** **The clock resets on resume** rather than continuing: 30 seconds. */
+    async resumeAuction(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['paused'], 'Bidding is not paused.')
+      const playerId = state.currentPlayerId
+      if (playerId === undefined) {
+        throw new DataLayerError('auctionState', 'Nobody is up.')
+      }
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'phase')]: 'bidding',
+        [livePath(leagueId, 'currentAcceptedBids', playerId, 'deadline')]:
+          Date.now() + ROUND_SECONDS * 1000,
+        [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: true,
+        [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: true,
+        ...timelineEntry(leagueId, 'auctionRestarted', {}),
+      })
+    },
+
+    /**
+     * **More time on the round**, for a manager with connection trouble.
+     * While bidding it extends the deadline; after time up it reopens bidding
+     * with that much time from now.
+     */
+    async addTimeToCurrentRound(
+      leagueId: LeagueId,
+      seconds: number,
+    ): Promise<void> {
+      await assertAuctioneer(leagueId)
+      if (!Number.isInteger(seconds) || seconds < 1 || seconds > 60) {
+        throw new DataLayerError('invalid', 'Add between 1 and 60 seconds.')
+      }
+      const state = await liveState(leagueId)
+      assertPhase(state, ['bidding', 'timeUp'], 'No round is running.')
+      const playerId = state.currentPlayerId
+      if (playerId === undefined) {
+        throw new DataLayerError('auctionState', 'Nobody is up.')
+      }
+      const deadline = await service.read<number>(
+        livePath(leagueId, 'currentAcceptedBids', playerId, 'deadline'),
+      )
+      const now = Date.now()
+      const from =
+        state.phase === 'bidding' ? Math.max(deadline ?? now, now) : now
+
+      await service.update({
+        [livePath(leagueId, 'currentAcceptedBids', playerId, 'deadline')]:
+          from + seconds * 1000,
+        ...(state.phase === 'timeUp'
+          ? {
+              [livePath(leagueId, 'auctionState', 'phase')]: 'bidding',
+              [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: true,
+              [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: true,
+            }
+          : {}),
+        ...timelineEntry(leagueId, 'timeIncreased', { timeAdded: seconds }),
+      })
+    },
+
+    /**
+     * **Enters recovery**, the only place a rewind is allowed, so one can
+     * never fire mid-round by accident. Between rounds only.
+     */
+    async startRecovery(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, BETWEEN_ROUNDS, 'Finish this round first.')
+      await assertNoPickInFlight(leagueId, state)
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'phase')]: 'recovering',
+        [livePath(leagueId, 'auctionState', 'rewoundInRecovery')]: 0,
+        ...timelineEntry(leagueId, 'auctionBeingRecovered', {}),
+      })
+    },
+
+    /**
+     * **Undoes the newest round result**, in one update: the player back in
+     * the pool, the buyer refunded and their squad restored, and the auction
+     * moved back to where that round happened — its batch, or for the draft,
+     * that turn and manager. Repeated rewinds walk back to the start.
+     *
+     * Appends to the timeline rather than removing anything. Individual bids
+     * are not undone; the player's bidding goes with the result.
+     */
+    async rewindLastRound(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['recovering'], 'Start recovery first.')
+
+      const log = await service.read<Record<string, RoundResult>>(
+        livePath(leagueId, 'roundResults'),
+      )
+      const key = Object.keys(log ?? {})
+        .sort()
+        .at(-1)
+      const result = key === undefined ? undefined : log?.[key]
+      if (key === undefined || result === undefined) {
+        throw new DataLayerError('auctionState', 'Nothing left to rewind.')
+      }
+
+      const update: Record<string, unknown> = {
+        [livePath(leagueId, 'roundResults', key)]: null,
+        [livePath(leagueId, 'auctionState', 'currentPlayerId')]: null,
+        [livePath(leagueId, 'auctionState', 'lastPlayerId')]: null,
+        [livePath(leagueId, 'auctionState', 'rewoundInRecovery')]:
+          (state.rewoundInRecovery ?? 0) + 1,
+        ...timelineEntry(leagueId, 'roundRewound', { result }),
+      }
+
+      // The player as if never put up: no status, no history, no round.
+      const clearPlayer = (playerId: PlayerId) => {
+        update[livePath(leagueId, 'playerStatus', playerId)] = null
+        update[livePath(leagueId, 'playerWiseBiddingHistory', playerId)] = null
+        update[livePath(leagueId, 'currentAcceptedBids', playerId)] = null
+        update[livePath(leagueId, 'currentSubmittedBids', playerId)] = null
+      }
+
+      if (result.kind === 'draftPick' && result.wasUnsold) {
+        // Back to unsold, with the bidding before the draft kept: only the
+        // pick's own bid goes.
+        const { playerId } = result
+        update[livePath(leagueId, 'playerStatus', playerId)] = {
+          playerId,
+          status: 'Unsold',
+        }
+        update[
+          livePath(leagueId, 'playerWiseBiddingHistory', playerId, 'status')
+        ] = 'Unsold'
+        update[
+          livePath(
+            leagueId,
+            'playerWiseBiddingHistory',
+            playerId,
+            'bids',
+            result.bidId,
+          )
+        ] = null
+      } else if (result.kind === 'sold' || result.kind === 'draftPick') {
+        clearPlayer(result.playerId)
+      }
+
+      if (result.kind === 'sold' || result.kind === 'draftPick') {
+        const { playerId, managerId, amount } = result
+        const [budget, squads] = await Promise.all([
+          service.read<number>(
+            livePath(leagueId, 'managerStatus', managerId, 'budget'),
+          ),
+          service.read<Record<string, PlayerId[]>>(
+            paths.squads(leagueId, managerId),
+          ),
+        ])
+        update[livePath(leagueId, 'managerStatus', managerId, 'budget')] =
+          (budget ?? 0) + amount
+        update[
+          livePath(leagueId, 'managerStatus', managerId, 'playerList', playerId)
+        ] = null
+        for (const [matchId, squad] of Object.entries(squads ?? {})) {
+          update[paths.squads(leagueId, managerId, matchId as MatchId)] =
+            squad.filter((id) => id !== playerId)
+        }
+      } else if (result.kind === 'unsold') {
+        clearPlayer(result.playerId)
+      } else if (result.kind === 'batchUnsold') {
+        result.playerIds.forEach(clearPlayer)
+      }
+
+      // Back to where the round happened.
+      if (result.kind === 'draftPick' || result.kind === 'draftTurnSkipped') {
+        update[livePath(leagueId, 'auctionState', 'currentBatch')] = {
+          kind: 'draft',
+        }
+        update[livePath(leagueId, 'auctionState', 'currentDraftTurn')] =
+          result.turn
+        update[livePath(leagueId, 'auctionState', 'currentDraftManagerId')] =
+          result.managerId
+        update[livePath(leagueId, 'draftPicks', String(result.turn))] = null
+      } else {
+        update[livePath(leagueId, 'auctionState', 'currentBatch')] =
+          result.batch
+        update[livePath(leagueId, 'auctionState', 'currentDraftTurn')] = null
+        update[livePath(leagueId, 'auctionState', 'currentDraftManagerId')] =
+          null
+      }
+
+      await service.update(update)
+    },
+
+    /** **Leaves recovery**, saying how many rounds it undid. */
+    async endRecovery(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['recovering'], 'The auction is not in recovery.')
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'phase')]: 'betweenPlayers',
+        [livePath(leagueId, 'auctionState', 'rewoundInRecovery')]: null,
+        ...timelineEntry(leagueId, 'auctionRecovered', {
+          rewindedRounds: state.rewoundInRecovery ?? 0,
+        }),
+      })
+    },
+
+    /**
+     * **Ends the auction**; the league moves to team submission. Between
+     * rounds only. Reversible with `reopenAuction`.
+     */
+    async endAuction(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, BETWEEN_ROUNDS, 'Finish this round first.')
+      await assertNoPickInFlight(leagueId, state)
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'phase')]: 'ended',
+        ...timelineEntry(leagueId, 'auctionEnded', {}),
+      })
+    },
+
+    /**
+     * **Reopens an ended auction**, for an accidental end or an error found
+     * later. Everything is as it was; the league is back in its auction and
+     * team submission closes. Lineups saved in between are left alone —
+     * Phase H discards any that fall outside the squad.
+     */
+    async reopenAuction(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await liveState(leagueId)
+      assertPhase(state, ['ended'], 'The auction has not ended.')
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'phase')]: 'betweenPlayers',
+        ...timelineEntry(leagueId, 'auctionReopened', {}),
       })
     },
 
@@ -5093,15 +5409,9 @@ export function createFirebaseApi(
         ),
         draftPoolPrices(leagueId),
       ])
-      const cheapest = Math.min(...pool.values())
-      const canPick = (managerId: UserId) => {
-        const status = managers?.[managerId]
-        const squad = Object.keys(status?.playerList ?? {}).length
-        return (
-          (maxSquadSize === undefined || squad < maxSquadSize) &&
-          (status?.budget ?? 0) >= cheapest
-        )
-      }
+      const cheapest = pool.size === 0 ? undefined : Math.min(...pool.values())
+      const canPick = (managerId: UserId) =>
+        canStillPick(managers?.[managerId], maxSquadSize, cheapest)
 
       const next = nextDraftTurn(
         draftOrderList(rawOrder),
@@ -5138,6 +5448,7 @@ export function createFirebaseApi(
     async acceptDraftPick(leagueId: LeagueId, turn: number): Promise<void> {
       await assertAuctioneer(leagueId)
       const state = await draftState(leagueId)
+      assertPhase(state, BETWEEN_ROUNDS, 'The draft is on hold.')
       if (state.currentDraftTurn !== turn) {
         throw new DataLayerError('auctionState', 'That turn is over.')
       }
@@ -5170,6 +5481,9 @@ export function createFirebaseApi(
         )
       }
       await assertCanBuy(leagueId, pick.managerId, price)
+      const before = await service.read<PlayerStatus>(
+        livePath(leagueId, 'playerStatus', pick.playerId),
+      )
 
       const bidId = service.generateKey() as BidId
       const update = await saleUpdate(
@@ -5191,7 +5505,18 @@ export function createFirebaseApi(
         }),
       )
       update[livePath(leagueId, 'draftPicks', String(turn), 'accepted')] = true
-      await service.update(update)
+      await service.update({
+        ...update,
+        ...resultEntry(leagueId, {
+          kind: 'draftPick',
+          playerId: pick.playerId,
+          managerId: pick.managerId,
+          amount: price,
+          turn,
+          bidId,
+          wasUnsold: before?.status === 'Unsold',
+        }),
+      })
     },
 
     /**
@@ -5209,6 +5534,7 @@ export function createFirebaseApi(
       await assertManager(leagueId)
       const uid = requireSession().uid as UserId
       const state = await draftState(leagueId)
+      assertPhase(state, BETWEEN_ROUNDS, 'The draft is on hold.')
       const turn = state.currentDraftTurn
       if (turn === undefined || state.currentDraftManagerId !== uid) {
         throw new DataLayerError('auctionState', "It isn't your turn.")
@@ -5252,6 +5578,7 @@ export function createFirebaseApi(
     async skipDraftTurn(leagueId: LeagueId): Promise<void> {
       await assertAuctioneer(leagueId)
       const state = await draftState(leagueId)
+      assertPhase(state, BETWEEN_ROUNDS, 'The draft is on hold.')
       const turn = state.currentDraftTurn
       const managerId = state.currentDraftManagerId
       if (turn === undefined || managerId === undefined) {
@@ -5272,9 +5599,10 @@ export function createFirebaseApi(
           'This turn is already settled — they have picked, or it was skipped.',
         )
       }
-      await service.update(
-        timelineEntry(leagueId, 'draftTurnSkipped', { managerId }),
-      )
+      await service.update({
+        ...timelineEntry(leagueId, 'draftTurnSkipped', { managerId }),
+        ...resultEntry(leagueId, { kind: 'draftTurnSkipped', managerId, turn }),
+      })
     },
 
     /**
@@ -5306,7 +5634,15 @@ export function createFirebaseApi(
           livePath(leagueId, 'playerWiseBiddingHistory', playerId, 'status')
         ] = 'Unsold'
       }
-      if (Object.keys(update).length > 0) await service.update(update)
+      if (left.length === 0) return
+      await service.update({
+        ...update,
+        ...resultEntry(leagueId, {
+          kind: 'batchUnsold',
+          playerIds: left,
+          batch: biddingBatch(state),
+        }),
+      })
     },
 
     /**

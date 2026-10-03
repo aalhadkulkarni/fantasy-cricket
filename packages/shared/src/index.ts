@@ -88,6 +88,7 @@ export {
   BID_INCREMENT,
   CALL_AT_SECONDS,
   ROUND_SECONDS,
+  canStillPick,
 } from './live-auction.ts'
 
 // Who is not overseas when a tournament names nobody.

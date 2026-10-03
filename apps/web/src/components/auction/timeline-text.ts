@@ -99,6 +99,29 @@ export function timelineText(
       return `${message.timelineEventData.timeAdded} seconds added`
     case 'auctionEnded':
       return 'The auction has ended'
+    case 'auctionReopened':
+      return 'The auctioneer reopened the auction'
+    case 'roundRewound': {
+      // Team names throughout, as a sale reads: it names what was undone.
+      const { result } = message.timelineEventData
+      switch (result.kind) {
+        case 'sold':
+          return `Undone: ${words.playerName(result.playerId)} sold to ${words.teamName(
+            result.managerId,
+          )} for ${price(result.amount)}`
+        case 'unsold':
+          return `Undone: ${words.playerName(result.playerId)} unsold`
+        case 'draftPick':
+          return `Undone: ${words.teamName(result.managerId)}'s pick of ${words.playerName(
+            result.playerId,
+          )}`
+        case 'draftTurnSkipped':
+          return `Undone: ${words.teamName(result.managerId)}'s skipped turn`
+        case 'batchUnsold':
+          return `Undone: ${result.playerIds.length} players marked unsold`
+      }
+      return 'Undone: the last round'
+    }
     default:
       // An event this page does not know, from a newer writer. Say something
       // rather than break the list.

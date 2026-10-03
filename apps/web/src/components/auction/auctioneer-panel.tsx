@@ -11,22 +11,36 @@ import {
 } from '@/components/ui/select'
 import { resolveEnvironment } from '@/config/environments'
 import {
+  addTimeToCurrentRound,
+  endAuction,
+  endRecovery,
   markBatchUnsold,
   markPlayerUnsold,
   nextBatch as moveToNextBatch,
   nextDraftManager,
+  pauseAuction,
   putUpPlayer,
   putUpRandomPlayer,
+  reopenAuction,
   resetAuction,
+  resumeAuction,
+  rewindLastRound,
   sellPlayer,
   sellPlayerManually,
   skipDraftTurn,
   startAuction,
   startBidding,
+  startRecovery,
 } from '@/data-layer'
-import type { AuctionBatch, PlayerId, UserId } from '@fantasy-cricket/shared'
+import {
+  canStillPick,
+  type AuctionBatch,
+  type PlayerId,
+  type UserId,
+} from '@fantasy-cricket/shared'
 
 import {
+  draftPool,
   indexPool,
   managerRows,
   momentOf,
@@ -45,10 +59,8 @@ import { OverseasMark } from './overseas-mark'
  * while bidding; the draft's controls in the draft; rewind only inside
  * recovery. Batches step through the league's sequence **in order only**.
  *
- * **Live from Phase E**: start, the next batch, putting a player up, opening
- * bidding, selling and unsold, the draft, and the testing-only reset. Pause,
- * extra time, recovery and ending come in a later phase and say so when
- * clicked.
+ * Every control is live: the bidding, the draft, pause and extra time,
+ * recovery and rewind, ending and reopening, and the testing-only tools.
  *
  * Bids are not accepted here by hand: the bid processor running in this same
  * browser does that, one at a time. Its refusals from the service show below.
@@ -64,10 +76,6 @@ export function AuctioneerPanel() {
   const leagueId = data.league.leagueId
   const processorError = useAuction((s) => s.processorError)
 
-  const [note, setNote] = useState<string | undefined>(undefined)
-  const tried = (what: string) => () =>
-    setNote(`${what} comes in a later phase.`)
-
   /*
     One action at a time from this panel: the button pressed shows it is
     working, every control waits, and a refusal from the service is shown
@@ -78,7 +86,6 @@ export function AuctioneerPanel() {
   const act = (label: string, run: () => Promise<void>) => () => {
     setBusy(label)
     setFailure(undefined)
-    setNote(undefined)
     void run()
       .catch((e: unknown) =>
         setFailure(e instanceof Error ? e.message : String(e)),
@@ -87,6 +94,8 @@ export function AuctioneerPanel() {
   }
   const working = busy !== undefined
   const [resetArmed, setResetArmed] = useState(false)
+  const [endArmed, setEndArmed] = useState(false)
+  const [reopenArmed, setReopenArmed] = useState(false)
 
   const pool = useMemo(() => indexPool(data.pool), [data.pool])
   const lists = useMemo(
@@ -135,7 +144,35 @@ export function AuctioneerPanel() {
     draftPick !== undefined &&
     (draftPick.skipped === true || draftPick.accepted === true)
 
-  const live = moment !== 'notStarted' && moment !== 'ended'
+  // Recovery and ending need the room between rounds, as the service does.
+  const betweenRounds =
+    moment === 'betweenPlayers' ||
+    moment === 'selected' ||
+    moment === 'sold' ||
+    moment === 'unsold' ||
+    moment === 'draft'
+  const pickInFlight =
+    draftPick !== undefined &&
+    draftPick.skipped !== true &&
+    draftPick.accepted !== true
+
+  // The end looks reached when nobody can take another draft turn — the same
+  // rule the service skips by. The auctioneer still decides.
+  const draftLeft = draftPool(data.pool, statuses)
+  const cheapest =
+    draftLeft.length === 0
+      ? undefined
+      : Math.min(...draftLeft.map(({ entry }) => entry.playerBasePrice))
+  const draftDone =
+    moment === 'draft' &&
+    !managers.some((m) =>
+      canStillPick(
+        managerStatuses[m.userId],
+        data.settings.maxSquadSize,
+        cheapest,
+      ),
+    )
+
   const canReset = resolveEnvironment() !== 'prod'
 
   return (
@@ -240,15 +277,22 @@ export function AuctioneerPanel() {
                 Mark unsold
               </Button>
               {moment === 'bidding' && (
-                <>
-                  <Button variant="outline" onClick={tried('Pausing')}>
-                    Pause
-                  </Button>
-                  <Button variant="outline" onClick={tried('Adding time')}>
-                    +10 s
-                  </Button>
-                </>
+                <Button
+                  variant="outline"
+                  onClick={act('pause', () => pauseAuction(leagueId))}
+                  disabled={working}
+                >
+                  {busy === 'pause' ? 'Pausing…' : 'Pause'}
+                </Button>
               )}
+              {/* After time up too: it reopens bidding with the extra time. */}
+              <Button
+                variant="outline"
+                onClick={act('time', () => addTimeToCurrentRound(leagueId, 10))}
+                disabled={working}
+              >
+                {busy === 'time' ? 'Adding…' : '+10 seconds'}
+              </Button>
             </Actions>
             <ManualSell
               managers={managers.map((m) => ({
@@ -267,7 +311,12 @@ export function AuctioneerPanel() {
 
         {moment === 'paused' && (
           <Actions>
-            <Button onClick={tried('Resuming')}>Resume</Button>
+            <Button
+              onClick={act('resume', () => resumeAuction(leagueId))}
+              disabled={working}
+            >
+              {busy === 'resume' ? 'Resuming…' : 'Resume (clock resets to 30s)'}
+            </Button>
           </Actions>
         )}
 
@@ -278,6 +327,12 @@ export function AuctioneerPanel() {
           only while the manager is still deciding, so a double click on Next
           can never skip anyone.
         */}
+        {moment === 'draft' && draftDone && (
+          <p className="text-sm font-medium">
+            Nobody can pick any more — every squad is full or out of budget for
+            what is left. End the auction from More.
+          </p>
+        )}
         {moment === 'draft' && (
           <>
             {turnStarted && (
@@ -295,7 +350,7 @@ export function AuctioneerPanel() {
             <Actions>
               <Button
                 onClick={act('draft', () => nextDraftManager(leagueId))}
-                disabled={working || (turnStarted && !turnSettled)}
+                disabled={working || draftDone || (turnStarted && !turnSettled)}
               >
                 {busy === 'draft'
                   ? 'Moving on…'
@@ -317,18 +372,63 @@ export function AuctioneerPanel() {
         )}
 
         {moment === 'recovering' && (
-          <Actions>
-            <Button onClick={tried('Rewinding')}>Rewind last round</Button>
-            <Button variant="outline" onClick={tried('Ending recovery')}>
-              End recovery
-            </Button>
-          </Actions>
+          <>
+            <p className="text-sm text-muted-foreground">
+              In recovery. Each rewind undoes the latest sale, unsold or draft
+              turn.{' '}
+              {(state?.rewoundInRecovery ?? 0) > 0 &&
+                `${state?.rewoundInRecovery} undone so far.`}
+            </p>
+            <Actions>
+              <Button
+                onClick={act('rewind', () => rewindLastRound(leagueId))}
+                disabled={working}
+              >
+                {busy === 'rewind' ? 'Rewinding…' : 'Rewind last round'}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={act('end recovery', () => endRecovery(leagueId))}
+                disabled={working}
+              >
+                End recovery
+              </Button>
+            </Actions>
+          </>
         )}
 
         {moment === 'ended' && (
-          <p className="text-sm text-muted-foreground">
-            The auction is over. Nothing left to run.
-          </p>
+          <>
+            <p className="text-sm text-muted-foreground">
+              The auction is over. Team submission is open.
+            </p>
+            <Actions>
+              {reopenArmed ? (
+                <>
+                  <Button
+                    onClick={act('reopen', async () => {
+                      setReopenArmed(false)
+                      await reopenAuction(leagueId)
+                    })}
+                    disabled={working}
+                  >
+                    {busy === 'reopen' ? 'Reopening…' : 'Reopen the auction'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setReopenArmed(false)}
+                    disabled={working}
+                  >
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <Button variant="outline" onClick={() => setReopenArmed(true)}>
+                  Reopen auction
+                </Button>
+              )}
+            </Actions>
+          </>
         )}
 
         {/*
@@ -336,18 +436,55 @@ export function AuctioneerPanel() {
           round. Recovery is entered deliberately, so a rewind can never fire
           mid-round by accident.
         */}
-        {live && moment !== 'recovering' && (
-          <details className="rounded-md border px-3 py-2 text-sm">
+        {/*
+          Between rounds only, as the service requires; open on its own when
+          the draft is done, since ending is then the next step.
+        */}
+        {betweenRounds && (
+          <details
+            className="rounded-md border px-3 py-2 text-sm"
+            open={draftDone || undefined}
+          >
             <summary className="cursor-pointer font-medium text-muted-foreground">
               More
             </summary>
             <div className="mt-3 flex flex-wrap gap-2.5">
-              <Button variant="outline" onClick={tried('Start recovery')}>
+              <Button
+                variant="outline"
+                onClick={act('recovery', () => startRecovery(leagueId))}
+                disabled={working || pickInFlight}
+              >
                 Start recovery
               </Button>
-              <Button variant="outline" onClick={tried('Ending the auction')}>
-                End auction
-              </Button>
+              {endArmed ? (
+                <>
+                  <Button
+                    variant="destructive"
+                    onClick={act('end', async () => {
+                      setEndArmed(false)
+                      await endAuction(leagueId)
+                    })}
+                    disabled={working || pickInFlight}
+                  >
+                    {busy === 'end' ? 'Ending…' : 'End the auction'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setEndArmed(false)}
+                    disabled={working}
+                  >
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant={draftDone ? 'default' : 'outline'}
+                  onClick={() => setEndArmed(true)}
+                  disabled={working || pickInFlight}
+                >
+                  End auction
+                </Button>
+              )}
             </div>
           </details>
         )}
@@ -424,9 +561,6 @@ export function AuctioneerPanel() {
           </details>
         )}
 
-        {note !== undefined && (
-          <p className="text-xs text-subtle-foreground">{note}</p>
-        )}
         {failure !== undefined && (
           <p role="alert" className="text-sm text-destructive">
             {failure}

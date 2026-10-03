@@ -39,9 +39,18 @@ export function startAuction(leagueId: LeagueId): Promise<void> {
 
 /**
  * The system prompts when the end looks reached, **but the auctioneer decides.**
+ * Team submission opens. Reversible with `reopenAuction`.
  */
 export function endAuction(leagueId: LeagueId): Promise<void> {
-  return notImplemented('endAuction', { leagueId })
+  return getApi().endAuction(leagueId)
+}
+
+/**
+ * **Reopens an ended auction exactly as it was**, for an accidental end or an
+ * error found later. Team submission closes again.
+ */
+export function reopenAuction(leagueId: LeagueId): Promise<void> {
+  return getApi().reopenAuction(leagueId)
 }
 
 // ---------------------------------------------------------------------------
@@ -162,11 +171,11 @@ export function markBatchUnsold(leagueId: LeagueId): Promise<void> {
 
 /** Freezes the timer. It resets on resume rather than continuing. */
 export function pauseAuction(leagueId: LeagueId): Promise<void> {
-  return notImplemented('pauseAuction', { leagueId })
+  return getApi().pauseAuction(leagueId)
 }
 
 export function resumeAuction(leagueId: LeagueId): Promise<void> {
-  return notImplemented('resumeAuction', { leagueId })
+  return getApi().resumeAuction(leagueId)
 }
 
 /** Good to have, not essential. For someone with connection trouble. */
@@ -174,7 +183,17 @@ export function addTimeToCurrentRound(
   leagueId: LeagueId,
   seconds: number,
 ): Promise<void> {
-  return notImplemented('addTimeToCurrentRound', { leagueId, seconds })
+  return getApi().addTimeToCurrentRound(leagueId, seconds)
+}
+
+/** Enters recovery, the only place a rewind is allowed. Between rounds. */
+export function startRecovery(leagueId: LeagueId): Promise<void> {
+  return getApi().startRecovery(leagueId)
+}
+
+/** Leaves recovery. */
+export function endRecovery(leagueId: LeagueId): Promise<void> {
+  return getApi().endRecovery(leagueId)
 }
 
 /**
@@ -182,7 +201,7 @@ export function addTimeToCurrentRound(
  * **Only inside recovery**, which the auctioneer starts and ends deliberately.
  */
 export function rewindLastRound(leagueId: LeagueId): Promise<void> {
-  return notImplemented('rewindLastRound', { leagueId })
+  return getApi().rewindLastRound(leagueId)
 }
 
 // ---------------------------------------------------------------------------

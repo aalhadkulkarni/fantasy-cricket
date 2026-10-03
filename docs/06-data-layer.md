@@ -845,15 +845,32 @@ with its timeline entry.
   when something has broken. Same writes; keeps the bid history and appends
   the sale as the final bid if it is not already the last one.
 - `markPlayerUnsold(leagueId)`
-- `pauseAuction(leagueId)` / `resumeAuction(leagueId)` *(Phase G)*
-- `addTimeToCurrentRound(leagueId, seconds)` *(Phase G)*
+- `pauseAuction(leagueId)` — bidding only; bids, calls and time up all refuse
+  while paused. `resumeAuction(leagueId)` — **the clock resets to 30 seconds**
+  rather than continuing. *(Phase G)*
+- `addTimeToCurrentRound(leagueId, seconds)` — 1–60 seconds; the panel offers
+  +10. While bidding it extends the deadline; **after time up it reopens
+  bidding** with that much time from now. *(Phase G)*
 - `startRecovery(leagueId)` / `endRecovery(leagueId)` — enter and leave the
-  `Recovering` phase *(Phase G)*
-- `rewindLastRound(leagueId)` — **refused outside recovery.** Undoes the last
-  sale or unsold result, restoring budgets and squad membership; the round
-  before it then becomes the last, so repeated rewinds walk back to the start.
-  Appends timeline entries rather than removing any. Does not undo individual
+  `recovering` phase. Start is between rounds only, and not while a draft pick
+  is going through; End writes how many rounds were undone. Draft picks and
+  skips are refused during recovery. *(Phase G)*
+- `rewindLastRound(leagueId)` — **refused outside recovery.** Undoes the newest
+  round result from the **results log** (below) in one update: the player back
+  in the pool with their round and history gone, the buyer refunded and the
+  player out of their squad for every match, and **the auction moved back to
+  where that round happened** — its batch, or for the draft, that turn and
+  manager, whose turn it is again. A draft pick of a previously unsold player
+  puts them back as unsold, keeping their earlier bidding. The round before
+  then becomes the last, so repeated rewinds walk back to the start. Appends a
+  `roundRewound` entry rather than removing any. Does not undo individual
   bids. *(Phase G)*
+
+> **The results log**, `liveAuctions/<leagueId>/roundResults/<pushKey>`, holds
+> every round's result in order — sold, unsold, draft pick, skipped turn, and
+> the testing button's whole batch at once — written in the same update that
+> makes it. A rewind pops the newest. It exists because the timeline is
+> display-only and is never read to decide anything.
 - `resetAuction(leagueId)` — **refused in production.** A testing fallback:
   puts the league back to before Start auction by deleting the live auction,
   the league's squads, and the lineups and leaderboard built on them, in one
@@ -875,7 +892,10 @@ with its timeline entry.
   auctioneer's browser** as a pick arrives, never by hand. Re-checks the turn,
   the manager, the player, budget and squad, then sells at base price in one
   update — the same sale as a bid's — and marks the pick accepted. *(Phase F)*
-- `endAuction(leagueId)` *(Phase G)*
+- `endAuction(leagueId)` — between rounds, not while a draft pick is going
+  through. The league moves to team submission. **Reversible**:
+  `reopenAuction(leagueId)` puts it back exactly as it was, for an accidental
+  end or an error found later. *(Phase G)*
 - `handOffAuctioneerRole(leagueId)` — **always to the backup.** **One atomic
   multi-path write** covering both the auctioneer roles on the membership
   records and the `primaryAuctioneer` field on the auction config. *(Not in

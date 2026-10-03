@@ -326,7 +326,16 @@ together.
 - **Manual sell** exists as a last-resort fallback.
 - **Rewind** undoes the last round's result, repeatedly, only inside recovery,
   and appends to the timeline rather than rewriting it. A non-production reset
-  exists for testing.
+  exists for testing. **Results are logged in order** at
+  `liveAuctions/<leagueId>/roundResults`, since the timeline is never read to
+  decide anything; a rewind also moves the auction back to that round's batch
+  or draft turn. One `roundRewound` entry per rewind.
+- **Ending the auction is reversible**: Reopen auction restores it as it was.
+  **Lineups saved between an end and a reopen are left alone; Phase H must
+  validate a lineup against the manager's current squad and discard one that
+  falls outside it.**
+- **Pause** resets the clock to 30 seconds on resume. **+10 seconds** works
+  while bidding and after time up, when it reopens bidding.
 - **Team submission begins only when the auctioneer ends the auction.** An
   auction league is pre-auction until the auction is started and in its auction
   until it is ended, regardless of the scheduled start or the first ball; only
