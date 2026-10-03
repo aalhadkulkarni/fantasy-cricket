@@ -959,6 +959,12 @@ browser only
 - `createCompetition(config)` / `updateCompetition(id, changes)` — name,
   format, and an optional **home nation**, which decides who is overseas
 - `createTeam(team)` / `createTeams(teams)` / `updateTeam(id, changes)`
+- `createTeams(rows, dryRun)` / `importPlayers(rows, dryRun)` — bulk upload
+  from pasted CSV (`/admin/bulk`). All or nothing in one update; a dry run
+  writes nothing and says what each row would do, which is the preview.
+  `importPlayers` creates new players and updates existing ones (by name),
+  changing only the teams a row names; both sides of every membership move
+  together. See `08-pages/system-admin.md`.
 - `createPlayer(player)` / `createPlayers(players)` / `updatePlayer(id, changes)`
   — **category and base price are required on creation**, and written to
   `standardAuctionConfig` in the same atomic update as the player

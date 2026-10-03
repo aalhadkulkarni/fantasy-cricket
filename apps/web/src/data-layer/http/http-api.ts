@@ -61,6 +61,9 @@ import type {
   ScoringWatermark,
   ResetEnvironmentResult,
   SeedDataResult,
+  ImportResult,
+  PlayerImportRow,
+  TeamImportRow,
   StandardsRefreshResult,
   SystemStatus,
   Fixture,
@@ -176,6 +179,20 @@ export function createHttpApi(
       players: readonly PlayerConfig[],
     ): Promise<CreatePlayersResult> {
       return call('createPlayers', [players]) as Promise<CreatePlayersResult>
+    },
+
+    createTeams(
+      rows: readonly TeamImportRow[],
+      dryRun: boolean,
+    ): Promise<ImportResult> {
+      return call('createTeams', [rows, dryRun]) as Promise<ImportResult>
+    },
+
+    importPlayers(
+      rows: readonly PlayerImportRow[],
+      dryRun: boolean,
+    ): Promise<ImportResult> {
+      return call('importPlayers', [rows, dryRun]) as Promise<ImportResult>
     },
 
     updatePlayer(

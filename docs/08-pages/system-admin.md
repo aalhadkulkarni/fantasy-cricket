@@ -17,7 +17,8 @@ inside a tournament.
 
 ## Conventions applied everywhere here
 
-- **Bulk upload via CSV paste** on every entity
+- **Bulk upload via CSV paste** for teams and players, on `/admin/bulk` (see
+  Bulk upload below)
 - **In-place editing** for existing records
 
 ## Base Tournaments
@@ -79,7 +80,7 @@ transfers left.
 
 ## Players
 
-- Add in **bulk**
+- Add in **bulk** — `/admin/bulk`, below
 - **Category and base price are required when a player is created**, alongside
   name, country and role. They are the player's standard auction values, and
   are written with the player in one atomic update. Players created before this
@@ -115,6 +116,51 @@ until the fixtures editor sets it.
 > match to fix one player resubmits every player's value. Prefill must be
 > reliable — if it silently fails, correcting one player would blank everyone
 > else.
+
+## Bulk upload — `/admin/bulk`
+
+**Pasted CSV, not files**: one row per entry, values separated by commas. The
+first row is skipped **only if it is exactly the header** (any case or
+spacing), so a real first row is never dropped. **Preview** runs the import as a
+dry run, so every row is judged by the service's own rules — new, updated,
+unchanged or an error with its reason; **Import** is offered only when no row
+has an error, and writes everything in **one update, or nothing**. Upload teams
+before players: players are matched to them.
+
+**Teams** — `name,short name,base tournaments`, base tournaments separated by
+`;` and matched by name. New teams only; an existing name is an error. No
+roster: players join through their own rows.
+
+**Players** — `name,short name,country,role,category,base price,IPL team,BBL team,international team,formats`,
+formats separated by `/`.
+
+**Fetch rather than type.** Above the text area, buttons fill it with existing
+players as ready-made rows, to edit in place and import back: all IPL players,
+or one IPL team's; the same for BBL; all international players, or one
+national team's. **Each fetch replaces what is in the text area** — fetching
+RCB then MI shows only MI. A row fetched and imported unchanged changes
+nothing. A league with no base tournament yet says so instead.
+
+- **Role** BAT, BOWL, WK or ALL (or the full words); **category** marquee, star
+  or general. **Short name** may be left empty: the surname, or initial and
+  surname on a collision.
+- **IPL team** and **BBL team**: each matched within that league. The league
+  columns are a list in the shared code (`LEAGUE_COLUMNS`), so another league
+  is one entry. Not part of the seed data.
+- **International team and formats**: t20 is T20 Series and World T20, odi is
+  ODI Series and ODI World Cup, test is Test Series; the same team in each.
+  Teams are matched by short or full name within the base tournament.
+- **A new player** needs name, country, role, category and base price.
+- **A name already in the catalogue is updated, and only what the row names
+  changes**: filled values overwrite, empty ones are kept; a filled IPL or BBL
+  team replaces their team in that league; a filled international team sets
+  the base tournaments its listed formats mean and leaves the others as they
+  were. So each season's league teams can be re-uploaded without restating
+  anyone's international cricket. Dropping a format is done in the players
+  panel. Both sides of every membership move: the player and the team
+  rosters.
+- The preview also flags a country not in the admin form's country list, as a
+  likely typo; the service only requires one.
 
 ## Nothing here deletes
 

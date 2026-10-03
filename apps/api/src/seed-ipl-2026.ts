@@ -15,6 +15,12 @@
 
 import type { PlayerCategory, PlayerRole } from '@fantasy-cricket/shared'
 
+export {
+  FORMAT_COMPETITIONS,
+  shortNames,
+  type IntlFormat,
+} from './catalogue-rules.ts'
+
 // ---------------------------------------------------------------------------
 // Teams
 // ---------------------------------------------------------------------------
@@ -58,18 +64,6 @@ export type Nation = keyof typeof NATIONAL_TEAMS
 
 /** The base tournaments, by name, that the IPL franchises play. */
 export const IPL_COMPETITION = 'IPL'
-
-/**
- * **Which base tournaments each international format means**, by name. A
- * player who plays T20Is is in their nation's team in both the T20 ones, and
- * so on. Every national team is in all five.
- */
-export const FORMAT_COMPETITIONS = {
-  t20: ['T20 Series', 'World T20'],
-  odi: ['ODI Series', 'ODI World Cup'],
-  test: ['Test Series'],
-} as const
-export type IntlFormat = keyof typeof FORMAT_COMPETITIONS
 
 // ---------------------------------------------------------------------------
 // The 2026 schedule
@@ -490,32 +484,3 @@ export const IPL_2026_PLAYERS: readonly SeedPlayer[] = [
   ['Shivam Mavi', 'SRH', 'India', 'bowl', ''],
   ['Blessing Muzarabani', 'KKR', 'Zimbabwe', 'bowl', 't20 odi test'],
 ]
-
-/**
- * **A short name for each player**: the surname, unless two players share it,
- * in which case the first initial goes in front — "H Pandya", "K Pandya". If
- * that still collides, as three A Sharmas do, the full name is used.
- */
-export function shortNames(names: readonly string[]): string[] {
-  const surname = (name: string) => {
-    const words = name.trim().split(/\s+/)
-    return words[words.length - 1] ?? name
-  }
-  const initialled = (name: string) =>
-    `${name.trim().charAt(0)} ${surname(name)}`
-  const countOf = (key: (name: string) => string) => {
-    const counts = new Map<string, number>()
-    for (const name of names) {
-      counts.set(key(name), (counts.get(key(name)) ?? 0) + 1)
-    }
-    return (name: string) => counts.get(key(name)) ?? 0
-  }
-  const sharingSurname = countOf(surname)
-  const sharingInitial = countOf(initialled)
-
-  return names.map((name) => {
-    if (sharingSurname(name) === 1) return surname(name)
-    if (sharingInitial(name) === 1) return initialled(name)
-    return name.trim()
-  })
-}

@@ -393,6 +393,14 @@ together.
 
 - **Testing runs on the IPL 2026 pool**: Reset environment, then Populate seed
   data, which replaced the old sample data. See `08-pages/system-admin.md`.
+- **Bulk upload, `/admin/bulk`**: teams and players from pasted CSV, previewed
+  by a dry run and imported all or nothing. A player's teams are an IPL team,
+  a BBL team, and an international team with formats (t20 → T20 Series and
+  World T20, odi → ODI Series and ODI World Cup, test → Test Series). An
+  existing player is updated, **only the teams a row names changing**, so
+  league teams can be re-uploaded each season on their own. **Fetch buttons**
+  fill the text area with existing players (a league, a team, internationals,
+  a nation), each replacing the last, to edit in place.
 - **Development tools are on `/setup`, not tied to an environment.** System
   owner only, linked from nowhere: Refresh standards, Reset environment,
   Populate seed data (load-only, refused unless the environment is empty), and

@@ -1,0 +1,24 @@
+name,short name,base tournaments
+Chennai Super Kings,CSK,IPL
+Delhi Capitals,DC,IPL
+Gujarat Titans,GT,IPL
+Kolkata Knight Riders,KKR,IPL
+Lucknow Super Giants,LSG,IPL
+Mumbai Indians,MI,IPL
+Punjab Kings,PBKS,IPL
+Royal Challengers Bengaluru,RCB,IPL
+Rajasthan Royals,RR,IPL
+Sunrisers Hyderabad,SRH,IPL
+India,IND,T20 Series;World T20;ODI Series;ODI World Cup;Test Series
+Australia,AUS,T20 Series;World T20;ODI Series;ODI World Cup;Test Series
+South Africa,SA,T20 Series;World T20;ODI Series;ODI World Cup;Test Series
+New Zealand,NZ,T20 Series;World T20;ODI Series;ODI World Cup;Test Series
+England,ENG,T20 Series;World T20;ODI Series;ODI World Cup;Test Series
+Pakistan,PAK,T20 Series;World T20;ODI Series;ODI World Cup;Test Series
+Sri Lanka,SL,T20 Series;World T20;ODI Series;ODI World Cup;Test Series
+West Indies,WI,T20 Series;World T20;ODI Series;ODI World Cup;Test Series
+Bangladesh,BAN,T20 Series;World T20;ODI Series;ODI World Cup;Test Series
+Afghanistan,AFG,T20 Series;World T20;ODI Series;ODI World Cup;Test Series
+Zimbabwe,ZIM,T20 Series;World T20;ODI Series;ODI World Cup;Test Series
+Ireland,IRE,T20 Series;World T20;ODI Series;ODI World Cup;Test Series
+Netherlands,NED,T20 Series;World T20;ODI Series;ODI World Cup;Test Series

@@ -38,6 +38,10 @@ import type {
   SampleTournamentResult,
   ResetEnvironmentResult,
   SeedDataResult,
+  ImportResult,
+  ImportRowResult,
+  PlayerImportRow,
+  TeamImportRow,
   StandardsRefreshResult,
   SystemStatus,
   MatchPlayerPoints,
@@ -105,6 +109,7 @@ import type {
   PlayerFilter,
   PlayerId,
   PlayerPoints,
+  PlayerRole,
   PlayerRoleRecord,
   PlayerStatus,
   NoBidId,
@@ -175,6 +180,7 @@ import {
   shortNames,
   type IntlFormat,
 } from '../seed-ipl-2026.ts'
+import { INTERNATIONAL_COMPETITIONS } from '../catalogue-rules.ts'
 import { FirebaseService, type DbPath } from './firebase-service.ts'
 import { createPaths } from './paths.ts'
 
@@ -209,6 +215,23 @@ export interface FirebaseApi extends ServerApi {
  *
  * **The environment comes from the deployment, never from the request.**
  */
+
+/** What a pasted role may say, case-insensitively, and the role it means. */
+const ROLE_ALIASES: Readonly<Record<string, PlayerRole>> = {
+  batsman: 'batsman',
+  bat: 'batsman',
+  batter: 'batsman',
+  bowler: 'bowler',
+  bowl: 'bowler',
+  wicketkeeper: 'wicketKeeper',
+  keeper: 'wicketKeeper',
+  wk: 'wicketKeeper',
+  allrounder: 'allRounder',
+  'all-rounder': 'allRounder',
+  all: 'allRounder',
+  ar: 'allRounder',
+}
+
 export function createFirebaseApi(
   environment: Environment,
   session?: Session,
@@ -2728,6 +2751,356 @@ export function createFirebaseApi(
 
       if (Object.keys(update).length > 0) await service.update(update)
       return { created, skipped }
+    },
+
+    /**
+     * **New teams from pasted rows**, in one update and all or nothing: every
+     * row is judged first, and anything wrong refuses the batch. A dry run
+     * judges and writes nothing, which is what the bulk page previews with.
+     */
+    async createTeams(
+      rows: readonly TeamImportRow[],
+      dryRun: boolean,
+    ): Promise<ImportResult> {
+      await assertSystemAdmin()
+
+      const [competitions, stored] = await Promise.all([
+        api.getCompetitions(),
+        service.read<Record<string, Team>>(paths.teams()),
+      ])
+      const competitionOf = new Map(
+        competitions.map((c) => [
+          c.competitionName.trim().toLowerCase(),
+          c.competitionId,
+        ]),
+      )
+      const taken = new Set(
+        Object.values(stored ?? {}).map((t) => t.teamName.trim().toLowerCase()),
+      )
+
+      const update: Record<string, unknown> = {}
+      const results = rows.map((row, index): ImportRowResult => {
+        const name = (row.teamName ?? '').trim()
+        const short = (row.teamShortName ?? '').trim()
+        const fail = (error: string): ImportRowResult => ({
+          row: index + 1,
+          name: name || `Row ${index + 1}`,
+          outcome: 'error',
+          error,
+        })
+
+        if (name === '') return fail('A team needs a name.')
+        if (short === '') return fail('A team needs a short name.')
+        if (taken.has(name.toLowerCase())) {
+          return fail(`${name} already exists.`)
+        }
+        const names = (row.competitionNames ?? [])
+          .map((n) => n.trim())
+          .filter((n) => n !== '')
+        if (names.length === 0)
+          return fail('Give at least one base tournament.')
+        const unknown = names.filter((n) => !competitionOf.has(n.toLowerCase()))
+        if (unknown.length > 0) {
+          return fail(`No base tournament called ${unknown.join(', ')}.`)
+        }
+
+        // A later row with the same name is refused, not written twice.
+        taken.add(name.toLowerCase())
+        const teamId = service.generateKey() as TeamId
+        update[paths.teams(teamId)] = {
+          teamId,
+          teamName: name,
+          teamShortName: short,
+          competitionIds: Object.fromEntries(
+            names.map((n): [string, true] => [
+              competitionOf.get(n.toLowerCase()) ?? n,
+              true,
+            ]),
+          ),
+        }
+        return { row: index + 1, name, outcome: 'new' }
+      })
+
+      const applied =
+        !dryRun &&
+        results.every((r) => r.outcome !== 'error') &&
+        Object.keys(update).length > 0
+      if (applied) await service.update(update)
+      return { applied, rows: results }
+    },
+
+    /**
+     * **Players from pasted rows**: new ones created, existing ones (by name)
+     * updated — one update, all or nothing, and a dry run that writes nothing.
+     *
+     * **Only the teams a row names are changed.** A league team — IPL: RCB,
+     * BBL: Sixers — is matched within that league and replaces the player's
+     * team there. An international team with formats sets the base
+     * tournaments those formats mean — t20 is T20 Series and World T20, odi is
+     * ODI Series and ODI World Cup, test is Test Series — and leaves the rest
+     * as they were. An empty column leaves that side alone. So a season's
+     * league teams can be re-uploaded without restating anyone's international
+     * cricket. **Both sides of every membership move together** — the player
+     * and the team rosters.
+     */
+    async importPlayers(
+      rows: readonly PlayerImportRow[],
+      dryRun: boolean,
+    ): Promise<ImportResult> {
+      await assertSystemAdmin()
+
+      const [competitions, teamsNode, playersNode, detailsNode] =
+        await Promise.all([
+          api.getCompetitions(),
+          service.read<Record<string, Team>>(paths.teams()),
+          service.read<Record<string, Player>>(paths.players()),
+          service.read<Record<string, LeaguePlayerAuctionDetail>>(
+            paths.standardPlayerAuctionDetails(),
+          ),
+        ])
+
+      const lower = (s: string | undefined) => (s ?? '').trim().toLowerCase()
+      const competitionOf = new Map(
+        competitions.map((c) => [lower(c.competitionName), c.competitionId]),
+      )
+      const competitionName = new Map<string, string>(
+        competitions.map((c) => [c.competitionId, c.competitionName]),
+      )
+      const internationalId = new Map(
+        INTERNATIONAL_COMPETITIONS.map((n) => [n, competitionOf.get(lower(n))]),
+      )
+      const teams = Object.values(teamsNode ?? {})
+      const shortOf = (id: string | undefined) =>
+        id === undefined
+          ? '—'
+          : (teams.find((t) => t.teamId === id)?.teamShortName ?? '?')
+      const isTeam = (team: Team, label: string) =>
+        lower(team.teamShortName) === label || lower(team.teamName) === label
+
+      const existing = new Map(
+        Object.values(playersNode ?? {}).map((p) => [lower(p.playerName), p]),
+      )
+
+      // Short names for the new players, judged against the whole catalogue.
+      const newNames = rows
+        .map((r) => (r.playerName ?? '').trim())
+        .filter((n) => n !== '' && !existing.has(n.toLowerCase()))
+      const catalogueNames = Object.values(playersNode ?? {}).map(
+        (p) => p.playerName,
+      )
+      const derived = shortNames([...catalogueNames, ...newNames])
+      const derivedShort = new Map(
+        newNames.map((n, i) => [
+          n.toLowerCase(),
+          derived[catalogueNames.length + i] ?? n,
+        ]),
+      )
+
+      const update: Record<string, unknown> = {}
+      const seen = new Set<string>()
+
+      const judge = (row: PlayerImportRow, index: number): ImportRowResult => {
+        const name = (row.playerName ?? '').trim()
+        const at = { row: index + 1, name: name || `Row ${index + 1}` }
+        const fail = (error: string): ImportRowResult => ({
+          ...at,
+          outcome: 'error',
+          error,
+        })
+
+        if (name === '') return fail('A player needs a name.')
+        const key = name.toLowerCase()
+        if (seen.has(key)) return fail(`${name} appears twice.`)
+        seen.add(key)
+        const before = existing.get(key)
+
+        const role =
+          row.role === undefined || row.role.trim() === ''
+            ? undefined
+            : ROLE_ALIASES[lower(row.role)]
+        if (row.role !== undefined && row.role.trim() !== '' && !role) {
+          return fail(`Role "${row.role}" is not one of BAT, BOWL, WK, ALL.`)
+        }
+        const country = (row.country ?? '').trim() || undefined
+        const category = lower(row.category) || undefined
+        const priceText = (row.basePrice ?? '').trim()
+        const basePrice = priceText === '' ? undefined : Number(priceText)
+
+        if (before === undefined) {
+          if (country === undefined)
+            return fail('A new player needs a country.')
+          if (role === undefined) return fail('A new player needs a role.')
+          if (category === undefined || basePrice === undefined) {
+            return fail('A new player needs a category and a base price.')
+          }
+        }
+
+        // Category and base price: checked by the same rule as the panel.
+        let detail: LeaguePlayerAuctionDetail | undefined
+        if (category !== undefined || basePrice !== undefined) {
+          const was =
+            before === undefined ? undefined : detailsNode?.[before.playerId]
+          try {
+            detail = auctionDetailFor(
+              name,
+              category ?? was?.playerCategory,
+              basePrice ?? was?.playerBasePrice,
+            )
+          } catch (e) {
+            return fail(e instanceof Error ? e.message : String(e))
+          }
+        }
+
+        const formats = (row.formats ?? [])
+          .map((f) => lower(f))
+          .filter((f) => f !== '')
+        const unknownFormats = formats.filter(
+          (f) => !(f in FORMAT_COMPETITIONS),
+        )
+        if (unknownFormats.length > 0) {
+          return fail(
+            `Format ${unknownFormats.join(', ')} is not one of t20, odi, test.`,
+          )
+        }
+        const nationLabel = lower(row.internationalTeam)
+        if (nationLabel !== '' && formats.length === 0) {
+          return fail(
+            `Say which formats they play for ${row.internationalTeam?.trim()}: t20, odi, test.`,
+          )
+        }
+        if (nationLabel === '' && formats.length > 0) {
+          return fail('Formats need an international team.')
+        }
+
+        // What each base tournament the row names should hold after it.
+        const set = new Map<string, TeamId>()
+
+        // Each league team, matched within the league it is named for.
+        for (const entry of row.leagueTeams ?? []) {
+          const label = lower(entry.team)
+          if (label === '') continue
+          const league = entry.competitionName.trim()
+          const cid = competitionOf.get(lower(league))
+          if (cid === undefined) {
+            return fail(`There is no ${league} base tournament.`)
+          }
+          const team = teams.find(
+            (t) => t.competitionIds?.[cid] === true && isTeam(t, label),
+          )
+          if (team === undefined) {
+            return fail(`${entry.team.trim()} does not play ${league}.`)
+          }
+          set.set(cid, team.teamId)
+        }
+
+        if (nationLabel !== '') {
+          for (const [format, names] of Object.entries(FORMAT_COMPETITIONS)) {
+            for (const competition of names) {
+              const cid = internationalId.get(competition)
+              // Only what the row names changes; an unlisted format keeps
+              // whatever the player already has there.
+              if (!formats.includes(format)) continue
+              if (cid === undefined) {
+                return fail(`There is no ${competition} base tournament.`)
+              }
+              const team = teams.find(
+                (t) =>
+                  t.competitionIds?.[cid] === true && isTeam(t, nationLabel),
+              )
+              if (team === undefined) {
+                return fail(
+                  `${row.internationalTeam?.trim()} does not play ${competition}.`,
+                )
+              }
+              set.set(cid, team.teamId)
+            }
+          }
+        }
+
+        const was: Partial<Record<string, TeamId>> = {
+          ...(before?.currentTeams ?? {}),
+        }
+        const now: Partial<Record<string, TeamId>> = { ...was }
+        for (const [cid, teamId] of set) now[cid] = teamId
+
+        const playerId = before?.playerId ?? (service.generateKey() as PlayerId)
+        const changes: string[] = []
+
+        // Both sides of every membership that moves.
+        for (const cid of new Set([...Object.keys(was), ...Object.keys(now)])) {
+          if (was[cid] === now[cid]) continue
+          const out = was[cid]
+          const into = now[cid]
+          if (out !== undefined) {
+            update[service.path('teams', out, 'playerIds', cid, playerId)] =
+              null
+          }
+          if (into !== undefined) {
+            update[service.path('teams', into, 'playerIds', cid, playerId)] =
+              true
+          }
+          changes.push(
+            `${competitionName.get(cid) ?? cid}: ${shortOf(out)} → ${shortOf(into)}`,
+          )
+        }
+
+        if (before === undefined) {
+          update[paths.players(playerId)] = {
+            playerId,
+            playerName: name,
+            playerShortName:
+              (row.playerShortName ?? '').trim() ||
+              (derivedShort.get(key) ?? name),
+            country,
+            playerRole: role,
+            isRetired: false,
+            ...(Object.keys(now).length > 0 ? { currentTeams: now } : {}),
+          }
+          update[paths.standardPlayerAuctionDetails(playerId)] = detail
+          return { ...at, outcome: 'new' }
+        }
+
+        // An existing player: a filled field overwrites, a blank one keeps.
+        const field = (f: string) => service.path('players', playerId, f)
+        const shortName = (row.playerShortName ?? '').trim()
+        if (shortName !== '' && shortName !== before.playerShortName) {
+          update[field('playerShortName')] = shortName
+          changes.push('short name')
+        }
+        if (country !== undefined && country !== before.country) {
+          update[field('country')] = country
+          changes.push('country')
+        }
+        if (role !== undefined && role !== before.playerRole) {
+          update[field('playerRole')] = role
+          changes.push('role')
+        }
+        if (set.size > 0) {
+          update[field('currentTeams')] =
+            Object.keys(now).length > 0 ? now : null
+        }
+        const oldDetail = detailsNode?.[playerId]
+        if (
+          detail !== undefined &&
+          (detail.playerCategory !== oldDetail?.playerCategory ||
+            detail.playerBasePrice !== oldDetail?.playerBasePrice)
+        ) {
+          update[paths.standardPlayerAuctionDetails(playerId)] = detail
+          changes.push('category and base price')
+        }
+
+        return changes.length === 0
+          ? { ...at, outcome: 'unchanged' }
+          : { ...at, outcome: 'updated', changes }
+      }
+
+      const results = rows.map(judge)
+      const applied =
+        !dryRun &&
+        results.every((r) => r.outcome !== 'error') &&
+        Object.keys(update).length > 0
+      if (applied) await service.update(update)
+      return { applied, rows: results }
     },
 
     /**

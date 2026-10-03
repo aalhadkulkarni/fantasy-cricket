@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router'
 
 import { CompetitionsPanel } from '@/components/admin/competitions-panel'
 import { PlayersPanel } from '@/components/admin/players-panel'
@@ -12,6 +13,7 @@ import {
   type SamplePlayersResult,
   type SystemSetupResult,
 } from '@/data-layer/system-setup'
+import { ROUTES } from '@/routes'
 
 /**
  * System admin — `/admin`.
@@ -40,7 +42,13 @@ export function SystemAdmin() {
         </h1>
 
         <p className="mt-2 text-sm text-muted-foreground">
-          Cricket reference data, tournaments and scoring.
+          Cricket reference data, tournaments and scoring.{' '}
+          <Link
+            to={ROUTES.adminBulk}
+            className="font-medium text-foreground underline-offset-4 hover:underline focus-visible:underline"
+          >
+            Bulk upload teams and players
+          </Link>
         </p>
 
         <SetUpBasicSystem onSetUp={catalogueChanged} />
