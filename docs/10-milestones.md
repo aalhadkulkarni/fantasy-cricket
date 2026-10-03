@@ -457,6 +457,12 @@ together.
 
 Small items logged instead of fixed. None blocks anything.
 
+- **Keep an instance warm for an auction.** The service deploys with
+  `--min-instances 0`, so the first request after a quiet spell waits for a
+  cold start. Before an auction:
+  `gcloud run services update api --region asia-southeast1 --project fantasy-cricket-league-c0346 --min-instances 1`,
+  and the same with `--min-instances 0` afterwards. A deploy resets it to 0,
+  so do not deploy mid-auction — or run the command again after one.
 - **The auction, decided and not yet built** (3 October 2026):
   - **"cr" on every price** in the auction and Auction Center, not only some.
   - **"Managers out of bidding" includes** anyone whose squad is full or whose
@@ -471,19 +477,25 @@ Small items logged instead of fixed. None blocks anything.
   if left running; never deploy it mid-auction, or add a database lock so only
   one copy processes.
 
-- **Every API request pays a CORS preflight.** The site and the service are on
+- **The CORS preflight — partly done.** The site and the service are on
   different origins and requests carry `Authorization`, so the browser sends an
-  `OPTIONS` before each one, and `cors()` in `apps/api/src/index.ts` sets no
-  `maxAge`, so the browser re-asks almost every time. A gameweek switch on My
-  Team is 3 requests plus up to 3 preflights. **Latency, not money** — preflights
-  never touch the database and sit far inside Cloud Run's free tier. Two fixes,
-  either or both:
-  - `maxAge` on `cors()` (Chrome caps it at 2 hours): one line, but cached per
-    exact URL, so each gameweek's first visit still preflights;
-  - serving the API from the site's origin — a Firebase Hosting rewrite of
-    `/api/**` to Cloud Run, and a Vite proxy locally — which removes CORS
-    entirely. An infrastructure change; check Hosting can rewrite to Cloud Run
-    in `asia-southeast1` first.
+  `OPTIONS` before a request. `cors()` now sets `maxAge: 7200` (Chrome's
+  ceiling), so each write endpoint — a fixed `POST /v1/<method>` URL —
+  preflights once per two hours instead of every time. GET reads carry their
+  arguments in the query string, so each distinct URL still preflights once.
+  **The remaining fix** is serving the API from the site's origin — a Firebase
+  Hosting rewrite of `/api/**` to Cloud Run, and a Vite proxy locally — which
+  removes CORS entirely. An infrastructure change; check Hosting can rewrite to
+  Cloud Run in `asia-southeast1` first.
+- **Every request is timed**: one structured log line (method, path, status,
+  ms), preflights included, and a `Server-Timing` header on every answer. Look
+  here before optimising further.
+- **WebSockets for auction writes — considered, not built.** The browser
+  already reuses one HTTP/2 connection, so handshakes are not repeated; on
+  Cloud Run a socket is cut at 60 minutes, bills the instance while open, and
+  needs its own re-authentication as tokens expire hourly. Revisit only if the
+  timings show connection overhead.
+
 - **My Team refetches a gameweek on every visit.** Remembering loaded periods
   (cleared on save), and fetching the neighbouring ones in the background, would
   make going back instant. Page-only.

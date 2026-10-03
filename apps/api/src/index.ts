@@ -36,7 +36,44 @@ initializeApp({
 
 const app = express()
 app.use(express.json())
-app.use(cors({ origin: allowedOrigins(environment) }))
+
+/*
+  **How long each request takes, measured here.** One line per request in the
+  logs — method, path, status, milliseconds — and a `Server-Timing` header on
+  every answer, so where an auction's time goes is visible in DevTools and in
+  Cloud Run's logs alike. First of all, so a preflight is logged too — which
+  is how to see they have stopped — and token checks count.
+*/
+app.use((request, response, next) => {
+  const startedAt = performance.now()
+  // Read now: a router rewrites the path for its own routes before this logs.
+  const { method, path } = request
+  response.locals.startedAt = startedAt
+  response.on('finish', () => {
+    const ms = Math.round(performance.now() - startedAt)
+    console.log(
+      JSON.stringify({
+        severity: 'INFO',
+        message: `${method} ${path} ${response.statusCode} ${ms}ms`,
+        method,
+        path,
+        status: response.statusCode,
+        ms,
+      }),
+    )
+  })
+  next()
+})
+
+/*
+  **The preflight is cached for two hours.** The site and the service are on
+  different origins and every request carries `Authorization`, so the browser
+  asks permission with an `OPTIONS` first. Without `maxAge` it asks again
+  almost every time, which doubles the round trips of every auction write.
+  Two hours is Chrome's ceiling; the cache is per URL and method, so each write
+  endpoint preflights once in that time.
+*/
+app.use(cors({ origin: allowedOrigins(environment), maxAge: 7200 }))
 
 /** Unauthenticated on purpose: Cloud Run and uptime checks call it. */
 app.get('/health', (_request, response) => {
