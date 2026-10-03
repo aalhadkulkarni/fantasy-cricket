@@ -165,6 +165,8 @@ export const TIMELINE_EVENTS = [
   'timeUp',
   'timeIncreased',
   'auctionEnded',
+  'roundRewound',
+  'auctionReopened',
 ] as const
 export type TimelineEventId = (typeof TIMELINE_EVENTS)[number]
 

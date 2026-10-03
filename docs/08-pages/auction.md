@@ -218,16 +218,17 @@ remaining players and their roles.
   bid history is kept as it is, and the sale is appended as the final bid if it
   is not already there.
 - **Mark unsold**
-- **Pause / resume** — freezes the timer; it resets on resume
-- **Add extra seconds** _(good to have, not essential)_
+- **Pause / resume** — freezes the timer; it resets to 30 seconds on resume
+- **+10 seconds** — while bidding, or after time up, when it reopens bidding
 - **Start recovery / End recovery**, and **Rewind** inside it — see below
 - **Start draft**, then **Next in draft order**. Picks are accepted
   automatically, in the auctioneer's browser. **Next stays disabled until the
   turn is settled**; for a manager taking too long, a separate **Skip <team>'s
   turn** button settles it — two buttons, so a double click never skips
   anyone
-- **End auction** — the system prompts when the end looks reached, but the
-  auctioneer decides
+- **End auction** — the system prompts when the end looks reached (nobody can
+  take another draft turn), but the auctioneer decides. Two taps.
+  **Reversible:** **Reopen auction**, two taps, restores it exactly as it was
 - **Hand off** — always to the backup auctioneer
 
 **There is no "generate draft order" control.** The order is assigned as
@@ -235,8 +236,9 @@ managers join — see below.
 
 ### Recovery and rewind
 
-- **Rewind undoes the last round** — a sale or an unsold result — restoring
-  budgets and squad membership. Once it is undone, the round before it becomes
+- **Rewind undoes the last round** — a sale, an unsold result, a draft pick or
+  a skipped draft turn — restoring budgets and squad membership, and taking the
+  auction back to that round's batch, or that draft turn. Once it is undone, the round before it becomes
   the last round, so **rewinding repeatedly walks the auction back to its
   start.** That is needed for testing, where an auction is reset many times.
 - **Only possible between Start recovery and End recovery.** The auctioneer

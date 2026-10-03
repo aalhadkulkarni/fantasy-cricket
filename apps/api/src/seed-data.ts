@@ -396,6 +396,18 @@ export const TIMELINE_EVENT_RECORDS: Readonly<
     timelineEventDescription: 'Auction ended',
     params: [],
   },
+  roundRewound: {
+    timelineEventId: 'roundRewound',
+    timelineEventType: 'RoundRewound',
+    timelineEventDescription: 'The auctioneer undid the last round',
+    params: ['result'],
+  },
+  auctionReopened: {
+    timelineEventId: 'auctionReopened',
+    timelineEventType: 'AuctionReopened',
+    timelineEventDescription: 'The auctioneer reopened the auction',
+    params: [],
+  },
 }
 
 // ---------------------------------------------------------------------------

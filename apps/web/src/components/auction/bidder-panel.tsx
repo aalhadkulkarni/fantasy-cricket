@@ -227,11 +227,13 @@ export function BidderPanel() {
               ? 'Bidding is paused.'
               : moment === 'timeUp'
                 ? "Time's up. Waiting for the auctioneer."
-                : moment === 'ended'
-                  ? 'The auction is over.'
-                  : moment === 'notStarted'
-                    ? 'The auction has not started yet.'
-                    : 'Bidding opens when the auctioneer starts it.'}
+                : moment === 'recovering'
+                  ? 'The auctioneer is correcting the auction. Bidding is on hold.'
+                  : moment === 'ended'
+                    ? 'The auction is over.'
+                    : moment === 'notStarted'
+                      ? 'The auction has not started yet.'
+                      : 'Bidding opens when the auctioneer starts it.'}
           </p>
         )}
       </div>

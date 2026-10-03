@@ -103,7 +103,47 @@ export interface AuctionState {
    * Absent until the draft starts.
    */
   currentDraftTurn?: number
+
+  /** How many rounds the current recovery has undone. Present only in one. */
+  rewoundInRecovery?: number
 }
+
+/**
+ * **One round's result, in the order they happened**, at
+ * `roundResults/{pushKey}` — push keys sort by time. Appended in the same
+ * update that makes the result, and popped by a rewind, which undoes the
+ * newest. Holds what the undo needs: whose budget to refund, by how much, and
+ * where the auction was, so a rewind can take it back there.
+ *
+ * Not the timeline: that is display only and never read to decide anything.
+ */
+export type RoundResult =
+  | {
+      kind: 'sold'
+      playerId: PlayerId
+      managerId: UserId
+      amount: number
+      batch: AuctionBatch
+    }
+  | { kind: 'unsold'; playerId: PlayerId; batch: AuctionBatch }
+  | {
+      kind: 'draftPick'
+      playerId: PlayerId
+      managerId: UserId
+      amount: number
+      turn: number
+      /** The bid the pick added to the player's history, removed on rewind. */
+      bidId: BidId
+      /**
+       * Unsold in the bidding before being picked. A rewind puts them back as
+       * unsold — otherwise a Marquee or Star player would leave the draft
+       * pool for good — and keeps their earlier bidding.
+       */
+      wasUnsold: boolean
+    }
+  | { kind: 'draftTurnSkipped'; managerId: UserId; turn: number }
+  /** The testing button: a whole batch at once, undone as one. */
+  | { kind: 'batchUnsold'; playerIds: PlayerId[]; batch: AuctionBatch }
 
 /**
  * **What became of one turn of the draft**, at `draftPicks/{turn}`: a pick,
@@ -295,6 +335,8 @@ export interface TimelineEventData {
   timeUp: Record<string, never>
   timeIncreased: { timeAdded: number }
   auctionEnded: Record<string, never>
+  roundRewound: { result: RoundResult }
+  auctionReopened: Record<string, never>
 }
 
 /**
@@ -346,4 +388,25 @@ export interface LiveAuction {
   currentAcceptedBids: CurrentAcceptedBids
 
   timeline: Record<TimelineMessageId, TimelineMessage>
+}
+
+/**
+ * **Whether a manager can still take a draft turn**: squad space, and budget
+ * for the cheapest player left in the pool. Shared so the service, which skips
+ * anyone who cannot, and the auctioneer's panel, which prompts to end the
+ * auction once nobody can, never disagree.
+ *
+ * `cheapest` is undefined when the pool is empty — nobody can pick then.
+ */
+export function canStillPick(
+  status: ManagerAuctionStatus | undefined,
+  maxSquadSize: number | undefined,
+  cheapest: number | undefined,
+): boolean {
+  if (cheapest === undefined) return false
+  const squad = Object.keys(status?.playerList ?? {}).length
+  return (
+    (maxSquadSize === undefined || squad < maxSquadSize) &&
+    (status?.budget ?? 0) >= cheapest
+  )
 }

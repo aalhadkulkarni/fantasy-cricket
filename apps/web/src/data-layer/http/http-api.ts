@@ -527,6 +527,38 @@ export function createHttpApi(
       return call('markPlayerUnsold', [leagueId]) as Promise<void>
     },
 
+    pauseAuction(leagueId: LeagueId): Promise<void> {
+      return call('pauseAuction', [leagueId]) as Promise<void>
+    },
+
+    resumeAuction(leagueId: LeagueId): Promise<void> {
+      return call('resumeAuction', [leagueId]) as Promise<void>
+    },
+
+    startRecovery(leagueId: LeagueId): Promise<void> {
+      return call('startRecovery', [leagueId]) as Promise<void>
+    },
+
+    rewindLastRound(leagueId: LeagueId): Promise<void> {
+      return call('rewindLastRound', [leagueId]) as Promise<void>
+    },
+
+    endRecovery(leagueId: LeagueId): Promise<void> {
+      return call('endRecovery', [leagueId]) as Promise<void>
+    },
+
+    endAuction(leagueId: LeagueId): Promise<void> {
+      return call('endAuction', [leagueId]) as Promise<void>
+    },
+
+    reopenAuction(leagueId: LeagueId): Promise<void> {
+      return call('reopenAuction', [leagueId]) as Promise<void>
+    },
+
+    addTimeToCurrentRound(leagueId: LeagueId, seconds: number): Promise<void> {
+      return call('addTimeToCurrentRound', [leagueId, seconds]) as Promise<void>
+    },
+
     nextDraftManager(leagueId: LeagueId): Promise<void> {
       return call('nextDraftManager', [leagueId]) as Promise<void>
     },

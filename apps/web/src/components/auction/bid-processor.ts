@@ -255,6 +255,9 @@ export function startBidProcessor(
   watchDraft(store.getState())
   const unsubscribeStore = store.subscribe((s) => {
     follow(s.state?.currentPlayerId)
+    // Out of bidding — paused, time up — the round in memory is stale: a
+    // resume or added time sets a new deadline, and the database's wins.
+    if (s.state?.phase !== 'bidding') ahead = undefined
     watchDraft(s)
   })
 

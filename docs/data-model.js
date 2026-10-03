@@ -1783,6 +1783,21 @@ const dataModel = {
       timelineEventDescription: 'Auction ended',
       params: [],
     },
+    // Appended by each rewind, carrying the result it undid. The timeline is
+    // never rewritten: a rewind adds an entry rather than removing one.
+    roundRewound: {
+      timelineEventId: 'roundRewound',
+      timelineEventType: 'RoundRewound',
+      timelineEventDescription: 'The auctioneer undid the last round',
+      params: ['result'],
+    },
+    // Ending is reversible, for an accidental end or an error found later.
+    auctionReopened: {
+      timelineEventId: 'auctionReopened',
+      timelineEventType: 'AuctionReopened',
+      timelineEventDescription: 'The auctioneer reopened the auction',
+      params: [],
+    },
   },
 
   /*
@@ -1846,6 +1861,29 @@ const dataModel = {
         // the draft's turn counter, from 0, moving on with every "Next in
         // draft order" (skipped managers included). Picks are keyed by it.
         currentDraftTurn: null,
+        // how many rounds the current recovery has undone; only in recovery.
+        rewoundInRecovery: null,
+      },
+
+      // RESOLVED (Milestone 4, Phase G): what a rewind undoes, in order.
+      // One entry per round result, keyed by push key (time order), written in
+      // the same update as the result. A rewind pops the newest and undoes it.
+      // The timeline cannot serve: it is display-only, never read to decide.
+      roundResults: {
+        result001: {
+          kind: 'sold',
+          playerId: 'player001',
+          managerId: 'user004',
+          amount: 6,
+          batch: { kind: 'auction', playerCategory: 'marquee', playerRole: 'batsman' },
+        },
+        result002: {
+          kind: 'unsold',
+          playerId: 'player008',
+          batch: { kind: 'auction', playerCategory: 'marquee', playerRole: 'batsman' },
+        },
+        // also: draftPick { playerId, managerId, amount, turn, bidId, wasUnsold },
+        // draftTurnSkipped { managerId, turn }, batchUnsold { playerIds, batch }
       },
 
       // RESOLVED (Milestone 4, Phase F): where a submitted draft pick lives.
