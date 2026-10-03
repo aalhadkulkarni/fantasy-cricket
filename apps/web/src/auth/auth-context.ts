@@ -66,6 +66,15 @@ export function isSystemAdmin(state: AuthState): boolean {
   return roles?.systemAdmin === true || roles?.systemOwner === true
 }
 
+/**
+ * **Whether this person is the system owner** — not every admin. Only the
+ * owner reaches `/setup`, whose tools can wipe an environment.
+ */
+export function isSystemOwner(state: AuthState): boolean {
+  if (state.status !== 'signedIn' || state.user === undefined) return false
+  return state.user.systemUserRoles?.systemOwner === true
+}
+
 export function useAuth(): AuthContextValue {
   const value = useContext(AuthContext)
   if (value === undefined) {

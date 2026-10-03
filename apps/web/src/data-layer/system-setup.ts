@@ -15,16 +15,22 @@
 import type {
   SamplePlayersResult,
   SampleTournamentResult,
+  ResetEnvironmentResult,
   SeedDataResult,
+  StandardsRefreshResult,
   SystemSetupResult,
+  SystemStatus,
 } from '@fantasy-cricket/shared'
 import { getApi } from './api'
 
 export type {
   SamplePlayersResult,
   SampleTournamentResult,
+  ResetEnvironmentResult,
   SeedDataResult,
+  StandardsRefreshResult,
   SystemSetupResult,
+  SystemStatus,
 }
 
 export function setUpBasicSystem(): Promise<SystemSetupResult> {
@@ -49,6 +55,10 @@ export function createSamplePlayers(): Promise<SamplePlayersResult> {
  * **Wipes this environment and loads the IPL 2026 test data**: the ten
  * franchises, thirteen national teams and 250 players. Refused in production.
  */
+export function resetEnvironment(): Promise<ResetEnvironmentResult> {
+  return getApi().resetEnvironment()
+}
+
 export function populateSeedData(): Promise<SeedDataResult> {
   return getApi().populateSeedData()
 }
@@ -59,4 +69,18 @@ export function populateSeedData(): Promise<SeedDataResult> {
  */
 export function createSampleIplTournament(): Promise<SampleTournamentResult> {
   return getApi().createSampleIplTournament()
+}
+
+/**
+ * **Rewrites the reference tables and the standards** from the seed data, for
+ * an environment seeded before they changed. System owner only; refused once
+ * the environment is released.
+ */
+export function refreshStandards(): Promise<StandardsRefreshResult> {
+  return getApi().refreshStandards()
+}
+
+/** Which environment this is, and whether its testing tools are switched off. */
+export function getSystemStatus(): Promise<SystemStatus> {
+  return getApi().getSystemStatus()
 }

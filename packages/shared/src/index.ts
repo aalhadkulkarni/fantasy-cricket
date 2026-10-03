@@ -95,6 +95,14 @@ export {
 // Who is not overseas when a tournament names nobody.
 export { DEFAULT_HOME_NATION } from './competition.ts'
 
+// How formats map to international base tournaments, and the league columns.
+export {
+  FORMAT_COMPETITIONS,
+  INTERNATIONAL_COMPETITIONS,
+  LEAGUE_COLUMNS,
+  type IntlFormat,
+} from './catalogue.ts'
+
 // ---------------------------------------------------------------------------
 // The contract between the browser and the service
 // ---------------------------------------------------------------------------

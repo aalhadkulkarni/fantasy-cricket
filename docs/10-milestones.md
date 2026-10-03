@@ -97,7 +97,7 @@ planner should know them.
   leaves it alone. It drives the "Points calculated till" label, whether a
   period counts as scored, and which match points entry opens on.
 - **Zero points are stored as absent.**
-- **Top-level nodes are now 31.** The two new ones are above.
+- **Top-level nodes are now 31.** The two new ones are above. (32 from Milestone 4, with `systemReleased`.)
 
 **Changes and allowances**
 
@@ -325,8 +325,8 @@ together.
   every phase.
 - **Manual sell** exists as a last-resort fallback.
 - **Rewind** undoes the last round's result, repeatedly, only inside recovery,
-  and appends to the timeline rather than rewriting it. A non-production reset
-  exists for testing. **Results are logged in order** at
+  and appends to the timeline rather than rewriting it. A reset exists for
+  testing, until the environment is released. **Results are logged in order** at
   `liveAuctions/<leagueId>/roundResults`, since the timeline is never read to
   decide anything; a rewind also moves the auction back to that round's batch
   or draft turn. One `roundRewound` entry per rewind.
@@ -391,9 +391,22 @@ together.
   is its auctioneer, and **cannot play in it**: an auctioneer is never a
   manager, and the service refuses their join.
 
-- **Testing runs on the IPL 2026 pool**, loaded by the admin panel's Populate
-  seed data, which resets a non-production environment and replaces the old
-  sample data. See `08-pages/system-admin.md`.
+- **Testing runs on the IPL 2026 pool**: Reset environment, then Populate seed
+  data, which replaced the old sample data. See `08-pages/system-admin.md`.
+- **Bulk upload, `/admin/bulk`**: teams and players from pasted CSV, previewed
+  by a dry run and imported all or nothing. A player's teams are an IPL team,
+  a BBL team, and an international team with formats (t20 → T20 Series and
+  World T20, odi → ODI Series and ODI World Cup, test → Test Series). An
+  existing player is updated, **only the teams a row names changing**, so
+  league teams can be re-uploaded each season on their own. **Fetch buttons**
+  fill the text area with existing players (a league, a team, internationals,
+  a nation), each replacing the last, to edit in place.
+- **Development tools are on `/setup`, not tied to an environment.** System
+  owner only, linked from nowhere: Refresh standards, Reset environment,
+  Populate seed data (load-only, refused unless the environment is empty), and
+  Create sample IPL 2027. They, and the auction's Reset and Mark batch unsold,
+  work everywhere — production included — **until `systemReleased` is set** at
+  the environment's root, after which the service refuses them all.
 
 ### Done in Phase E, as Phase D required
 

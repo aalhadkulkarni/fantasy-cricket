@@ -59,7 +59,13 @@ import type {
   SamplePlayersResult,
   SampleTournamentResult,
   ScoringWatermark,
+  ResetEnvironmentResult,
   SeedDataResult,
+  ImportResult,
+  PlayerImportRow,
+  TeamImportRow,
+  StandardsRefreshResult,
+  SystemStatus,
   Fixture,
   SquadsView,
   SignInOutcome,
@@ -173,6 +179,20 @@ export function createHttpApi(
       players: readonly PlayerConfig[],
     ): Promise<CreatePlayersResult> {
       return call('createPlayers', [players]) as Promise<CreatePlayersResult>
+    },
+
+    createTeams(
+      rows: readonly TeamImportRow[],
+      dryRun: boolean,
+    ): Promise<ImportResult> {
+      return call('createTeams', [rows, dryRun]) as Promise<ImportResult>
+    },
+
+    importPlayers(
+      rows: readonly PlayerImportRow[],
+      dryRun: boolean,
+    ): Promise<ImportResult> {
+      return call('importPlayers', [rows, dryRun]) as Promise<ImportResult>
     },
 
     updatePlayer(
@@ -717,8 +737,20 @@ export function createHttpApi(
       return call('createSamplePlayers', []) as Promise<SamplePlayersResult>
     },
 
+    resetEnvironment(): Promise<ResetEnvironmentResult> {
+      return call('resetEnvironment', []) as Promise<ResetEnvironmentResult>
+    },
+
     populateSeedData(): Promise<SeedDataResult> {
       return call('populateSeedData', []) as Promise<SeedDataResult>
+    },
+
+    refreshStandards(): Promise<StandardsRefreshResult> {
+      return call('refreshStandards', []) as Promise<StandardsRefreshResult>
+    },
+
+    getSystemStatus(): Promise<SystemStatus> {
+      return call('getSystemStatus', []) as Promise<SystemStatus>
     },
 
     createSampleIplTournament(): Promise<SampleTournamentResult> {

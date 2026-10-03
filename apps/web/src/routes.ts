@@ -36,6 +36,13 @@ export const ROUTES = {
   actions: '/actions',
   pointsSystem: '/points-system',
   admin: '/admin',
+  /** Teams and players from pasted CSV. System admins, linked from `/admin`. */
+  adminBulk: '/admin/bulk',
+  /**
+   * **Development tools, system owner only, linked from nowhere.** Reset and
+   * reload an environment, refresh its standards — until it is released.
+   */
+  setup: '/setup',
 
   /**
    * One tournament, in the admin panel. **Not in the route table in

@@ -888,12 +888,14 @@ with its timeline entry.
 > the testing button's whole batch at once — written in the same update that
 > makes it. A rewind pops the newest. It exists because the timeline is
 > display-only and is never read to decide anything.
-- `resetAuction(leagueId)` — **refused in production.** A testing fallback:
+- `resetAuction(leagueId)` — **refused once the environment is released**
+  (`systemReleased`). A testing fallback:
   puts the league back to before Start auction by deleting the live auction,
   the league's squads, and the lineups and leaderboard built on them, in one
   update. Members and the draft order stay. The auctioneer only, in any phase
   once the auction exists. *(Built early, in Phase E, for testing.)*
-- `markBatchUnsold(leagueId)` — **refused in production.** Marks everyone left
+- `markBatchUnsold(leagueId)` — **refused once the environment is released.**
+  Marks everyone left
   in the current bidding batch unsold, between rounds, so the draft can be
   reached without bidding. No timeline entries. *(Testing, Phase F.)*
 - `nextDraftManager(leagueId)` — the next turn in the draft; **the first call
@@ -957,6 +959,12 @@ browser only
 - `createCompetition(config)` / `updateCompetition(id, changes)` — name,
   format, and an optional **home nation**, which decides who is overseas
 - `createTeam(team)` / `createTeams(teams)` / `updateTeam(id, changes)`
+- `createTeams(rows, dryRun)` / `importPlayers(rows, dryRun)` — bulk upload
+  from pasted CSV (`/admin/bulk`). All or nothing in one update; a dry run
+  writes nothing and says what each row would do, which is the preview.
+  `importPlayers` creates new players and updates existing ones (by name),
+  changing only the teams a row names; both sides of every membership move
+  together. See `08-pages/system-admin.md`.
 - `createPlayer(player)` / `createPlayers(players)` / `updatePlayer(id, changes)`
   — **category and base price are required on creation**, and written to
   `standardAuctionConfig` in the same atomic update as the player
@@ -1039,3 +1047,25 @@ browser only
 
 > **These are marked open deliberately.** Do not pick one and proceed — raise it
 > and we decide together, per `docs/02-working-with-me.md`.
+
+---
+
+## Setup — `/setup`, system owner only
+
+- `getSystemStatus()` — the environment, and whether it is released. Any
+  signed-in caller; the auction page reads it to decide whether to offer its
+  testing tools.
+- `refreshStandards()` — rewrites the reference tables and the standards from
+  the seed data; the auction config field by field, so players' auction values
+  survive.
+- `resetEnvironment()` — wipes every player, team, tournament and league and
+  everything built on them; users, base tournaments and the standards stay.
+- `populateSeedData()` — loads the IPL 2026 pool; **refused unless there are
+  no players and no teams**.
+- `createSampleIplTournament()` — as on `08-pages/system-admin.md`.
+
+> **System owner only, and refused once the environment is released.**
+> `systemReleased` at the environment's root, set by hand in the console, locks
+> every testing tool — these four and the auction's `resetAuction` and
+> `markBatchUnsold` — even for the owner. Until then they work everywhere,
+> production included.

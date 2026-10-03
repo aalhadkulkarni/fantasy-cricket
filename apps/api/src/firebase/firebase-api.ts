@@ -36,7 +36,14 @@ import type {
   CreatePlayersResult,
   SamplePlayersResult,
   SampleTournamentResult,
+  ResetEnvironmentResult,
   SeedDataResult,
+  ImportResult,
+  ImportRowResult,
+  PlayerImportRow,
+  TeamImportRow,
+  StandardsRefreshResult,
+  SystemStatus,
   MatchPlayerPoints,
   OfficialLeagues,
   SystemSetupResult,
@@ -102,6 +109,7 @@ import type {
   PlayerFilter,
   PlayerId,
   PlayerPoints,
+  PlayerRole,
   PlayerRoleRecord,
   PlayerStatus,
   NoBidId,
@@ -172,6 +180,7 @@ import {
   shortNames,
   type IntlFormat,
 } from '../seed-ipl-2026.ts'
+import { INTERNATIONAL_COMPETITIONS } from '../catalogue-rules.ts'
 import { FirebaseService, type DbPath } from './firebase-service.ts'
 import { createPaths } from './paths.ts'
 
@@ -206,6 +215,23 @@ export interface FirebaseApi extends ServerApi {
  *
  * **The environment comes from the deployment, never from the request.**
  */
+
+/** What a pasted role may say, case-insensitively, and the role it means. */
+const ROLE_ALIASES: Readonly<Record<string, PlayerRole>> = {
+  batsman: 'batsman',
+  bat: 'batsman',
+  batter: 'batsman',
+  bowler: 'bowler',
+  bowl: 'bowler',
+  wicketkeeper: 'wicketKeeper',
+  keeper: 'wicketKeeper',
+  wk: 'wicketKeeper',
+  allrounder: 'allRounder',
+  'all-rounder': 'allRounder',
+  all: 'allRounder',
+  ar: 'allRounder',
+}
+
 export function createFirebaseApi(
   environment: Environment,
   session?: Session,
@@ -2175,6 +2201,79 @@ export function createFirebaseApi(
   }
 
   /**
+   * **The system owner only** — not every admin. For the setup tools, which
+   * can wipe an environment.
+   */
+  async function assertSystemOwner(): Promise<void> {
+    const session = requireSession()
+
+    const roles = await service.read<User['systemUserRoles']>(
+      service.path('users', session.uid, 'systemUserRoles'),
+    )
+
+    if (roles?.systemOwner !== true) {
+      throw new DataLayerError(
+        'forbidden',
+        'Only the system owner can do that.',
+      )
+    }
+  }
+
+  /**
+   * **Everything Reset environment deletes, as paths** — every player, team,
+   * tournament and league, everything hanging off them, and every user's
+   * league lists. Users, base tournaments, reference tables and the standards
+   * are not in it. The one list, so it cannot drift.
+   */
+  function resetUpdate(userIds: readonly string[]): Record<string, unknown> {
+    const update: Record<string, unknown> = {}
+    for (const node of [
+      paths.players(),
+      paths.teams(),
+      paths.standardPlayerAuctionDetails(),
+      paths.tournaments(),
+      paths.leagues(),
+      paths.leagueCodeToLeagueMapping(),
+      paths.matchBasedLineups(),
+      paths.gameWeekBasedLineups(),
+      paths.squads(),
+      paths.joinRequests(),
+      paths.bannedUsers(),
+      paths.transferProposals(),
+      paths.transferProposalsByManager(),
+      paths.liveAuctions(),
+      paths.leaderboards(),
+      paths.customPointsByMatch(),
+      paths.customPointsByPlayer(),
+      paths.standardPointsByMatch(),
+      paths.standardPointsByPlayer(),
+      paths.standardPointsUpdatedAt(),
+    ]) {
+      update[node] = null
+    }
+    for (const userId of userIds) {
+      update[service.path('users', userId, 'leagues')] = null
+      update[service.path('users', userId, 'archivedLeagues')] = null
+    }
+    return update
+  }
+
+  /**
+   * **The testing tools stop once the environment is released.** Until
+   * `systemReleased` is set they work everywhere, production included, so a
+   * system still in development can be reset and reloaded; after it, they are
+   * refused even for the system owner.
+   */
+  async function assertNotReleased(): Promise<void> {
+    if ((await service.read<boolean>(paths.systemReleased())) === true) {
+      throw new DataLayerError(
+        'forbidden',
+        'This environment is released, so testing tools are switched off.',
+      )
+    }
+  }
+
+  /**
    * **An illegal team is refused here**, not merely disabled in the form.
    *
    * Consistent with the auction deliberately permitting illegal squads: a
@@ -2652,6 +2751,356 @@ export function createFirebaseApi(
 
       if (Object.keys(update).length > 0) await service.update(update)
       return { created, skipped }
+    },
+
+    /**
+     * **New teams from pasted rows**, in one update and all or nothing: every
+     * row is judged first, and anything wrong refuses the batch. A dry run
+     * judges and writes nothing, which is what the bulk page previews with.
+     */
+    async createTeams(
+      rows: readonly TeamImportRow[],
+      dryRun: boolean,
+    ): Promise<ImportResult> {
+      await assertSystemAdmin()
+
+      const [competitions, stored] = await Promise.all([
+        api.getCompetitions(),
+        service.read<Record<string, Team>>(paths.teams()),
+      ])
+      const competitionOf = new Map(
+        competitions.map((c) => [
+          c.competitionName.trim().toLowerCase(),
+          c.competitionId,
+        ]),
+      )
+      const taken = new Set(
+        Object.values(stored ?? {}).map((t) => t.teamName.trim().toLowerCase()),
+      )
+
+      const update: Record<string, unknown> = {}
+      const results = rows.map((row, index): ImportRowResult => {
+        const name = (row.teamName ?? '').trim()
+        const short = (row.teamShortName ?? '').trim()
+        const fail = (error: string): ImportRowResult => ({
+          row: index + 1,
+          name: name || `Row ${index + 1}`,
+          outcome: 'error',
+          error,
+        })
+
+        if (name === '') return fail('A team needs a name.')
+        if (short === '') return fail('A team needs a short name.')
+        if (taken.has(name.toLowerCase())) {
+          return fail(`${name} already exists.`)
+        }
+        const names = (row.competitionNames ?? [])
+          .map((n) => n.trim())
+          .filter((n) => n !== '')
+        if (names.length === 0)
+          return fail('Give at least one base tournament.')
+        const unknown = names.filter((n) => !competitionOf.has(n.toLowerCase()))
+        if (unknown.length > 0) {
+          return fail(`No base tournament called ${unknown.join(', ')}.`)
+        }
+
+        // A later row with the same name is refused, not written twice.
+        taken.add(name.toLowerCase())
+        const teamId = service.generateKey() as TeamId
+        update[paths.teams(teamId)] = {
+          teamId,
+          teamName: name,
+          teamShortName: short,
+          competitionIds: Object.fromEntries(
+            names.map((n): [string, true] => [
+              competitionOf.get(n.toLowerCase()) ?? n,
+              true,
+            ]),
+          ),
+        }
+        return { row: index + 1, name, outcome: 'new' }
+      })
+
+      const applied =
+        !dryRun &&
+        results.every((r) => r.outcome !== 'error') &&
+        Object.keys(update).length > 0
+      if (applied) await service.update(update)
+      return { applied, rows: results }
+    },
+
+    /**
+     * **Players from pasted rows**: new ones created, existing ones (by name)
+     * updated — one update, all or nothing, and a dry run that writes nothing.
+     *
+     * **Only the teams a row names are changed.** A league team — IPL: RCB,
+     * BBL: Sixers — is matched within that league and replaces the player's
+     * team there. An international team with formats sets the base
+     * tournaments those formats mean — t20 is T20 Series and World T20, odi is
+     * ODI Series and ODI World Cup, test is Test Series — and leaves the rest
+     * as they were. An empty column leaves that side alone. So a season's
+     * league teams can be re-uploaded without restating anyone's international
+     * cricket. **Both sides of every membership move together** — the player
+     * and the team rosters.
+     */
+    async importPlayers(
+      rows: readonly PlayerImportRow[],
+      dryRun: boolean,
+    ): Promise<ImportResult> {
+      await assertSystemAdmin()
+
+      const [competitions, teamsNode, playersNode, detailsNode] =
+        await Promise.all([
+          api.getCompetitions(),
+          service.read<Record<string, Team>>(paths.teams()),
+          service.read<Record<string, Player>>(paths.players()),
+          service.read<Record<string, LeaguePlayerAuctionDetail>>(
+            paths.standardPlayerAuctionDetails(),
+          ),
+        ])
+
+      const lower = (s: string | undefined) => (s ?? '').trim().toLowerCase()
+      const competitionOf = new Map(
+        competitions.map((c) => [lower(c.competitionName), c.competitionId]),
+      )
+      const competitionName = new Map<string, string>(
+        competitions.map((c) => [c.competitionId, c.competitionName]),
+      )
+      const internationalId = new Map(
+        INTERNATIONAL_COMPETITIONS.map((n) => [n, competitionOf.get(lower(n))]),
+      )
+      const teams = Object.values(teamsNode ?? {})
+      const shortOf = (id: string | undefined) =>
+        id === undefined
+          ? '—'
+          : (teams.find((t) => t.teamId === id)?.teamShortName ?? '?')
+      const isTeam = (team: Team, label: string) =>
+        lower(team.teamShortName) === label || lower(team.teamName) === label
+
+      const existing = new Map(
+        Object.values(playersNode ?? {}).map((p) => [lower(p.playerName), p]),
+      )
+
+      // Short names for the new players, judged against the whole catalogue.
+      const newNames = rows
+        .map((r) => (r.playerName ?? '').trim())
+        .filter((n) => n !== '' && !existing.has(n.toLowerCase()))
+      const catalogueNames = Object.values(playersNode ?? {}).map(
+        (p) => p.playerName,
+      )
+      const derived = shortNames([...catalogueNames, ...newNames])
+      const derivedShort = new Map(
+        newNames.map((n, i) => [
+          n.toLowerCase(),
+          derived[catalogueNames.length + i] ?? n,
+        ]),
+      )
+
+      const update: Record<string, unknown> = {}
+      const seen = new Set<string>()
+
+      const judge = (row: PlayerImportRow, index: number): ImportRowResult => {
+        const name = (row.playerName ?? '').trim()
+        const at = { row: index + 1, name: name || `Row ${index + 1}` }
+        const fail = (error: string): ImportRowResult => ({
+          ...at,
+          outcome: 'error',
+          error,
+        })
+
+        if (name === '') return fail('A player needs a name.')
+        const key = name.toLowerCase()
+        if (seen.has(key)) return fail(`${name} appears twice.`)
+        seen.add(key)
+        const before = existing.get(key)
+
+        const role =
+          row.role === undefined || row.role.trim() === ''
+            ? undefined
+            : ROLE_ALIASES[lower(row.role)]
+        if (row.role !== undefined && row.role.trim() !== '' && !role) {
+          return fail(`Role "${row.role}" is not one of BAT, BOWL, WK, ALL.`)
+        }
+        const country = (row.country ?? '').trim() || undefined
+        const category = lower(row.category) || undefined
+        const priceText = (row.basePrice ?? '').trim()
+        const basePrice = priceText === '' ? undefined : Number(priceText)
+
+        if (before === undefined) {
+          if (country === undefined)
+            return fail('A new player needs a country.')
+          if (role === undefined) return fail('A new player needs a role.')
+          if (category === undefined || basePrice === undefined) {
+            return fail('A new player needs a category and a base price.')
+          }
+        }
+
+        // Category and base price: checked by the same rule as the panel.
+        let detail: LeaguePlayerAuctionDetail | undefined
+        if (category !== undefined || basePrice !== undefined) {
+          const was =
+            before === undefined ? undefined : detailsNode?.[before.playerId]
+          try {
+            detail = auctionDetailFor(
+              name,
+              category ?? was?.playerCategory,
+              basePrice ?? was?.playerBasePrice,
+            )
+          } catch (e) {
+            return fail(e instanceof Error ? e.message : String(e))
+          }
+        }
+
+        const formats = (row.formats ?? [])
+          .map((f) => lower(f))
+          .filter((f) => f !== '')
+        const unknownFormats = formats.filter(
+          (f) => !(f in FORMAT_COMPETITIONS),
+        )
+        if (unknownFormats.length > 0) {
+          return fail(
+            `Format ${unknownFormats.join(', ')} is not one of t20, odi, test.`,
+          )
+        }
+        const nationLabel = lower(row.internationalTeam)
+        if (nationLabel !== '' && formats.length === 0) {
+          return fail(
+            `Say which formats they play for ${row.internationalTeam?.trim()}: t20, odi, test.`,
+          )
+        }
+        if (nationLabel === '' && formats.length > 0) {
+          return fail('Formats need an international team.')
+        }
+
+        // What each base tournament the row names should hold after it.
+        const set = new Map<string, TeamId>()
+
+        // Each league team, matched within the league it is named for.
+        for (const entry of row.leagueTeams ?? []) {
+          const label = lower(entry.team)
+          if (label === '') continue
+          const league = entry.competitionName.trim()
+          const cid = competitionOf.get(lower(league))
+          if (cid === undefined) {
+            return fail(`There is no ${league} base tournament.`)
+          }
+          const team = teams.find(
+            (t) => t.competitionIds?.[cid] === true && isTeam(t, label),
+          )
+          if (team === undefined) {
+            return fail(`${entry.team.trim()} does not play ${league}.`)
+          }
+          set.set(cid, team.teamId)
+        }
+
+        if (nationLabel !== '') {
+          for (const [format, names] of Object.entries(FORMAT_COMPETITIONS)) {
+            for (const competition of names) {
+              const cid = internationalId.get(competition)
+              // Only what the row names changes; an unlisted format keeps
+              // whatever the player already has there.
+              if (!formats.includes(format)) continue
+              if (cid === undefined) {
+                return fail(`There is no ${competition} base tournament.`)
+              }
+              const team = teams.find(
+                (t) =>
+                  t.competitionIds?.[cid] === true && isTeam(t, nationLabel),
+              )
+              if (team === undefined) {
+                return fail(
+                  `${row.internationalTeam?.trim()} does not play ${competition}.`,
+                )
+              }
+              set.set(cid, team.teamId)
+            }
+          }
+        }
+
+        const was: Partial<Record<string, TeamId>> = {
+          ...(before?.currentTeams ?? {}),
+        }
+        const now: Partial<Record<string, TeamId>> = { ...was }
+        for (const [cid, teamId] of set) now[cid] = teamId
+
+        const playerId = before?.playerId ?? (service.generateKey() as PlayerId)
+        const changes: string[] = []
+
+        // Both sides of every membership that moves.
+        for (const cid of new Set([...Object.keys(was), ...Object.keys(now)])) {
+          if (was[cid] === now[cid]) continue
+          const out = was[cid]
+          const into = now[cid]
+          if (out !== undefined) {
+            update[service.path('teams', out, 'playerIds', cid, playerId)] =
+              null
+          }
+          if (into !== undefined) {
+            update[service.path('teams', into, 'playerIds', cid, playerId)] =
+              true
+          }
+          changes.push(
+            `${competitionName.get(cid) ?? cid}: ${shortOf(out)} → ${shortOf(into)}`,
+          )
+        }
+
+        if (before === undefined) {
+          update[paths.players(playerId)] = {
+            playerId,
+            playerName: name,
+            playerShortName:
+              (row.playerShortName ?? '').trim() ||
+              (derivedShort.get(key) ?? name),
+            country,
+            playerRole: role,
+            isRetired: false,
+            ...(Object.keys(now).length > 0 ? { currentTeams: now } : {}),
+          }
+          update[paths.standardPlayerAuctionDetails(playerId)] = detail
+          return { ...at, outcome: 'new' }
+        }
+
+        // An existing player: a filled field overwrites, a blank one keeps.
+        const field = (f: string) => service.path('players', playerId, f)
+        const shortName = (row.playerShortName ?? '').trim()
+        if (shortName !== '' && shortName !== before.playerShortName) {
+          update[field('playerShortName')] = shortName
+          changes.push('short name')
+        }
+        if (country !== undefined && country !== before.country) {
+          update[field('country')] = country
+          changes.push('country')
+        }
+        if (role !== undefined && role !== before.playerRole) {
+          update[field('playerRole')] = role
+          changes.push('role')
+        }
+        if (set.size > 0) {
+          update[field('currentTeams')] =
+            Object.keys(now).length > 0 ? now : null
+        }
+        const oldDetail = detailsNode?.[playerId]
+        if (
+          detail !== undefined &&
+          (detail.playerCategory !== oldDetail?.playerCategory ||
+            detail.playerBasePrice !== oldDetail?.playerBasePrice)
+        ) {
+          update[paths.standardPlayerAuctionDetails(playerId)] = detail
+          changes.push('category and base price')
+        }
+
+        return changes.length === 0
+          ? { ...at, outcome: 'unchanged' }
+          : { ...at, outcome: 'updated', changes }
+      }
+
+      const results = rows.map(judge)
+      const applied =
+        !dryRun &&
+        results.every((r) => r.outcome !== 'error') &&
+        Object.keys(update).length > 0
+      if (applied) await service.update(update)
+      return { applied, rows: results }
     },
 
     /**
@@ -6069,13 +6518,7 @@ export function createFirebaseApi(
      */
     async markBatchUnsold(leagueId: LeagueId): Promise<void> {
       await assertAuctioneer(leagueId)
-
-      if (service.environment === 'prod') {
-        throw new DataLayerError(
-          'forbidden',
-          'A batch cannot be skipped in production.',
-        )
-      }
+      await assertNotReleased()
 
       const state = await liveState(leagueId)
       const left = await eligibleInBatch(leagueId, state)
@@ -6111,13 +6554,7 @@ export function createFirebaseApi(
      */
     async resetAuction(leagueId: LeagueId): Promise<void> {
       await assertAuctioneer(leagueId)
-
-      if (service.environment === 'prod') {
-        throw new DataLayerError(
-          'forbidden',
-          'An auction cannot be reset in production.',
-        )
-      }
+      await assertNotReleased()
 
       await service.update({
         [paths.liveAuctions(leagueId)]: null,
@@ -6669,32 +7106,51 @@ export function createFirebaseApi(
     },
 
     /**
-     * **Test data, and destructive.** Every player, team, tournament and
-     * league goes, with everything that points at them, and the IPL 2026 pool
-     * replaces them. User records, base tournaments, reference tables and the
-     * standards stay.
+     * **Wipes the environment**: every player, team, tournament and league,
+     * and everything that points at them. User records, base tournaments,
+     * reference tables and the standards stay.
      *
-     * **Refused in production**, whoever asks.
+     * One atomic update, so a failure changes nothing. System owner only, and
+     * refused once the environment is released.
+     */
+    async resetEnvironment(): Promise<ResetEnvironmentResult> {
+      await assertSystemOwner()
+      await assertNotReleased()
+
+      const users = await service.read<Record<string, unknown>>(paths.users())
+      const userIds = Object.keys(users ?? {})
+      await service.update(resetUpdate(userIds))
+
+      return { environment: service.root, usersCleared: userIds.length }
+    },
+
+    /**
+     * **Loads the IPL 2026 pool into an empty environment**: the ten
+     * franchises, thirteen national teams and 250 players with their standard
+     * auction values. **Refused unless there are no players and no teams** —
+     * Reset environment first — since loading over existing data would leave
+     * tournaments and leagues pointing at players that are gone.
      *
-     * **One atomic update.** The wiped nodes are set to null and the replaced
-     * ones written whole — `players`, `teams` and the standard auction details
-     * — because an update may not name a node and something beneath it
-     * together. Either the environment is reset and loaded, or untouched.
+     * One atomic update. System owner only, and refused once released.
      */
     async populateSeedData(): Promise<SeedDataResult> {
-      await assertSystemAdmin()
+      await assertSystemOwner()
+      await assertNotReleased()
 
-      if (service.environment === 'prod') {
+      const [competitions, existingPlayers, existingTeams] = await Promise.all([
+        api.getCompetitions(),
+        service.read<Record<string, unknown>>(paths.players()),
+        service.read<Record<string, unknown>>(paths.teams()),
+      ])
+      if (
+        Object.keys(existingPlayers ?? {}).length > 0 ||
+        Object.keys(existingTeams ?? {}).length > 0
+      ) {
         throw new DataLayerError(
-          'forbidden',
-          'Seed data cannot be loaded into production.',
+          'invalidConfig',
+          'This environment already has players or teams. Reset the environment first.',
         )
       }
-
-      const [competitions, users] = await Promise.all([
-        api.getCompetitions(),
-        service.read<Record<string, unknown>>(paths.users()),
-      ])
       const competitionIdOf = new Map(
         competitions.map((c) => [c.competitionName, c.competitionId]),
       )
@@ -6778,45 +7234,16 @@ export function createFirebaseApi(
         },
       )
 
-      const update: Record<string, unknown> = {
+      await service.update({
         [paths.players()]: players,
         [paths.teams()]: teams,
         [paths.standardPlayerAuctionDetails()]: auctionDetails,
-      }
-      for (const node of [
-        paths.tournaments(),
-        paths.leagues(),
-        paths.leagueCodeToLeagueMapping(),
-        paths.matchBasedLineups(),
-        paths.gameWeekBasedLineups(),
-        paths.squads(),
-        paths.joinRequests(),
-        paths.bannedUsers(),
-        paths.transferProposals(),
-        paths.transferProposalsByManager(),
-        paths.liveAuctions(),
-        paths.leaderboards(),
-        paths.customPointsByMatch(),
-        paths.customPointsByPlayer(),
-        paths.standardPointsByMatch(),
-        paths.standardPointsByPlayer(),
-        paths.standardPointsUpdatedAt(),
-      ]) {
-        update[node] = null
-      }
-      const userIds = Object.keys(users ?? {})
-      for (const userId of userIds) {
-        update[service.path('users', userId, 'leagues')] = null
-        update[service.path('users', userId, 'archivedLeagues')] = null
-      }
-
-      await service.update(update)
+      })
 
       return {
         environment: service.root,
         teamsCreated: Object.keys(teams).length,
         playersCreated: Object.keys(players).length,
-        usersCleared: userIds.length,
         missingCompetitions: [...missing],
       }
     },
@@ -6832,14 +7259,8 @@ export function createFirebaseApi(
      * Needs the IPL teams by short name, so it follows Populate seed data.
      */
     async createSampleIplTournament(): Promise<SampleTournamentResult> {
-      await assertSystemAdmin()
-
-      if (service.environment === 'prod') {
-        throw new DataLayerError(
-          'forbidden',
-          'A sample tournament cannot be created in production.',
-        )
-      }
+      await assertSystemOwner()
+      await assertNotReleased()
 
       const tournamentName = 'IPL 2027'
       const competition = (await api.getCompetitions()).find(
@@ -6928,6 +7349,71 @@ export function createFirebaseApi(
         teams: new Set(Object.values(participants)).size,
         players: Object.keys(participants).length,
         rounds: IPL_ROUNDS.map((r) => r.roundName),
+      }
+    },
+
+    /**
+     * **Rewrites the reference tables and the standards** from the seed data,
+     * for an environment seeded before they changed — `setUpBasicSystem` runs
+     * once, so it cannot. Competitions, players, tournaments, leagues and the
+     * setup marker are left alone.
+     *
+     * **`standardAuctionConfig` is written field by field**, because each
+     * player's standard category and base price live beneath it, in
+     * `playerDetails`, and writing the node whole would erase them.
+     *
+     * System owner only, and refused once the environment is released.
+     */
+    async refreshStandards(): Promise<StandardsRefreshResult> {
+      await assertSystemOwner()
+      await assertNotReleased()
+
+      const update: Record<string, unknown> = {
+        [paths.userRoles()]: USER_ROLES,
+        [paths.formats()]: FORMAT_RECORDS,
+        [paths.playerRoles()]: PLAYER_ROLE_RECORDS,
+        [paths.playerCategories()]: PLAYER_CATEGORY_RECORDS,
+        [paths.liveAuctionPhases()]: AUCTION_PHASE_RECORDS,
+        [paths.timelineEvents()]: TIMELINE_EVENT_RECORDS,
+        [paths.standardFantasyLineupRules()]: STANDARD_FANTASY_LINEUP_RULES,
+        [paths.standardFantasyLeagueTeamChangesDeadlineOffset()]:
+          STANDARD_TEAM_CHANGES_DEADLINE_OFFSET,
+      }
+      for (const [field, value] of Object.entries(STANDARD_AUCTION_CONFIG)) {
+        update[service.path('standardAuctionConfig', field)] = value
+      }
+
+      await service.update(update)
+
+      return {
+        environment: service.root,
+        written: [
+          'userRoles',
+          'formats',
+          'playerRoles',
+          'playerCategories',
+          'liveAuctionPhases',
+          'timelineEvents',
+          'standardFantasyLineupRules',
+          'standardFantasyLeagueTeamChangesDeadlineOffset',
+          ...Object.keys(STANDARD_AUCTION_CONFIG).map(
+            (field) => `standardAuctionConfig/${field}`,
+          ),
+        ],
+      }
+    },
+
+    /**
+     * **Which environment this is, and whether it has been released** — any
+     * signed-in caller, since it decides only whether testing tools are
+     * offered.
+     */
+    async getSystemStatus(): Promise<SystemStatus> {
+      requireSession()
+      return {
+        environment: service.root,
+        released:
+          (await service.read<boolean>(paths.systemReleased())) === true,
       }
     },
 

@@ -1,0 +1,251 @@
+name,short name,country,role,category,base price,IPL team,BBL team,international team,formats
+Hardik Pandya,H Pandya,India,ALL,marquee,6,MI,,IND,t20/odi
+Abhishek Sharma,Abhishek Sharma,India,ALL,marquee,6,SRH,,IND,t20
+Shreyas Iyer,S Iyer,India,BAT,marquee,6,PBKS,,IND,odi
+Vaibhav Suryavanshi,Suryavanshi,India,BAT,marquee,6,RR,,,
+Virat Kohli,Kohli,India,BAT,marquee,6,RCB,,IND,odi
+Ruturaj Gaikwad,Gaikwad,India,BAT,marquee,6,CSK,,IND,odi
+Shubman Gill,Gill,India,BAT,marquee,6,GT,,IND,t20/odi/test
+Rohit Sharma,Rohit Sharma,India,BAT,marquee,6,MI,,IND,odi
+Surya Kumar Yadav,S Yadav,India,BAT,marquee,6,MI,,IND,t20
+Yashasvi Jaiswal,Jaiswal,India,BAT,marquee,6,RR,,IND,odi/test
+Travis Head,Head,Australia,BAT,marquee,6,SRH,,AUS,t20/odi/test
+Jasprit Bumrah,Bumrah,India,BOWL,marquee,6,MI,,IND,t20/odi/test
+KL Rahul,Rahul,India,WK,marquee,5,DC,,IND,odi/test
+Jos Buttler,Buttler,England,WK,marquee,5,GT,,ENG,t20/odi
+Sai Sudharsan,Sudharsan,India,BAT,marquee,5,GT,,IND,test
+Will Jacks,Jacks,England,ALL,marquee,5,MI,,ENG,t20/odi
+Dewald Brevis,Brevis,South Africa,BAT,marquee,5,CSK,,SA,t20/odi/test
+Sanju Samson,Samson,India,WK,marquee,5,CSK,,IND,t20
+Nicholas Pooran,Pooran,West Indies,WK,marquee,5,LSG,,,
+Ishan Kishan,Kishan,India,WK,marquee,5,SRH,,IND,t20
+Aiden Markram,Markram,South Africa,BAT,marquee,5,LSG,,SA,t20/odi/test
+Mitchell Marsh,Marsh,Australia,ALL,marquee,5,LSG,,AUS,t20/odi
+Cameron Green,Green,Australia,ALL,marquee,5,KKR,,AUS,t20/odi/test
+Axar Patel,A Patel,India,ALL,marquee,5,DC,,IND,t20/odi/test
+Jason Holder,Holder,West Indies,ALL,star,4,GT,,WI,t20/odi/test
+Marco Jansen,Jansen,South Africa,ALL,star,4,PBKS,,SA,t20/odi/test
+Sam Curran,Curran,England,ALL,star,4,RR,,ENG,t20
+Rajat Patidar,Patidar,India,BAT,star,4,RCB,,,
+Devdutt Padikkal,Padikkal,India,BAT,star,4,RCB,,,
+Shimron Hetmyer,Hetmyer,West Indies,BAT,star,4,RR,,WI,t20/odi
+Noor Ahmad,Ahmad,Afghanistan,BOWL,star,4,CSK,,AFG,t20/odi
+Mitchell Starc,Starc,Australia,BOWL,star,4,DC,,AUS,odi/test
+Varun Chakaravarthy,Chakaravarthy,India,BOWL,star,4,KKR,,IND,t20/odi
+Sunil Narine,Narine,West Indies,ALL,star,4,KKR,,,
+Arshdeep Singh,Arshdeep Singh,India,BOWL,star,4,PBKS,,IND,t20/odi
+Josh Hazlewood,Hazlewood,Australia,BOWL,star,4,RCB,,AUS,t20/odi/test
+Bhuvneshwar Kumar,B Kumar,India,BOWL,star,3,RCB,,,
+Rishabh Pant,Pant,India,WK,star,3,LSG,,IND,odi/test
+Phil Salt,Salt,England,WK,star,3,RCB,,ENG,t20/odi
+Heinrich Klaasen,Klaasen,South Africa,WK,star,3,SRH,,,
+Ravindra Jadeja,Jadeja,India,ALL,star,3,RR,,IND,odi/test
+Tim David,David,Australia,BAT,star,3,RCB,,AUS,t20
+Harshal Patel,H Patel,India,BOWL,star,3,SRH,,,
+Shivam Dube,Dube,India,ALL,star,3,CSK,,IND,t20
+Marcus Stoinis,Stoinis,Australia,ALL,star,3,PBKS,,AUS,t20
+N. Tilak Varma,Varma,India,BAT,star,3,MI,,IND,t20/odi
+David Miller,Miller,South Africa,BAT,star,3,DC,,SA,t20/odi
+Ayush Mhatre,Mhatre,India,BAT,star,3,CSK,,,
+Rashid Khan,R Khan,Afghanistan,BOWL,general,2,GT,,AFG,t20/odi/test
+Trent Boult,Boult,New Zealand,BOWL,general,2,MI,,,
+Pat Cummins,Cummins,Australia,BOWL,general,2,SRH,,AUS,t20/odi/test
+Yuzvendra Chahal,Chahal,India,BOWL,general,2,PBKS,,,
+Kuldeep Yadav,K Yadav,India,BOWL,general,2,DC,,IND,t20/odi/test
+Mohammed Siraj,Siraj,India,BOWL,general,2,GT,,IND,odi/test
+Jofra Archer,Archer,England,BOWL,general,2,RR,,ENG,t20/odi/test
+Prasidh Krishna,Krishna,India,BOWL,general,2,GT,,IND,odi/test
+Matheesha Pathirana,Pathirana,Sri Lanka,BOWL,general,2,KKR,,SL,t20/odi
+Lungisani Ngidi,Ngidi,South Africa,BOWL,general,2,DC,,SA,t20/odi/test
+Prabhsimran Singh,P Singh,India,WK,general,2,PBKS,,,
+Tim Seifert,Seifert,New Zealand,WK,general,2,KKR,,NZ,t20
+Venkatesh Iyer,V Iyer,India,ALL,general,2,RCB,,,
+Nitish Kumar Reddy,Reddy,India,ALL,general,2,SRH,,IND,t20/odi/test
+Priyansh Arya,Arya,India,BAT,general,2,PBKS,,,
+Krunal Pandya,K Pandya,India,ALL,general,2,RCB,,,
+Washington Sundar,Sundar,India,ALL,general,2,GT,,IND,t20/odi/test
+Sai Kishore,Kishore,India,BOWL,general,2,GT,,,
+Sherfane Rutherford,Rutherford,West Indies,BAT,general,2,MI,,WI,t20/odi
+Riyan Parag,Parag,India,ALL,general,2,RR,,,
+Rinku Singh,Rinku Singh,India,BAT,general,2,KKR,,IND,t20
+Glenn Phillips,Phillips,New Zealand,BAT,general,2,GT,,NZ,t20/odi/test
+Kagiso Rabada,Rabada,South Africa,BOWL,general,2,GT,,SA,t20/odi/test
+Deepak Chahar,D Chahar,India,BOWL,general,2,MI,,,
+Ravi Bishnoi,Bishnoi,India,BOWL,general,2,RR,,,
+Lockie Ferguson,Ferguson,New Zealand,BOWL,general,2,PBKS,,NZ,t20/odi
+Harshit Rana,H Rana,India,BOWL,general,2,KKR,,IND,t20/odi
+Finn Allen,Allen,New Zealand,BAT,general,2,KKR,,NZ,t20
+Quinton de Kock,Kock,South Africa,WK,general,2,MI,,SA,t20/odi
+MS Dhoni,Dhoni,India,WK,general,2,CSK,,,
+Dhruv Jurel,Jurel,India,WK,general,2,RR,,IND,test
+Tristan Stubbs,Stubbs,South Africa,BAT,general,2,DC,,SA,t20/odi/test
+Khaleel Ahmed,Ahmed,India,BOWL,general,2,CSK,,,
+Sarfaraz Khan,Sarfaraz Khan,India,BAT,general,2,CSK,,,
+Kartik Sharma,K Sharma,India,WK,general,2,CSK,,,
+Anshul Kamboj,Kamboj,India,BOWL,general,2,CSK,,,
+Prashant Veer,Veer,India,ALL,general,2,CSK,,,
+Rahul Chahar,R Chahar,India,BOWL,general,2,CSK,,,
+Urvil Patel,U Patel,India,WK,general,2,CSK,,,
+Shreyas Gopal,Gopal,India,BOWL,general,2,CSK,,,
+Jamie Overton,Overton,England,ALL,general,2,CSK,,,
+Nathan Ellis,Ellis,Australia,BOWL,general,2,CSK,,AUS,t20
+Akeal Hosein,Hosein,West Indies,BOWL,general,2,CSK,,WI,t20/odi
+Matt Henry,Henry,New Zealand,BOWL,general,2,CSK,,NZ,t20/odi/test
+Karun Nair,Nair,India,BAT,general,2,DC,,,
+Prithvi Shaw,Shaw,India,BAT,general,2,DC,,,
+Abishek Porel,Porel,India,WK,general,2,DC,,,
+Sameer Rizvi,Rizvi,India,BAT,general,2,DC,,,
+Ashutosh Sharma,Ashutosh Sharma,India,BAT,general,2,DC,,,
+Pathum Nissanka,Nissanka,Sri Lanka,BAT,general,2,DC,,SL,t20/odi/test
+Ben Duckett,Duckett,England,BAT,general,2,DC,,ENG,t20/odi/test
+Kyle Jamieson,Jamieson,New Zealand,BOWL,general,2,DC,,NZ,t20/odi/test
+Nitish Rana,N Rana,India,BAT,general,2,DC,,,
+T. Natarajan,Natarajan,India,BOWL,general,2,DC,,,
+Mukesh Kumar,M Kumar,India,BOWL,general,2,DC,,,
+Vipraj Nigam,Nigam,India,ALL,general,2,DC,,,
+Tom Banton,Banton,England,BAT,general,2,GT,,,
+Anuj Rawat,A Rawat,India,WK,general,2,GT,,,
+Shahrukh Khan,Shahrukh Khan,India,BAT,general,2,GT,,,
+Gurnoor Singh Brar,G Brar,India,BOWL,general,2,GT,,,
+Ishant Sharma,I Sharma,India,BOWL,general,2,GT,,,
+Rahul Tewatia,Tewatia,India,ALL,general,2,GT,,,
+Ashok Sharma,Ashok Sharma,India,BOWL,general,2,GT,,,
+Rovman Powell,Powell,West Indies,BAT,general,2,KKR,,WI,t20
+Rachin Ravindra,Ravindra,New Zealand,ALL,general,2,KKR,,NZ,t20/odi/test
+Ajinkya Rahane,Rahane,India,BAT,general,2,KKR,,,
+Angkrish Raghuvanshi,Raghuvanshi,India,BAT,general,2,KKR,,,
+Ramandeep Singh,Ramandeep Singh,India,ALL,general,2,KKR,,,
+Vaibhav Arora,V Arora,India,BOWL,general,2,KKR,,,
+Akash Deep,Deep,India,BOWL,general,2,KKR,,IND,test
+Manish Pandey,Pandey,India,BAT,general,2,KKR,,,
+Rahul Tripathi,Tripathi,India,BAT,general,2,KKR,,,
+Umran Malik,Malik,India,BOWL,general,2,KKR,,,
+Mohammad Shami,Shami,India,BOWL,general,2,LSG,,,
+Josh Inglis,Inglis,Australia,WK,general,2,LSG,,AUS,t20/odi/test
+Wanindu Hasaranga,Hasaranga,Sri Lanka,ALL,general,2,LSG,,SL,t20/odi
+Anrich Nortje,Nortje,South Africa,BOWL,general,2,LSG,,SA,t20/odi
+Akshat Raghuwanshi,Raghuwanshi,India,BAT,general,2,LSG,,,
+Abdul Samad,Samad,India,BAT,general,2,LSG,,,
+Shahbaz Ahamad,Ahamad,India,ALL,general,2,LSG,,,
+Ayush Badoni,Badoni,India,BAT,general,2,LSG,,,
+Avesh Khan,Avesh Khan,India,BOWL,general,2,LSG,,,
+Digvesh Singh,D Singh,India,BOWL,general,2,LSG,,,
+Prince Yadav,P Yadav,India,BOWL,general,2,LSG,,,
+Mayank Yadav,Mayank Yadav,India,BOWL,general,2,LSG,,,
+Mohsin Khan,Mohsin Khan,India,BOWL,general,2,LSG,,,
+M. Siddharth,Siddharth,India,BOWL,general,2,LSG,,,
+Ryan Rickelton,Rickelton,South Africa,WK,general,2,MI,,SA,t20/odi/test
+Mitchell Santner,Santner,New Zealand,ALL,general,2,MI,,NZ,t20/odi/test
+Naman Dhir,Dhir,India,ALL,general,2,MI,,,
+Shardul Thakur,S Thakur,India,ALL,general,2,MI,,,
+Corbin Bosch,Bosch,South Africa,ALL,general,2,MI,,SA,t20/odi/test
+Azmatullah Omarzai,Omarzai,Afghanistan,ALL,general,2,PBKS,,AFG,t20/odi
+Harpreet Brar,H Brar,India,ALL,general,2,PBKS,,,
+Cooper Connolly,Connolly,Australia,ALL,general,2,PBKS,,AUS,t20/odi
+Ben Dwarshuis,Dwarshuis,Australia,BOWL,general,2,PBKS,,AUS,t20/odi
+Vyshak Vijaykumar,Vijaykumar,India,BOWL,general,2,PBKS,,,
+Nehal Wadhera,Wadhera,India,BAT,general,2,PBKS,,,
+Shashank Singh,Shashank Singh,India,BAT,general,2,PBKS,,,
+Yash Thakur,Y Thakur,India,BOWL,general,2,PBKS,,,
+Suryansh Shedge,Shedge,India,ALL,general,2,PBKS,,,
+Romario Shepherd,Shepherd,West Indies,ALL,general,2,RCB,,WI,t20/odi
+Jacob Bethell,Bethell,England,ALL,general,2,RCB,,ENG,t20/odi/test
+Jitesh Sharma,J Sharma,India,WK,general,2,RCB,,IND,t20
+Mangesh Yadav,Mangesh Yadav,India,BOWL,general,2,RCB,,,
+Rasikh Dar,R Dar,India,BOWL,general,2,RCB,,,
+Suyash Sharma,Suyash Sharma,India,BOWL,general,2,RCB,,,
+Yash Dayal,Dayal,India,BOWL,general,2,RCB,,,
+Tushar Deshpande,Deshpande,India,BOWL,general,2,RR,,,
+Sandeep Sharma,Sandeep Sharma,India,BOWL,general,2,RR,,,
+Vignesh Puthur,Puthur,India,BOWL,general,2,RR,,,
+Kuldeep Sen,Sen,India,BOWL,general,2,RR,,,
+Shubham Dubey,S Dubey,India,BAT,general,2,RR,,,
+Liam Livingstone,Livingstone,England,ALL,general,2,SRH,,,
+Eshan Malinga,Malinga,Sri Lanka,BOWL,general,2,SRH,,SL,odi
+Aniket Verma,Verma,India,BAT,general,2,SRH,,,
+Jaydev Unadkat,Unadkat,India,BOWL,general,2,SRH,,,
+Gurjapneet Singh,G Singh,India,BOWL,general,2,CSK,,,
+Matthew William Short,Short,Australia,ALL,general,2,CSK,,AUS,t20/odi
+Ramakrishna Ghosh,Ghosh,India,ALL,general,2,CSK,,,
+Aman Khan,Aman Khan,India,ALL,general,2,CSK,,,
+Mukesh Choudhary,Mukesh Choudhary,India,BOWL,general,2,CSK,,,
+Zak Foulkes,Foulkes,New Zealand,ALL,general,2,CSK,,NZ,t20
+Auqib Dar,A Dar,India,BOWL,general,2,DC,,,
+Sahil Parakh,Parakh,India,BAT,general,2,DC,,,
+Ajay Mandal,Mandal,India,ALL,general,2,DC,,,
+Tripurana Vijay,Vijay,India,ALL,general,2,DC,,,
+Madhav Tiwari,M Tiwari,India,ALL,general,2,DC,,,
+Dushmantha Chameera,Chameera,Sri Lanka,BOWL,general,2,DC,,SL,t20/odi
+Mohd. Arshad Khan,Mohd. Arshad Khan,India,ALL,general,2,GT,,,
+Luke Wood,Wood,England,BOWL,general,2,GT,,ENG,t20
+Kumar Kushagra,Kushagra,India,WK,general,2,GT,,,
+Nishant Sindhu,Sindhu,India,ALL,general,2,GT,,,
+Jayant Yadav,J Yadav,India,ALL,general,2,GT,,,
+Manav Suthar,Suthar,India,BOWL,general,2,GT,,,
+Prithvi Raj Yarra,Yarra,India,BOWL,general,2,GT,,,
+Tejasvi Singh,T Singh,India,WK,general,2,KKR,,,
+Anukul Roy,Roy,India,ALL,general,2,KKR,,,
+Sarthak Ranjan,Ranjan,India,BAT,general,2,KKR,,,
+Daksh Kamra,Kamra,India,ALL,general,2,KKR,,,
+Kartik Tyagi,Tyagi,India,BOWL,general,2,KKR,,,
+Prashant Solanki,Solanki,India,BOWL,general,2,KKR,,,
+Mukul Choudhary,Mukul Choudhary,India,BAT,general,2,LSG,,,
+Matthew Breetzke,Breetzke,South Africa,BAT,general,2,LSG,,SA,t20/odi/test
+Arshin Kulkarni,Kulkarni,India,ALL,general,2,LSG,,,
+Himmat Singh,H Singh,India,BAT,general,2,LSG,,,
+Akash Singh,Akash Singh,India,BOWL,general,2,LSG,,,
+Arjun Tendulkar,Tendulkar,India,ALL,general,2,LSG,,,
+Naman Tiwari,N Tiwari,India,BOWL,general,2,LSG,,,
+Allah Ghazanfar,Ghazanfar,Afghanistan,BOWL,general,2,MI,,AFG,t20/odi
+Danish Malewar,Malewar,India,BAT,general,2,MI,,,
+Robin Minz,Minz,India,WK,general,2,MI,,,
+Raj Angad Bawa,Bawa,India,ALL,general,2,MI,,,
+Atharva Ankolekar,Ankolekar,India,ALL,general,2,MI,,,
+Mayank Rawat,M Rawat,India,ALL,general,2,MI,,,
+Mayank Markande,Markande,India,BOWL,general,2,MI,,,
+Ashwani Kumar,Ashwani Kumar,India,BOWL,general,2,MI,,,
+Raghu Sharma,Raghu Sharma,India,BOWL,general,2,MI,,,
+Mohammad Izhar,Izhar,India,BOWL,general,2,MI,,,
+Mitch Owen,Owen,Australia,ALL,general,2,PBKS,,AUS,t20
+Xavier Bartlett,Bartlett,Australia,BOWL,general,2,PBKS,,AUS,t20/odi
+Harnoor Pannu,Pannu,India,BAT,general,2,PBKS,,,
+Pyla Avinash,Avinash,India,BAT,general,2,PBKS,,,
+Vishnu Vinod,Vinod,India,WK,general,2,PBKS,,,
+Musheer Khan,Musheer Khan,India,ALL,general,2,PBKS,,,
+Pravin Dubey,P Dubey,India,BOWL,general,2,PBKS,,,
+Vishal Nishad,Nishad,India,BOWL,general,2,PBKS,,,
+Nuwan Thushara,Thushara,Sri Lanka,BOWL,general,2,RCB,,SL,t20
+Jacob Duffy,Duffy,New Zealand,BOWL,general,2,RCB,,NZ,t20/odi/test
+Jordan Cox,Cox,England,WK,general,2,RCB,,ENG,t20
+Swapnil Singh,Swapnil Singh,India,ALL,general,2,RCB,,,
+Satvik Deswal,Deswal,India,ALL,general,2,RCB,,,
+Vicky Ostwal,Ostwal,India,ALL,general,2,RCB,,,
+Vihaan Malhotra,Malhotra,India,BAT,general,2,RCB,,,
+Kanishk Chouhan,Chouhan,India,ALL,general,2,RCB,,,
+Abhinandan Singh,Abhinandan Singh,India,BOWL,general,2,RCB,,,
+Kwena Maphaka,Maphaka,South Africa,BOWL,general,2,RR,,SA,t20/odi
+Adam Milne,Milne,New Zealand,BOWL,general,2,RR,,,
+Nandre Burger,Burger,South Africa,BOWL,general,2,RR,,SA,t20/odi/test
+Donovan Ferreira,Ferreira,South Africa,BAT,general,2,RR,,SA,t20
+Lhuan-dre Pretorius,Pretorius,South Africa,WK,general,2,RR,,SA,t20/odi/test
+Aman Rao Perala,Perala,India,BAT,general,2,RR,,,
+Ravi Singh,Ravi Singh,India,WK,general,2,RR,,,
+Yudhvir Singh Charak,Charak,India,BOWL,general,2,RR,,,
+Sushant Mishra,Mishra,India,BOWL,general,2,RR,,,
+Yash Raj Punja,Punja,India,BOWL,general,2,RR,,,
+Brijesh Sharma,B Sharma,India,BOWL,general,2,RR,,,
+Jack Edwards,Edwards,Australia,ALL,general,2,SRH,,,
+Salil Arora,S Arora,India,WK,general,2,SRH,,,
+Kamindu Mendis,Mendis,Sri Lanka,ALL,general,2,SRH,,SL,t20/odi/test
+Brydon Carse,Carse,England,BOWL,general,2,SRH,,ENG,t20/odi/test
+Smaran Ravichandran,Ravichandran,India,BAT,general,2,SRH,,,
+Harsh Dubey,H Dubey,India,ALL,general,2,SRH,,,
+Shivang Kumar,S Kumar,India,ALL,general,2,SRH,,,
+Krains Fuletra,Fuletra,India,BOWL,general,2,SRH,,,
+Zeeshan Ansari,Ansari,India,BOWL,general,2,SRH,,,
+Sakib Hussain,Hussain,India,BOWL,general,2,SRH,,,
+Onkar Tarmale,Tarmale,India,BOWL,general,2,SRH,,,
+Amit Kumar,Amit Kumar,India,BOWL,general,2,SRH,,,
+Praful Hinge,Hinge,India,BOWL,general,2,SRH,,,
+Shivam Mavi,Mavi,India,BOWL,general,2,SRH,,,
+Blessing Muzarabani,Muzarabani,Zimbabwe,BOWL,general,2,KKR,,ZIM,t20/odi/test

@@ -9,7 +9,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { resolveEnvironment } from '@/config/environments'
 import {
   addTimeToCurrentRound,
   endAuction,
@@ -173,7 +172,8 @@ export function AuctioneerPanel() {
       ),
     )
 
-  const canReset = resolveEnvironment() !== 'prod'
+  // The testing tools, until the environment is released.
+  const canReset = !data.released
 
   return (
     <section className="rounded-xl border border-primary/40 bg-card p-5 text-card-foreground sm:p-6">

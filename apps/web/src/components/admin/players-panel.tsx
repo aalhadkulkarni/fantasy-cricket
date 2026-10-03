@@ -9,6 +9,8 @@ import {
   parseBasePrice,
   type PlayerFields,
 } from '@/components/admin/player-form'
+import { FilterBox } from '@/components/admin/filter-box'
+import { playerMatches } from '@/components/admin/catalogue-filter'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -54,10 +56,8 @@ const NOT_IN_COMPETITION = '__none__'
 /**
  * Players, on the admin panel.
  *
- * **One player at a time.** Bulk entry was designed and dropped: the catalogue
- * for playtesting is thirty-six players, and the recurring job later is
- * reassigning teams rather than creating people, which a spreadsheet import
- * would not have helped with anyway.
+ * **One player at a time here.** Bulk entry — new players, and reassigning
+ * teams each season — is `/admin/bulk`, from pasted CSV.
  *
  * **Retired players are not listed**, and there is no screen that lists them —
  * `system-admin.md` defers a Retired Players view to Phase 2 on the grounds
@@ -83,6 +83,8 @@ export function PlayersPanel({
   const [error, setError] = useState<string | undefined>(undefined)
   const [editing, setEditing] = useState<Player | 'new' | undefined>(undefined)
   const [notice, setNotice] = useState<string | undefined>(undefined)
+  // Narrows the list in the browser; nothing is fetched as you type.
+  const [query, setQuery] = useState('')
   /* A failed row action. Separate from `error`, which means the list itself
      could not load and replaces it. */
   const [problem, setProblem] = useState<string | undefined>(undefined)
@@ -189,8 +191,17 @@ export function PlayersPanel({
         <p className="mt-3 font-mono text-xs text-destructive">{problem}</p>
       )}
 
+      {players !== undefined && players.length > 0 && (
+        <FilterBox
+          value={query}
+          onChange={setQuery}
+          placeholder="Filter by name, team, role or category — e.g. bowl mi"
+        />
+      )}
+
       <Body
         players={players}
+        query={query}
         error={error}
         teams={teams}
         competitions={competitions}
@@ -225,6 +236,7 @@ export function PlayersPanel({
 
 function Body({
   players,
+  query,
   error,
   teams,
   competitions,
@@ -233,6 +245,7 @@ function Body({
   onRetire,
 }: {
   players: Player[] | undefined
+  query: string
   error: string | undefined
   teams: Team[]
   competitions: Competition[]
@@ -265,9 +278,18 @@ function Body({
     )
   }
 
+  const shown = players.filter((p) => playerMatches(p, query, teams, roles))
+  if (shown.length === 0) {
+    return (
+      <p className="mt-5 text-sm text-subtle-foreground">
+        No players match “{query.trim()}”.
+      </p>
+    )
+  }
+
   return (
-    <ul className="mt-5 divide-y border-t">
-      {players.map((player) => (
+    <ul className="mt-5 divide-y border-t border-b sm:max-h-[28rem] sm:overflow-y-auto">
+      {shown.map((player) => (
         <li key={player.playerId} className="flex items-center gap-2">
           {/*
             Two controls now, so the row can no longer be one — a button cannot

@@ -17,7 +17,8 @@ inside a tournament.
 
 ## Conventions applied everywhere here
 
-- **Bulk upload via CSV paste** on every entity
+- **Bulk upload via CSV paste** for teams and players, on `/admin/bulk` (see
+  Bulk upload below)
 - **In-place editing** for existing records
 
 ## Base Tournaments
@@ -79,7 +80,7 @@ transfers left.
 
 ## Players
 
-- Add in **bulk**
+- Add in **bulk** — `/admin/bulk`, below
 - **Category and base price are required when a player is created**, alongside
   name, country and role. They are the player's standard auction values, and
   are written with the player in one atomic update. Players created before this
@@ -116,6 +117,51 @@ until the fixtures editor sets it.
 > reliable — if it silently fails, correcting one player would blank everyone
 > else.
 
+## Bulk upload — `/admin/bulk`
+
+**Pasted CSV, not files**: one row per entry, values separated by commas. The
+first row is skipped **only if it is exactly the header** (any case or
+spacing), so a real first row is never dropped. **Preview** runs the import as a
+dry run, so every row is judged by the service's own rules — new, updated,
+unchanged or an error with its reason; **Import** is offered only when no row
+has an error, and writes everything in **one update, or nothing**. Upload teams
+before players: players are matched to them.
+
+**Teams** — `name,short name,base tournaments`, base tournaments separated by
+`;` and matched by name. New teams only; an existing name is an error. No
+roster: players join through their own rows.
+
+**Players** — `name,short name,country,role,category,base price,IPL team,BBL team,international team,formats`,
+formats separated by `/`.
+
+**Fetch rather than type.** Above the text area, buttons fill it with existing
+players as ready-made rows, to edit in place and import back: all IPL players,
+or one IPL team's; the same for BBL; all international players, or one
+national team's. **Each fetch replaces what is in the text area** — fetching
+RCB then MI shows only MI. A row fetched and imported unchanged changes
+nothing. A league with no base tournament yet says so instead.
+
+- **Role** BAT, BOWL, WK or ALL (or the full words); **category** marquee, star
+  or general. **Short name** may be left empty: the surname, or initial and
+  surname on a collision.
+- **IPL team** and **BBL team**: each matched within that league. The league
+  columns are a list in the shared code (`LEAGUE_COLUMNS`), so another league
+  is one entry. Not part of the seed data.
+- **International team and formats**: t20 is T20 Series and World T20, odi is
+  ODI Series and ODI World Cup, test is Test Series; the same team in each.
+  Teams are matched by short or full name within the base tournament.
+- **A new player** needs name, country, role, category and base price.
+- **A name already in the catalogue is updated, and only what the row names
+  changes**: filled values overwrite, empty ones are kept; a filled IPL or BBL
+  team replaces their team in that league; a filled international team sets
+  the base tournaments its listed formats mean and leaves the others as they
+  were. So each season's league teams can be re-uploaded without restating
+  anyone's international cricket. Dropping a format is done in the players
+  panel. Both sides of every membership move: the player and the team
+  rosters.
+- The preview also flags a country not in the admin form's country list, as a
+  likely typo; the service only requires one.
+
 ## Nothing here deletes
 
 **There is no delete for a tournament, player, team, competition or match**, and
@@ -139,14 +185,30 @@ circulation without destroying anything that references it:
 > **This screen is deliberately not user-friendly.** Its only user is the person
 > who built it, so a slightly awkward workaround beats a destructive button.
 
-### The exception: Populate seed data, outside production
+### The exception: `/setup`, until the environment is released
 
-**A testing tool, not a delete.** It resets a whole environment to known data
-rather than removing one record, so nothing is left dangling. **Not shown in
-production, and the service refuses it there** regardless of who asks.
+**Development tools live on their own page, `/setup`**, not on the admin
+panel. **System owner only** — every other account is sent home — and **linked
+from nowhere**. They work on **every environment, production included, until
+it is released**: `systemReleased` at the environment's root, set by hand in
+the console when the system goes live. Once it is true the service refuses
+every testing tool there, even for the system owner — these four, and the
+auction's Reset and Mark batch unsold.
 
-Two taps: the first arms it and says what will go, the second runs it. **One
-atomic update**, so a failure changes nothing.
+#### Refresh standards
+
+**Rewrites the reference tables and the standards** from the seed data — roles,
+formats, auction phases, timeline events; the auction config, lineup rules and
+deadline offset a new league inherits. For an environment seeded before they
+changed, since Set up basic system runs only once. Players, teams, tournaments,
+leagues and base tournaments are left alone, and **every player's auction
+values survive** (the auction config is written field by field).
+
+#### Reset environment
+
+**A whole environment cleared, not a record deleted**, so nothing is left
+dangling. Two taps: the first arms it and says what will go, the second runs
+it. **One atomic update**, so a failure changes nothing.
 
 - **Deletes:** every player, team, tournament and league, and everything that
   hangs off them — lineups, squads, join requests, bans, transfers, live
@@ -154,6 +216,13 @@ atomic update**, so a failure changes nothing.
   values, and every user's league lists.
 - **Keeps:** user records, base tournaments, the reference tables and the
   standards.
+
+#### Populate seed data
+
+**Loads the IPL 2026 pool into an empty environment.** It deletes nothing, so
+one tap — and the service **refuses it while any players or teams exist**:
+Reset environment first. One atomic update.
+
 - **Loads:**
   - **the ten IPL franchises**, in the IPL base tournament;
   - **thirteen national teams**, each in every international base tournament;
@@ -167,11 +236,11 @@ atomic update**, so a failure changes nothing.
 - **Base tournaments are matched by name.** One not found is reported, and no
   one is put in it.
 
-### Create sample IPL 2027, outside production
+#### Create sample IPL 2027
 
 **Test data, for testing publish and everything after it** without entering a
-tournament by hand. Same production rule as above. Needs Populate seed data
-first, since it finds the IPL teams by short name.
+tournament by hand. Needs Populate seed data first, since it finds the IPL
+teams by short name.
 
 - **IPL 2027, unpublished**, in the IPL base tournament.
 - **Every IPL team, and every player** with an IPL team.

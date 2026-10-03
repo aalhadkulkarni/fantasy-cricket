@@ -23,6 +23,8 @@ state.
 | `/leagues/new`                      | Create a league                           |
 | `/points-system`                    | Standard points, per format               |
 | `/admin`                            | System admin panel                        |
+| `/admin/bulk`                       | Bulk upload of teams and players — system admins, linked from `/admin` |
+| `/setup`                            | Development tools — system owner only, linked from nowhere |
 
 ### Inside a league
 
@@ -177,6 +179,7 @@ SDK. Route guards are convenience; the data layer is the guard.
 | Spectator on `/team`                          | Redirect to `/leaderboard`. **Not `/squads`** — squads are public, so a spectator sees the page with every manager on it and no squad of their own. |
 | Manager on `/leagues/:id/admin`               | Redirect to `/leagues/:id`                                                                                                                          |
 | Non-system-admin on `/admin`                  | Redirect to `/`                                                                                                                                     |
+| Anyone but the system owner on `/setup`       | Redirect to `/`                                                                                                                                     |
 | Non-system-admin on `/tournaments/:id/points` | Redirect to `/`                                                                                                                                     |
 | League, tournament or match does not exist    | A not-found state, not a blank page                                                                                                                 |
 

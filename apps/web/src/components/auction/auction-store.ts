@@ -55,6 +55,11 @@ export interface AuctionStatic {
   members: LeagueMemberSummary[]
   draftOrder: DraftOrderEntry[]
   rules: LineupRules
+  /**
+   * Whether this environment has been released. Until it is, the auctioneer's
+   * testing tools are offered — production included.
+   */
+  released: boolean
 }
 
 /** Who is looking, which decides the panels and the wording. */

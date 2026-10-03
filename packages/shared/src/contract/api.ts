@@ -191,9 +191,14 @@ export interface SeedDataResult {
   environment: string
   teamsCreated: number
   playersCreated: number
+  missingCompetitions: readonly string[]
+}
+
+/** What resetting an environment cleared. */
+export interface ResetEnvironmentResult {
+  environment: string
   /** Users whose league lists were cleared, so their home screen starts empty. */
   usersCleared: number
-  missingCompetitions: readonly string[]
 }
 
 /** What creating the sample IPL tournament did. */
@@ -204,6 +209,82 @@ export interface SampleTournamentResult {
   teams: number
   players: number
   rounds: readonly string[]
+}
+
+// ---------------------------------------------------------------------------
+// Bulk upload
+// ---------------------------------------------------------------------------
+
+/**
+ * **One pasted team row**, as written: the service resolves the base
+ * tournaments by name and judges everything.
+ */
+export interface TeamImportRow {
+  teamName: string
+  teamShortName: string
+  competitionNames: readonly string[]
+}
+
+/**
+ * **One pasted player row, raw.** Every field but the name is optional here
+ * because an existing player needs only the name; the service decides what a
+ * new one requires, so the preview and the import judge by the same rules.
+ */
+export interface PlayerImportRow {
+  playerName: string
+  playerShortName?: string
+  country?: string
+  /** `batsman`/`BAT`, `bowler`/`BOWL`, `wicketKeeper`/`WK`, `allRounder`/`ALL`. */
+  role?: string
+  /** marquee, star or general. */
+  category?: string
+  basePrice?: string
+  /**
+   * **A team in a named league** — `{ IPL, RCB }`, `{ BBL, Sixers }` — each
+   * matched within that base tournament. Empty ones are left out.
+   */
+  leagueTeams?: readonly { competitionName: string; team: string }[]
+  /** The national side, in every international base tournament its formats mean. */
+  internationalTeam?: string
+  /** t20, odi, test. */
+  formats?: readonly string[]
+}
+
+/** What one row would do, or did. */
+export interface ImportRowResult {
+  /** 1-based, counting only the rows sent. */
+  row: number
+  name: string
+  outcome: 'new' | 'updated' | 'unchanged' | 'error'
+  error?: string
+  /** For an update: what changes, in words — "IPL: CSK → RCB". */
+  changes?: readonly string[]
+}
+
+/**
+ * **A whole import's outcome.** All or nothing: `applied` is true only when it
+ * was not a dry run and no row had an error.
+ */
+export interface ImportResult {
+  applied: boolean
+  rows: readonly ImportRowResult[]
+}
+
+/** What refreshing the standards wrote. */
+export interface StandardsRefreshResult {
+  environment: string
+  /** The nodes written, `standardAuctionConfig` field by field. */
+  written: readonly string[]
+}
+
+/** Which environment this is, and whether it has gone live. */
+export interface SystemStatus {
+  environment: string
+  /**
+   * Set by hand when the environment goes live. Until then the testing tools
+   * work here, production included; once true they are refused.
+   */
+  released: boolean
 }
 
 /** What seeding an environment did, so a caller can say more than "done". */
@@ -289,6 +370,29 @@ export interface Api {
    * Names that already exist are skipped rather than duplicated, and reported.
    */
   createPlayers(players: readonly PlayerConfig[]): Promise<CreatePlayersResult>
+
+  /**
+   * **New teams from pasted rows**, in one update, all or nothing. A name
+   * already taken, repeated, or an unknown base tournament is a row error.
+   * With `dryRun`, nothing is written: it says what each row would do.
+   */
+  createTeams(
+    rows: readonly TeamImportRow[],
+    dryRun: boolean,
+  ): Promise<ImportResult>
+
+  /**
+   * **Players from pasted rows**, new ones created and existing ones (same
+   * name) updated, in one update, all or nothing. **Only the teams a row names
+   * change**: a league team replaces their team in that league; a filled
+   * international team sets the base tournaments its listed formats mean, and
+   * leaves the rest alone. Both sides of every membership move together. With
+   * `dryRun`, nothing is written.
+   */
+  importPlayers(
+    rows: readonly PlayerImportRow[],
+    dryRun: boolean,
+  ): Promise<ImportResult>
 
   updatePlayer(
     playerId: PlayerId,
@@ -945,12 +1049,16 @@ export interface Api {
   createSamplePlayers(): Promise<SamplePlayersResult>
 
   /**
-   * **Wipes the environment and loads the IPL 2026 test data.** Every player,
-   * team, tournament and league goes, with everything hanging off them; user
-   * records, base tournaments and the standards stay.
-   *
-   * **Refused in production.** One atomic update, so a failure leaves the
-   * environment as it was.
+   * **Wipes the environment**: every player, team, tournament and league,
+   * with everything that points at them. Users, base tournaments and the
+   * standards stay. System owner only; refused once released.
+   */
+  resetEnvironment(): Promise<ResetEnvironmentResult>
+
+  /**
+   * **Loads the IPL 2026 pool into an empty environment.** Refused if any
+   * players or teams exist — reset first. System owner only; refused once
+   * released.
    */
   populateSeedData(): Promise<SeedDataResult>
 
@@ -964,4 +1072,14 @@ export interface Api {
    * IPL 2027 already exists.**
    */
   createSampleIplTournament(): Promise<SampleTournamentResult>
+
+  /**
+   * **Rewrites the reference tables and the standards** from the seed data,
+   * leaving every player, team, tournament and league alone. System owner only;
+   * refused once the environment is released.
+   */
+  refreshStandards(): Promise<StandardsRefreshResult>
+
+  /** Which environment this is, and whether it has been released. */
+  getSystemStatus(): Promise<SystemStatus>
 }
