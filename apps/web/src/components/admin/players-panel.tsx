@@ -54,10 +54,8 @@ const NOT_IN_COMPETITION = '__none__'
 /**
  * Players, on the admin panel.
  *
- * **One player at a time.** Bulk entry was designed and dropped: the catalogue
- * for playtesting is thirty-six players, and the recurring job later is
- * reassigning teams rather than creating people, which a spreadsheet import
- * would not have helped with anyway.
+ * **One player at a time here.** Bulk entry — new players, and reassigning
+ * teams each season — is `/admin/bulk`, from pasted CSV.
  *
  * **Retired players are not listed**, and there is no screen that lists them —
  * `system-admin.md` defers a Retired Players view to Phase 2 on the grounds

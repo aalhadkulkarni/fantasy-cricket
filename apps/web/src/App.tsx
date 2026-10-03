@@ -18,6 +18,7 @@ import { Squads } from './pages/league/squads'
 import { Auction } from './pages/auction'
 import { AuctionCenter } from './pages/league/auction-center'
 import { LeagueHome, LeagueLanding, SectionGuard } from './pages/league-home'
+import { AdminBulk } from './pages/admin-bulk'
 import { Setup } from './pages/setup'
 import { SystemAdmin } from './pages/system-admin'
 import { TournamentAdmin } from './pages/tournament-admin'
@@ -115,6 +116,14 @@ function App() {
                   element={
                     <RequireSystemAdmin>
                       <SystemAdmin />
+                    </RequireSystemAdmin>
+                  }
+                />
+                <Route
+                  path={ROUTES.adminBulk}
+                  element={
+                    <RequireSystemAdmin>
+                      <AdminBulk />
                     </RequireSystemAdmin>
                   }
                 />

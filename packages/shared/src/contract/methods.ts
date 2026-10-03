@@ -44,6 +44,8 @@ export const API_METHODS: Readonly<Record<WireMethod, MethodSpec>> = {
   updateTeam: { verb: 'post', params: ['teamId', 'changes'] },
   getPlayers: { verb: 'get', params: ['filter'] },
   createPlayers: { verb: 'post', params: ['players'] },
+  createTeams: { verb: 'post', params: ['rows', 'dryRun'] },
+  importPlayers: { verb: 'post', params: ['rows', 'dryRun'] },
   updatePlayer: { verb: 'post', params: ['playerId', 'changes'] },
   addPlayerToTeam: {
     verb: 'post',

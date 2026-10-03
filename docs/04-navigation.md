@@ -23,6 +23,7 @@ state.
 | `/leagues/new`                      | Create a league                           |
 | `/points-system`                    | Standard points, per format               |
 | `/admin`                            | System admin panel                        |
+| `/admin/bulk`                       | Bulk upload of teams and players — system admins, linked from `/admin` |
 | `/setup`                            | Development tools — system owner only, linked from nowhere |
 
 ### Inside a league

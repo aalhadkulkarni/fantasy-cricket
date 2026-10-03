@@ -14,21 +14,29 @@ import type {
   CompetitionId,
   CreatePlayersResult,
   FormatRecord,
+  ImportResult,
   Match,
   MatchId,
   Player,
   PlayerConfig,
   PlayerFilter,
   PlayerId,
+  PlayerImportRow,
   PlayerRoleRecord,
   Team,
   TeamConfig,
   TeamFilter,
   TeamId,
+  TeamImportRow,
 } from '@fantasy-cricket/shared'
 import { getApi } from './api'
 
-export type { CreatePlayersResult }
+export type {
+  CreatePlayersResult,
+  ImportResult,
+  PlayerImportRow,
+  TeamImportRow,
+}
 import { notImplemented } from './not-implemented'
 
 // ---------------------------------------------------------------------------
@@ -80,11 +88,6 @@ export function getTeams(filter?: TeamFilter): Promise<Team[]> {
 
 export function createTeam(team: TeamConfig): Promise<TeamId> {
   return getApi().createTeam(team)
-}
-
-/** Bulk creation, for setting up a competition in one go. */
-export function createTeams(teams: readonly TeamConfig[]): Promise<TeamId[]> {
-  return notImplemented('createTeams', { teams })
 }
 
 /**
@@ -222,4 +225,30 @@ export function getFormats(): Promise<FormatRecord[]> {
 /** Likewise. Anything rendering a player's role needs these for its names. */
 export function getPlayerRoles(): Promise<PlayerRoleRecord[]> {
   return getApi().getPlayerRoles()
+}
+
+// ---------------------------------------------------------------------------
+// Bulk upload
+// ---------------------------------------------------------------------------
+
+/**
+ * **New teams from pasted rows**, all or nothing. With `dryRun` it only says
+ * what each row would do, which is what the bulk page previews with.
+ */
+export function createTeams(
+  rows: readonly TeamImportRow[],
+  dryRun: boolean,
+): Promise<ImportResult> {
+  return getApi().createTeams(rows, dryRun)
+}
+
+/**
+ * **Players from pasted rows**: new ones created, existing ones updated, all
+ * or nothing. With `dryRun` it only says what each row would do.
+ */
+export function importPlayers(
+  rows: readonly PlayerImportRow[],
+  dryRun: boolean,
+): Promise<ImportResult> {
+  return getApi().importPlayers(rows, dryRun)
 }
