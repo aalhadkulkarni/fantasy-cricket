@@ -2,6 +2,7 @@ import { Route, Routes } from 'react-router'
 
 import { RequireAccount } from './auth/require-account'
 import { RequireSystemAdmin } from './auth/require-system-admin'
+import { RequireSystemOwner } from './auth/require-system-owner'
 import { SiteHeader } from './components/site-header'
 import { ActionsCenter } from './pages/actions-center'
 import { CreateLeague } from './pages/create-league'
@@ -17,6 +18,7 @@ import { Squads } from './pages/league/squads'
 import { Auction } from './pages/auction'
 import { AuctionCenter } from './pages/league/auction-center'
 import { LeagueHome, LeagueLanding, SectionGuard } from './pages/league-home'
+import { Setup } from './pages/setup'
 import { SystemAdmin } from './pages/system-admin'
 import { TournamentAdmin } from './pages/tournament-admin'
 import { TournamentHome } from './pages/tournament-home'
@@ -114,6 +116,14 @@ function App() {
                     <RequireSystemAdmin>
                       <SystemAdmin />
                     </RequireSystemAdmin>
+                  }
+                />
+                <Route
+                  path={ROUTES.setup}
+                  element={
+                    <RequireSystemOwner>
+                      <Setup />
+                    </RequireSystemOwner>
                   }
                 />
                 <Route

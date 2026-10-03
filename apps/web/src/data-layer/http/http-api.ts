@@ -60,6 +60,8 @@ import type {
   SampleTournamentResult,
   ScoringWatermark,
   SeedDataResult,
+  StandardsRefreshResult,
+  SystemStatus,
   Fixture,
   SquadsView,
   SignInOutcome,
@@ -719,6 +721,14 @@ export function createHttpApi(
 
     populateSeedData(): Promise<SeedDataResult> {
       return call('populateSeedData', []) as Promise<SeedDataResult>
+    },
+
+    refreshStandards(): Promise<StandardsRefreshResult> {
+      return call('refreshStandards', []) as Promise<StandardsRefreshResult>
+    },
+
+    getSystemStatus(): Promise<SystemStatus> {
+      return call('getSystemStatus', []) as Promise<SystemStatus>
     },
 
     createSampleIplTournament(): Promise<SampleTournamentResult> {

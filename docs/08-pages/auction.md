@@ -248,8 +248,10 @@ managers join — see below.
   result.
 - **The timeline is appended to, never rewritten.** A rewind adds its own
   entries rather than removing the ones it undoes.
-- **A reset-auction control exists outside production**, as a fallback for
-  testing. It is hidden in prod because it is dangerous.
+- **A reset-auction control exists until the environment is released**
+  (`systemReleased`), as a fallback for testing — production included while in
+  development. After release it is hidden and refused, because it is
+  dangerous.
 
 **Not in Phase 1:** autopilot, where the system advances rounds automatically.
 

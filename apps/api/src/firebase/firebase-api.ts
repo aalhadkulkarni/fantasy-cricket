@@ -37,6 +37,8 @@ import type {
   SamplePlayersResult,
   SampleTournamentResult,
   SeedDataResult,
+  StandardsRefreshResult,
+  SystemStatus,
   MatchPlayerPoints,
   OfficialLeagues,
   SystemSetupResult,
@@ -2170,6 +2172,40 @@ export function createFirebaseApi(
       throw new DataLayerError(
         'notSystemAdmin',
         'Only a system admin can do that.',
+      )
+    }
+  }
+
+  /**
+   * **The system owner only** — not every admin. For the setup tools, which
+   * can wipe an environment.
+   */
+  async function assertSystemOwner(): Promise<void> {
+    const session = requireSession()
+
+    const roles = await service.read<User['systemUserRoles']>(
+      service.path('users', session.uid, 'systemUserRoles'),
+    )
+
+    if (roles?.systemOwner !== true) {
+      throw new DataLayerError(
+        'forbidden',
+        'Only the system owner can do that.',
+      )
+    }
+  }
+
+  /**
+   * **The testing tools stop once the environment is released.** Until
+   * `systemReleased` is set they work everywhere, production included, so a
+   * system still in development can be reset and reloaded; after it, they are
+   * refused even for the system owner.
+   */
+  async function assertNotReleased(): Promise<void> {
+    if ((await service.read<boolean>(paths.systemReleased())) === true) {
+      throw new DataLayerError(
+        'forbidden',
+        'This environment is released, so testing tools are switched off.',
       )
     }
   }
@@ -6069,13 +6105,7 @@ export function createFirebaseApi(
      */
     async markBatchUnsold(leagueId: LeagueId): Promise<void> {
       await assertAuctioneer(leagueId)
-
-      if (service.environment === 'prod') {
-        throw new DataLayerError(
-          'forbidden',
-          'A batch cannot be skipped in production.',
-        )
-      }
+      await assertNotReleased()
 
       const state = await liveState(leagueId)
       const left = await eligibleInBatch(leagueId, state)
@@ -6111,13 +6141,7 @@ export function createFirebaseApi(
      */
     async resetAuction(leagueId: LeagueId): Promise<void> {
       await assertAuctioneer(leagueId)
-
-      if (service.environment === 'prod') {
-        throw new DataLayerError(
-          'forbidden',
-          'An auction cannot be reset in production.',
-        )
-      }
+      await assertNotReleased()
 
       await service.update({
         [paths.liveAuctions(leagueId)]: null,
@@ -6682,14 +6706,8 @@ export function createFirebaseApi(
      * together. Either the environment is reset and loaded, or untouched.
      */
     async populateSeedData(): Promise<SeedDataResult> {
-      await assertSystemAdmin()
-
-      if (service.environment === 'prod') {
-        throw new DataLayerError(
-          'forbidden',
-          'Seed data cannot be loaded into production.',
-        )
-      }
+      await assertSystemOwner()
+      await assertNotReleased()
 
       const [competitions, users] = await Promise.all([
         api.getCompetitions(),
@@ -6832,14 +6850,8 @@ export function createFirebaseApi(
      * Needs the IPL teams by short name, so it follows Populate seed data.
      */
     async createSampleIplTournament(): Promise<SampleTournamentResult> {
-      await assertSystemAdmin()
-
-      if (service.environment === 'prod') {
-        throw new DataLayerError(
-          'forbidden',
-          'A sample tournament cannot be created in production.',
-        )
-      }
+      await assertSystemOwner()
+      await assertNotReleased()
 
       const tournamentName = 'IPL 2027'
       const competition = (await api.getCompetitions()).find(
@@ -6928,6 +6940,71 @@ export function createFirebaseApi(
         teams: new Set(Object.values(participants)).size,
         players: Object.keys(participants).length,
         rounds: IPL_ROUNDS.map((r) => r.roundName),
+      }
+    },
+
+    /**
+     * **Rewrites the reference tables and the standards** from the seed data,
+     * for an environment seeded before they changed — `setUpBasicSystem` runs
+     * once, so it cannot. Competitions, players, tournaments, leagues and the
+     * setup marker are left alone.
+     *
+     * **`standardAuctionConfig` is written field by field**, because each
+     * player's standard category and base price live beneath it, in
+     * `playerDetails`, and writing the node whole would erase them.
+     *
+     * System owner only, and refused once the environment is released.
+     */
+    async refreshStandards(): Promise<StandardsRefreshResult> {
+      await assertSystemOwner()
+      await assertNotReleased()
+
+      const update: Record<string, unknown> = {
+        [paths.userRoles()]: USER_ROLES,
+        [paths.formats()]: FORMAT_RECORDS,
+        [paths.playerRoles()]: PLAYER_ROLE_RECORDS,
+        [paths.playerCategories()]: PLAYER_CATEGORY_RECORDS,
+        [paths.liveAuctionPhases()]: AUCTION_PHASE_RECORDS,
+        [paths.timelineEvents()]: TIMELINE_EVENT_RECORDS,
+        [paths.standardFantasyLineupRules()]: STANDARD_FANTASY_LINEUP_RULES,
+        [paths.standardFantasyLeagueTeamChangesDeadlineOffset()]:
+          STANDARD_TEAM_CHANGES_DEADLINE_OFFSET,
+      }
+      for (const [field, value] of Object.entries(STANDARD_AUCTION_CONFIG)) {
+        update[service.path('standardAuctionConfig', field)] = value
+      }
+
+      await service.update(update)
+
+      return {
+        environment: service.root,
+        written: [
+          'userRoles',
+          'formats',
+          'playerRoles',
+          'playerCategories',
+          'liveAuctionPhases',
+          'timelineEvents',
+          'standardFantasyLineupRules',
+          'standardFantasyLeagueTeamChangesDeadlineOffset',
+          ...Object.keys(STANDARD_AUCTION_CONFIG).map(
+            (field) => `standardAuctionConfig/${field}`,
+          ),
+        ],
+      }
+    },
+
+    /**
+     * **Which environment this is, and whether it has been released** — any
+     * signed-in caller, since it decides only whether testing tools are
+     * offered.
+     */
+    async getSystemStatus(): Promise<SystemStatus> {
+      requireSession()
+      return {
+        environment: service.root,
+        released:
+          (await service.read<boolean>(paths.systemReleased())) === true,
       }
     },
 

@@ -16,7 +16,9 @@ import type {
   SamplePlayersResult,
   SampleTournamentResult,
   SeedDataResult,
+  StandardsRefreshResult,
   SystemSetupResult,
+  SystemStatus,
 } from '@fantasy-cricket/shared'
 import { getApi } from './api'
 
@@ -24,7 +26,9 @@ export type {
   SamplePlayersResult,
   SampleTournamentResult,
   SeedDataResult,
+  StandardsRefreshResult,
   SystemSetupResult,
+  SystemStatus,
 }
 
 export function setUpBasicSystem(): Promise<SystemSetupResult> {
@@ -59,4 +63,18 @@ export function populateSeedData(): Promise<SeedDataResult> {
  */
 export function createSampleIplTournament(): Promise<SampleTournamentResult> {
   return getApi().createSampleIplTournament()
+}
+
+/**
+ * **Rewrites the reference tables and the standards** from the seed data, for
+ * an environment seeded before they changed. System owner only; refused once
+ * the environment is released.
+ */
+export function refreshStandards(): Promise<StandardsRefreshResult> {
+  return getApi().refreshStandards()
+}
+
+/** Which environment this is, and whether its testing tools are switched off. */
+export function getSystemStatus(): Promise<SystemStatus> {
+  return getApi().getSystemStatus()
 }
