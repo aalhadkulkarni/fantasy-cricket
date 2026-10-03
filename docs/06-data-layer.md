@@ -769,6 +769,8 @@ auction.
 - `onPlayerStatusesChanged(leagueId, callback)` — sold, unsold, pending
 - `onCurrentRoundChanged(leagueId, playerId, callback)` — the current player's
   accepted round; the page moves to the next player's as they go up
+- `onDraftPick(leagueId, turn, callback)` — the current draft turn's pick, if
+  made; the auctioneer's browser accepts it from here
 - `onSubmittedNoBids(leagueId, playerId, callback)` — who has passed
 - `getPlayerBiddingHistory(leagueId, playerId)` — a one-shot read from the
   database, on drill-down only
@@ -794,6 +796,10 @@ never an argument.
 - `submitBid(leagueId, playerId, amount)` — refused for a player not up, after
   passing, when leading, off the 0.5 grid, over budget or with a full squad
 - `submitNoBid(leagueId, playerId)` — refused when leading
+- `submitDraftPick(leagueId, playerId)` — refused when it is not the caller's
+  turn, for a player not in the draft pool, over budget or with a full squad.
+  **Claimed**: written to `draftPicks/<turn>` only if that turn has no pick, so
+  a second pick, however it is sent, is refused
 
 > These write **only** to the bidder's own path,
 > `currentSubmittedBids/<playerId>/bids|noBids/<uid>`. Whether a bid is
@@ -853,9 +859,22 @@ with its timeline entry.
   the league's squads, and the lineups and leaderboard built on them, in one
   update. Members and the draft order stay. The auctioneer only, in any phase
   once the auction exists. *(Built early, in Phase E, for testing.)*
-- `startDraft(leagueId)`, `nextDraftManager(leagueId)` — **skips any manager
-  who can no longer pick** — and `acceptDraftPick(leagueId, playerId,
-  managerId)` *(Phase F)*
+- `markBatchUnsold(leagueId)` — **refused in production.** Marks everyone left
+  in the current bidding batch unsold, between rounds, so the draft can be
+  reached without bidding. No timeline entries. *(Testing, Phase F.)*
+- `nextDraftManager(leagueId)` — the next turn in the draft; **the first call
+  starts it**, so there is no `startDraft`. The order snakes, and it **skips any
+  manager who can no longer pick** — a full squad, or a budget below the
+  cheapest base price left. **Refused until the current turn is settled** — a
+  pick that has gone through, or a skip — and once nobody can pick. *(Phase F)*
+- `skipDraftTurn(leagueId)` — skips the current manager's turn, for one taking
+  too long. **Separate from Next on purpose**, so a double click never skips
+  anyone. Claims the turn the way a pick does, so a pick and a skip landing
+  together cannot both succeed. Writes `draftTurnSkipped`. *(Phase F)*
+- `acceptDraftPick(leagueId, turn)` — **called by the processor in the
+  auctioneer's browser** as a pick arrives, never by hand. Re-checks the turn,
+  the manager, the player, budget and squad, then sells at base price in one
+  update — the same sale as a bid's — and marks the pick accepted. *(Phase F)*
 - `endAuction(leagueId)` *(Phase G)*
 - `handOffAuctioneerRole(leagueId)` — **always to the backup.** **One atomic
   multi-path write** covering both the auctioneer roles on the membership

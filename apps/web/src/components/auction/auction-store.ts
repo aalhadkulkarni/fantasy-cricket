@@ -21,6 +21,7 @@ import { createStore, useStore, type StoreApi } from 'zustand'
 import {
   onAuctionStateChanged,
   onCurrentRoundChanged,
+  onDraftPick,
   onManagerStatusesChanged,
   onPlayerStatusesChanged,
   onServerTimeOffset,
@@ -33,6 +34,7 @@ import type {
   AuctionSettings,
   AuctionState,
   DraftOrderEntry,
+  DraftPick,
   LeagueId,
   LeagueMemberSummary,
   LeagueSummary,
@@ -76,6 +78,8 @@ export interface AuctionStoreState {
   round: AcceptedBidsForPlayer | undefined
   /** Who has passed on the current player. */
   noBids: Partial<Record<UserId, true>>
+  /** The current draft turn's pick. Absent until it is made. */
+  draftPick: DraftPick | undefined
   /** Oldest first, as written. The timeline shows them newest first. */
   timeline: TimelineMessage[]
   /** Add to `Date.now()` for the database's idea of now. */
@@ -102,6 +106,7 @@ export function createAuctionStore(): AuctionStore {
     players: {},
     round: undefined,
     noBids: {},
+    draftPick: undefined,
     timeline: [],
     serverOffset: 0,
     liveError: undefined,
@@ -165,6 +170,25 @@ export function startLiveFeed(
     ]
   }
 
+  // The current draft turn's pick, followed the same way.
+  let draftListener: Unsubscribe | undefined
+  let followedTurn: number | undefined
+
+  function followTurn(turn: number | undefined) {
+    if (turn === followedTurn) return
+    draftListener?.()
+    draftListener = undefined
+    followedTurn = turn
+    store.setState({ draftPick: undefined })
+    if (turn === undefined) return
+    draftListener = onDraftPick(
+      leagueId,
+      turn,
+      (draftPick) => store.setState({ draftPick }),
+      fail,
+    )
+  }
+
   const always = [
     onAuctionStateChanged(
       leagueId,
@@ -175,6 +199,7 @@ export function startLiveFeed(
           state === undefined ? { state, timeline: [] } : { state },
         )
         follow(state?.currentPlayerId)
+        followTurn(state?.currentDraftTurn)
       },
       fail,
     ),
@@ -203,6 +228,7 @@ export function startLiveFeed(
   return () => {
     always.forEach((stop) => stop())
     perPlayer.forEach((stop) => stop())
+    draftListener?.()
   }
 }
 

@@ -25,6 +25,7 @@ import type {
   AuctionSettings,
   AuctionState,
   DraftOrderEntry,
+  DraftPick,
   LeagueId,
   Player,
   ManagerAuctionStatus,
@@ -182,6 +183,17 @@ export function submitNoBid(
   return getApi().submitNoBid(leagueId, playerId)
 }
 
+/**
+ * **A pick for your turn in the draft.** One per turn; a second is refused.
+ * The auctioneer's browser makes the sale.
+ */
+export function submitDraftPick(
+  leagueId: LeagueId,
+  playerId: PlayerId,
+): Promise<void> {
+  return getApi().submitDraftPick(leagueId, playerId)
+}
+
 // ---------------------------------------------------------------------------
 // Subscriptions
 // ---------------------------------------------------------------------------
@@ -273,6 +285,23 @@ export function onSubmittedBids(
   return listenToValue<Partial<Record<UserId, number>>>(
     ['liveAuctions', leagueId, 'currentSubmittedBids', playerId, 'bids'],
     (value) => callback(value ?? {}),
+    onError,
+  )
+}
+
+/**
+ * **The pick for one turn of the draft**, if made. `undefined` until the
+ * manager picks; `accepted` once the sale is made.
+ */
+export function onDraftPick(
+  leagueId: LeagueId,
+  turn: number,
+  callback: Subscriber<DraftPick | undefined>,
+  onError?: SubscriptionErrorHandler,
+): Unsubscribe {
+  return listenToValue<DraftPick>(
+    ['liveAuctions', leagueId, 'draftPicks', String(turn)],
+    callback,
     onError,
   )
 }

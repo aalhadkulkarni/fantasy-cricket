@@ -235,8 +235,9 @@ immediately and revokes the previous auctioneer's control.
 - **Rewind** the last round, undoing a sale or an unsold result, restoring
   budgets and squad membership. Only inside recovery, which the auctioneer
   starts and ends deliberately; repeated rewinds walk back to the start.
-- Move the draft to the next manager, skipping anyone who can no longer pick,
-  and accept a manager's draft pick when it is their turn
+- Move the draft to the next manager, skipping anyone who can no longer pick.
+  A manager's pick is accepted by the auctioneer's browser as it arrives, with
+  no click needed
 - End the auction. The system prompts when the end looks reached, but the
   auctioneer decides.
 

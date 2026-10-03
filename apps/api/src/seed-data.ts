@@ -351,6 +351,12 @@ export const TIMELINE_EVENT_RECORDS: Readonly<
     timelineEventDescription: 'Current manager made a draft pick',
     params: ['managerId', 'playerId', 'basePrice'],
   },
+  draftTurnSkipped: {
+    timelineEventId: 'draftTurnSkipped',
+    timelineEventType: 'DraftTurnSkipped',
+    timelineEventDescription: "Current manager's draft turn was skipped",
+    params: ['managerId'],
+  },
   firstCall: {
     timelineEventId: 'firstCall',
     timelineEventType: 'FirstCall',

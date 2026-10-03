@@ -11,13 +11,16 @@ import {
 } from '@/components/ui/select'
 import { resolveEnvironment } from '@/config/environments'
 import {
+  markBatchUnsold,
   markPlayerUnsold,
   nextBatch as moveToNextBatch,
+  nextDraftManager,
   putUpPlayer,
   putUpRandomPlayer,
   resetAuction,
   sellPlayer,
   sellPlayerManually,
+  skipDraftTurn,
   startAuction,
   startBidding,
 } from '@/data-layer'
@@ -43,8 +46,9 @@ import { OverseasMark } from './overseas-mark'
  * recovery. Batches step through the league's sequence **in order only**.
  *
  * **Live from Phase E**: start, the next batch, putting a player up, opening
- * bidding, selling and unsold, and the testing-only reset. Pause, extra time,
- * the draft, recovery and ending come in later phases and say so when clicked.
+ * bidding, selling and unsold, the draft, and the testing-only reset. Pause,
+ * extra time, recovery and ending come in a later phase and say so when
+ * clicked.
  *
  * Bids are not accepted here by hand: the bid processor running in this same
  * browser does that, one at a time. Its refusals from the service show below.
@@ -55,6 +59,7 @@ export function AuctioneerPanel() {
   const round = useAuction((s) => s.round)
   const statuses = useAuction((s) => s.players)
   const managerStatuses = useAuction((s) => s.managers)
+  const draftPick = useAuction((s) => s.draftPick)
 
   const leagueId = data.league.leagueId
   const processorError = useAuction((s) => s.processorError)
@@ -119,6 +124,16 @@ export function AuctioneerPanel() {
       ? undefined
       : (managers.find((m) => m.userId === round.currentLeadingManager)
           ?.teamName ?? 'the leader')
+
+  const drafterName =
+    managers.find((m) => m.userId === state?.currentDraftManagerId)?.teamName ??
+    'the manager'
+  // A turn is settled once its pick has gone through or it was skipped. Only
+  // then may Next move on.
+  const turnStarted = state?.currentDraftManagerId !== undefined
+  const turnSettled =
+    draftPick !== undefined &&
+    (draftPick.skipped === true || draftPick.accepted === true)
 
   const live = moment !== 'notStarted' && moment !== 'ended'
   const canReset = resolveEnvironment() !== 'prod'
@@ -256,21 +271,49 @@ export function AuctioneerPanel() {
           </Actions>
         )}
 
+        {/*
+          Picks are accepted by the processor in this browser as they arrive,
+          so there is no Accept button. Next waits until the turn is settled —
+          a pick gone through, or a skip — and Skip is its own button, shown
+          only while the manager is still deciding, so a double click on Next
+          can never skip anyone.
+        */}
         {moment === 'draft' && (
-          <Actions>
-            {state?.currentDraftManagerId === undefined ? (
-              <Button onClick={tried('Starting the draft')}>Start draft</Button>
-            ) : (
-              <>
-                <Button disabled title="No pick submitted yet">
-                  Accept pick
-                </Button>
-                <Button variant="outline" onClick={tried('Next manager')}>
-                  Next manager
-                </Button>
-              </>
+          <>
+            {turnStarted && (
+              <p className="text-sm text-muted-foreground">
+                {draftPick === undefined
+                  ? `Waiting for ${drafterName} to pick.`
+                  : draftPick.skipped === true
+                    ? `${drafterName}'s turn was skipped.`
+                    : `${drafterName} picked ${
+                        pool.get(draftPick.playerId)?.player.playerName ??
+                        'a player'
+                      }${draftPick.accepted === true ? '.' : ' — going through…'}`}
+              </p>
             )}
-          </Actions>
+            <Actions>
+              <Button
+                onClick={act('draft', () => nextDraftManager(leagueId))}
+                disabled={working || (turnStarted && !turnSettled)}
+              >
+                {busy === 'draft'
+                  ? 'Moving on…'
+                  : turnStarted
+                    ? 'Next in draft order'
+                    : 'Start draft'}
+              </Button>
+              {turnStarted && draftPick === undefined && (
+                <Button
+                  variant="outline"
+                  onClick={act('skip', () => skipDraftTurn(leagueId))}
+                  disabled={working}
+                >
+                  {busy === 'skip' ? 'Skipping…' : `Skip ${drafterName}'s turn`}
+                </Button>
+              )}
+            </Actions>
+          </>
         )}
 
         {moment === 'recovering' && (
@@ -320,6 +363,26 @@ export function AuctioneerPanel() {
               Testing
             </summary>
             <div className="mt-3 grid gap-2.5">
+              {/* Runs the batches through to the draft without bidding. */}
+              {batch?.kind === 'auction' &&
+                (moment === 'betweenPlayers' ||
+                  moment === 'selected' ||
+                  moment === 'sold' ||
+                  moment === 'unsold') && (
+                  <div>
+                    <Button
+                      variant="outline"
+                      onClick={act('batch unsold', () =>
+                        markBatchUnsold(leagueId),
+                      )}
+                      disabled={working || inBatch.length === 0}
+                    >
+                      {busy === 'batch unsold'
+                        ? 'Marking…'
+                        : `Mark everyone in this batch unsold (${inBatch.length})`}
+                    </Button>
+                  </div>
+                )}
               {resetArmed ? (
                 <>
                   <p className="text-sm text-destructive">

@@ -21,6 +21,7 @@ export function Stage() {
   const round = useAuction((s) => s.round)
   const players = useAuction((s) => s.players)
   const viewerId = useAuction((s) => s.viewer.userId)
+  const draftPick = useAuction((s) => s.draftPick)
 
   const pool = useMemo(() => indexPool(data.pool), [data.pool])
   const teamName = (userId: string | undefined) => {
@@ -36,6 +37,14 @@ export function Stage() {
   }
 
   const moment = momentOf(state, round)
+
+  // What the turn's pick went for, once sold.
+  const pickStatus =
+    draftPick === undefined || draftPick.skipped === true
+      ? undefined
+      : players[draftPick.playerId]
+  const pickPrice =
+    pickStatus?.status === 'Sold' ? pickStatus.winningBid : undefined
   const current =
     state?.currentPlayerId === undefined
       ? undefined
@@ -84,18 +93,35 @@ export function Stage() {
         />
       )}
 
-      {moment === 'draft' && (
-        <Headline
-          title={
-            state?.currentDraftManagerId === undefined
-              ? 'The draft is about to start'
-              : state.currentDraftManagerId === viewerId
-                ? 'Your turn to pick'
-                : `${teamName(state.currentDraftManagerId)} to pick`
-          }
-          detail="Picks go at base price, in draft order."
-        />
-      )}
+      {/*
+        Once the turn's pick is accepted it is the headline, like a sale, until
+        the auctioneer moves the turn on.
+      */}
+      {moment === 'draft' &&
+        (draftPick?.skipped === true ? (
+          <Headline
+            title={`${buyerName(draftPick.managerId)}'s turn was skipped`}
+            detail="Waiting for the next turn."
+          />
+        ) : draftPick?.accepted === true ? (
+          <Headline
+            title={`${buyerName(draftPick.managerId)} picked ${
+              pool.get(draftPick.playerId)?.player.playerName ?? 'a player'
+            }${pickPrice === undefined ? '' : ` for ${crore(pickPrice)}`}`}
+            detail="Waiting for the next turn."
+          />
+        ) : (
+          <Headline
+            title={
+              state?.currentDraftManagerId === undefined
+                ? 'The draft is about to start'
+                : state.currentDraftManagerId === viewerId
+                  ? 'Your turn to pick'
+                  : `${teamName(state.currentDraftManagerId)} to pick`
+            }
+            detail="Picks go at base price, in draft order."
+          />
+        ))}
 
       {moment === 'betweenPlayers' &&
         (last !== undefined && lastStatus?.status === 'Sold' ? (

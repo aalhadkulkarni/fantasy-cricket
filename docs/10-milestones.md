@@ -351,6 +351,15 @@ together.
   (`$env/liveAuctions/$leagueId`, signed-in only; `/liveAuctions` itself stays
   closed). Writes still go through the service. The database SDK is loaded only
   where it is used. **State on the auction page is Zustand.**
+- **The draft mirrors bidding**: the auctioneer moves the turn on (Start
+  draft, then Next in draft order, skipping anyone who cannot pick); the
+  manager submits a pick; the auctioneer's browser accepts it through the
+  service, which re-checks and sells at base price. **Picks live at
+  `liveAuctions/<leagueId>/draftPicks/<turn>`**, keyed by a turn counter in
+  `auctionState`, and are claimed transactionally — one per turn. **Next waits
+  for the turn to be settled**, by a pick gone through or a deliberate **Skip**
+  (its own button and endpoint, timeline `draftTurnSkipped`), which claims the
+  turn the same way, so a pick and a skip cannot both land.
 - **The batch sequence** lives in `standardAuctionConfig.batchSequence` and is
   copied into each auction league: Marquee batsmen, bowlers, keepers,
   all-rounders, then the same for Star, then the draft as a batch of its own.
@@ -375,8 +384,6 @@ together.
 - **Write `auctionState` in its Phase D shape**: `currentBatch` is an
   `AuctionBatch` (`kind: 'draft'` for the draft); a selected player has no
   round until bidding starts.
-- **Decide where a submitted draft pick lives.** The panel's Accept pick has no
-  data behind it yet.
 
 ### Open
 

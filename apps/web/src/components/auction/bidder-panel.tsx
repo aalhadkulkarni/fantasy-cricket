@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 
+import { PlayerName } from '@/components/leagues/player-name'
+import { RoleTag } from '@/components/leagues/role-tag'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -8,8 +10,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { submitBid, submitNoBid } from '@/data-layer'
-import { PLAYER_ROLES, type PlayerId } from '@fantasy-cricket/shared'
+import { submitBid, submitDraftPick, submitNoBid } from '@/data-layer'
+import {
+  PLAYER_ROLES,
+  type Player,
+  type PlayerId,
+} from '@fantasy-cricket/shared'
 
 import {
   composition,
@@ -36,7 +42,11 @@ import { OverseasMark } from './overseas-mark'
  * **Bid and pass are live.** A bid goes to the manager's own field; the
  * auctioneer's browser decides whether it is accepted, and a bid at a price
  * that has already moved is silently ignored — so "sent" is said until the
- * round moves. The draft pick comes in a later phase.
+ * round moves.
+ *
+ * **In the draft, a pick on your turn.** It is sent once — a second is
+ * refused — and the auctioneer's browser makes the sale, so "sent" is said
+ * until it does.
  */
 export function BidderPanel() {
   const data = useAuctionStatic()
@@ -46,17 +56,18 @@ export function BidderPanel() {
   const noBids = useAuction((s) => s.noBids)
   const statuses = useAuction((s) => s.players)
   const managerStatuses = useAuction((s) => s.managers)
+  const draftPick = useAuction((s) => s.draftPick)
 
-  const [note, setNote] = useState<string | undefined>(undefined)
-  const tried = (what: string) => () =>
-    setNote(`${what} comes in a later phase.`)
-
-  const [sending, setSending] = useState<'bid' | 'pass' | undefined>()
+  const [sending, setSending] = useState<'bid' | 'pass' | 'pick' | undefined>()
   /** The asking price a bid was sent at, until the round moves past it. */
   const [sentAt, setSentAt] = useState<number | undefined>()
   const [failure, setFailure] = useState<string | undefined>()
 
-  function send(kind: 'bid' | 'pass', run: () => Promise<void>, at?: number) {
+  function send(
+    kind: 'bid' | 'pass' | 'pick',
+    run: () => Promise<void>,
+    at?: number,
+  ) {
     setSending(kind)
     setFailure(undefined)
     void run()
@@ -164,25 +175,52 @@ export function BidderPanel() {
             )}
           </div>
         ) : moment === 'draft' ? (
-          <DraftPick
-            homeNation={settings.homeNation}
-            myTurn={state?.currentDraftManagerId === me.userId}
-            waitingFor={
-              data.members.find(
-                (m) => m.userId === state?.currentDraftManagerId,
-              )?.fantasyTeamName
-            }
-            choices={draftPool(data.pool, statuses).map(
-              ({ entry, wasUnsold }) => ({
-                id: entry.player.playerId,
-                country: entry.player.country,
-                label: `${entry.player.playerName} · ${price(entry.playerBasePrice)}${
-                  wasUnsold ? ' · was unsold' : ''
-                }`,
-              }),
+          <div>
+            <DraftPick
+              homeNation={settings.homeNation}
+              myTurn={state?.currentDraftManagerId === me.userId}
+              turnPicked={draftPick !== undefined}
+              waitingFor={
+                data.members.find(
+                  (m) => m.userId === state?.currentDraftManagerId,
+                )?.fantasyTeamName
+              }
+              mySkipped={
+                draftPick?.managerId === me.userId && draftPick.skipped === true
+              }
+              myPick={
+                draftPick?.managerId === me.userId && draftPick.skipped !== true
+                  ? {
+                      name:
+                        pool.get(draftPick.playerId)?.player.playerName ??
+                        'a player',
+                      accepted: draftPick.accepted === true,
+                    }
+                  : undefined
+              }
+              squadFull={squadFull}
+              sending={sending === 'pick'}
+              // Only who can be afforded: the service would refuse the rest.
+              choices={draftPool(data.pool, statuses)
+                .filter(({ entry }) => entry.playerBasePrice <= me.budget)
+                .map(({ entry, wasUnsold }) => ({
+                  id: entry.player.playerId,
+                  player: entry.player,
+                  basePrice: entry.playerBasePrice,
+                  wasUnsold,
+                }))}
+              onPick={(playerId) =>
+                send('pick', () =>
+                  submitDraftPick(data.league.leagueId, playerId as PlayerId),
+                )
+              }
+            />
+            {failure !== undefined && (
+              <p role="alert" className="mt-2 text-sm text-destructive">
+                {failure}
+              </p>
             )}
-            onPick={tried('Picking')}
-          />
+          </div>
         ) : (
           <p className="text-sm text-muted-foreground">
             {moment === 'paused'
@@ -232,10 +270,6 @@ export function BidderPanel() {
           />
         )}
       </dl>
-
-      {note !== undefined && (
-        <p className="mt-3 text-xs text-subtle-foreground">{note}</p>
-      )}
     </section>
   )
 }
@@ -253,15 +287,33 @@ function Line({ label, value }: { label: string; value: string }) {
 function DraftPick({
   homeNation,
   myTurn,
+  turnPicked,
   waitingFor,
+  mySkipped,
+  myPick,
+  squadFull,
+  sending,
   choices,
   onPick,
 }: {
   myTurn: boolean
+  /** Whoever's turn it is has picked; the auctioneer moves it on next. */
+  turnPicked: boolean
   waitingFor: string | undefined
-  choices: { id: string; country: string; label: string }[]
+  /** The auctioneer skipped this turn. */
+  mySkipped: boolean
+  /** This turn's pick, once made. */
+  myPick: { name: string; accepted: boolean } | undefined
+  squadFull: boolean
+  sending: boolean
+  choices: {
+    id: string
+    player: Player
+    basePrice: number
+    wasUnsold: boolean
+  }[]
   homeNation: string | undefined
-  onPick: () => void
+  onPick: (playerId: string) => void
 }) {
   const [chosen, setChosen] = useState('')
 
@@ -270,38 +322,76 @@ function DraftPick({
       <p className="text-sm text-muted-foreground">
         {waitingFor === undefined
           ? 'Waiting for the draft to start.'
-          : `Waiting for ${waitingFor} to pick.`}
+          : turnPicked
+            ? 'Waiting for the auctioneer.'
+            : `Waiting for ${waitingFor} to pick.`}
       </p>
     )
   }
 
+  if (mySkipped) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Your turn was skipped. Waiting for the auctioneer.
+      </p>
+    )
+  }
+
+  if (myPick !== undefined) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        {myPick.accepted
+          ? `You picked ${myPick.name}.`
+          : `Picked ${myPick.name} — waiting for the auctioneer.`}
+      </p>
+    )
+  }
+
+  if (squadFull) {
+    return <p className="text-sm text-muted-foreground">Your squad is full.</p>
+  }
+
   if (choices.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">Nobody is left to pick.</p>
+      <p className="text-sm text-muted-foreground">
+        Nobody you can afford is left to pick.
+      </p>
     )
   }
 
   return (
     <div className="flex flex-wrap gap-2.5">
       <Select value={chosen} onValueChange={setChosen}>
-        <SelectTrigger className="w-full sm:w-72" aria-label="Your pick">
+        <SelectTrigger className="w-full sm:w-96" aria-label="Your pick">
           <SelectValue placeholder="Choose a player" />
         </SelectTrigger>
         <SelectContent>
+          {/*
+            Role and team on every row, as in the player lists: the pick is a
+            decision about the squad's makeup, not just the name.
+          */}
           {choices.map((c) => (
             <SelectItem key={c.id} value={c.id}>
               <OverseasMark
-                player={{ country: c.country }}
+                player={c.player}
                 homeNation={homeNation}
                 keepSpace
               />
-              {c.label}
+              <PlayerName player={c.player} />
+              <RoleTag role={c.player.playerRole} />
+              <span className="font-mono text-xs text-muted-foreground">
+                {price(c.basePrice)}
+                {c.wasUnsold && ' · was unsold'}
+              </span>
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-      <Button onClick={onPick} disabled={chosen === ''}>
-        Pick this player
+      <Button
+        onClick={() => onPick(chosen)}
+        disabled={chosen === '' || sending}
+      >
+        {sending ? 'Sending…' : 'Pick this player'}
       </Button>
     </div>
   )

@@ -11,6 +11,9 @@
  * It also **owns the round's clock**: the first, second and last calls at 20,
  * 10 and 5 seconds left, and time up at zero, all by the database's clock.
  *
+ * **In the draft, it accepts each turn's pick** as it arrives, through the
+ * same queue. The service re-checks it and makes the sale.
+ *
  * **The accepted cost:** if this browser disconnects or sleeps, the auction
  * stalls. Selling is manual, so a missing auctioneer stalls it anyway.
  */
@@ -28,6 +31,7 @@ import {
 
 import {
   acceptBid,
+  acceptDraftPick,
   acceptNoBid,
   announceCall,
   markTimeUp,
@@ -48,6 +52,7 @@ interface Ahead {
 type Job =
   | { kind: 'bid'; playerId: PlayerId; managerId: UserId; amount: number }
   | { kind: 'pass'; playerId: PlayerId; managerId: UserId }
+  | { kind: 'draftPick'; turn: number }
 
 export function startBidProcessor(
   store: AuctionStore,
@@ -98,7 +103,26 @@ export function startBidProcessor(
   }
 
   async function run(job: Job): Promise<void> {
-    const { state, round } = store.getState()
+    const { state, round, draftPick } = store.getState()
+
+    if (job.kind === 'draftPick') {
+      if (state?.currentDraftTurn !== job.turn) return
+      if (
+        draftPick === undefined ||
+        draftPick.skipped === true ||
+        draftPick.accepted === true
+      ) {
+        return
+      }
+      try {
+        await acceptDraftPick(leagueId, job.turn)
+        store.setState({ processorError: undefined })
+      } catch (error) {
+        fail(error)
+      }
+      return
+    }
+
     if (state?.currentPlayerId !== job.playerId) return
 
     if (job.kind === 'pass') {
@@ -197,10 +221,42 @@ export function startBidProcessor(
     ]
   }
 
+  // -------------------------------------------------------------------------
+  // The draft: each turn's pick, accepted once
+  // -------------------------------------------------------------------------
+
+  /**
+   * The picks already queued, so each is accepted once however often the
+   * store changes. Keyed by the pick itself rather than the turn, because a
+   * reset starts the turns again from 0. A failed accept is shown and not
+   * retried; reopening the page queues it again.
+   */
+  const queuedPicks = new Set<string>()
+
+  function watchDraft(s: ReturnType<AuctionStore['getState']>) {
+    const turn = s.state?.currentDraftTurn
+    const pick = s.draftPick
+    // A skip has nothing to accept.
+    if (
+      turn === undefined ||
+      pick === undefined ||
+      pick.skipped === true ||
+      pick.accepted === true
+    ) {
+      return
+    }
+    const key = `${turn}:${pick.managerId}:${pick.submittedAt}`
+    if (queuedPicks.has(key)) return
+    queuedPicks.add(key)
+    enqueue({ kind: 'draftPick', turn })
+  }
+
   follow(store.getState().state?.currentPlayerId)
-  const unsubscribeStore = store.subscribe((s) =>
-    follow(s.state?.currentPlayerId),
-  )
+  watchDraft(store.getState())
+  const unsubscribeStore = store.subscribe((s) => {
+    follow(s.state?.currentPlayerId)
+    watchDraft(s)
+  })
 
   // -------------------------------------------------------------------------
   // The clock: calls and time up

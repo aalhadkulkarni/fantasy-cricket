@@ -46,6 +46,7 @@ import type { Environment } from '@fantasy-cricket/shared'
 import type { Session } from '../auth.ts'
 import type {
   AcceptedBidsForPlayer,
+  DraftPick,
   ArchivedLeagueCard,
   ArchivedLeagueIndexEntry,
   AuctionBatch,
@@ -132,6 +133,7 @@ import {
   ROUND_SECONDS,
 } from '@fantasy-cricket/shared'
 import { derivePhase } from '../league-phase.ts'
+import { draftOrderList, nextDraftTurn } from '../draft-order.ts'
 import {
   AUCTION_PHASE_RECORDS,
   changeAllowanceFor,
@@ -1144,6 +1146,8 @@ export function createFirebaseApi(
     managerId: UserId,
     amount: number,
     winningBid: Bid,
+    /** The timeline entry, when the sale is not announced as `sold`. */
+    announcement?: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     const tournamentId = await service.read<TournamentId>(
       service.path('leagues', leagueId, 'tournamentId'),
@@ -1186,11 +1190,12 @@ export function createFirebaseApi(
       [livePath(leagueId, 'auctionState', 'phase')]: 'sold',
       [livePath(leagueId, 'currentSubmittedBids', 'takingBids')]: false,
       [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: false,
-      ...timelineEntry(leagueId, 'sold', {
-        playerId,
-        winningBid: amount,
-        managerId,
-      }),
+      ...(announcement ??
+        timelineEntry(leagueId, 'sold', {
+          playerId,
+          winningBid: amount,
+          managerId,
+        })),
     }
 
     for (const matchId of Object.keys(matches ?? {})) {
@@ -1266,6 +1271,46 @@ export function createFirebaseApi(
       [livePath(leagueId, 'currentAcceptedBids', 'currentPlayer')]: playerId,
       [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: false,
     })
+  }
+
+  /**
+   * **The draft pool, priced**: every General player not yet sold, plus
+   * everyone left unsold from the bidding batches, each at their base price.
+   */
+  async function draftPoolPrices(
+    leagueId: LeagueId,
+  ): Promise<Map<string, number>> {
+    const [details, statuses] = await Promise.all([
+      service.read<Record<string, LeaguePlayerAuctionDetail>>(
+        auctionDetailsPath(leagueId, 'auctionConfig', 'playerDetails'),
+      ),
+      service.read<Partial<Record<string, PlayerStatus>>>(
+        livePath(leagueId, 'playerStatus'),
+      ),
+    ])
+    const prices = new Map<string, number>()
+    for (const [playerId, detail] of Object.entries(details ?? {})) {
+      const status = statuses?.[playerId]?.status
+      if (
+        status === 'Unsold' ||
+        (status !== 'Sold' && detail.playerCategory === 'general')
+      ) {
+        prices.set(playerId, detail.playerBasePrice)
+      }
+    }
+    return prices
+  }
+
+  /** The live state, refusing outside the draft. */
+  async function draftState(leagueId: LeagueId): Promise<AuctionState> {
+    const state = await liveState(leagueId)
+    if (state.currentBatch?.kind !== 'draft') {
+      throw new DataLayerError(
+        'auctionState',
+        'The draft has not been reached.',
+      )
+    }
+    return state
   }
 
   /** A path under a league's auction details. Never read the node whole. */
@@ -4998,6 +5043,270 @@ export function createFirebaseApi(
         [livePath(leagueId, 'currentAcceptedBids', 'takingBids')]: false,
         ...timelineEntry(leagueId, 'unsold', { playerId }),
       })
+    },
+
+    // -----------------------------------------------------------------------
+    // The live auction: the draft
+    // -----------------------------------------------------------------------
+
+    /**
+     * **The next turn in the draft**, which the first call also starts. The
+     * order snakes, and anyone who can no longer pick — a full squad, or a
+     * budget below the cheapest player left — is skipped rather than waited
+     * on. Refused while a pick is still going through, and once nobody can
+     * pick at all.
+     */
+    async nextDraftManager(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await draftState(leagueId)
+      assertPhase(state, BETWEEN_ROUNDS, 'Finish this round first.')
+
+      // The turn has to be settled first: a pick that has gone through, or a
+      // deliberate skip. Next never moves past a manager still deciding, so a
+      // double click cannot skip anyone.
+      const turn = state.currentDraftTurn
+      if (turn !== undefined) {
+        const pick = await service.read<DraftPick>(
+          livePath(leagueId, 'draftPicks', String(turn)),
+        )
+        if (pick === undefined) {
+          throw new DataLayerError(
+            'auctionState',
+            'This manager has not picked yet. Skip their turn to move on.',
+          )
+        }
+        if (pick.skipped !== true && pick.accepted !== true) {
+          throw new DataLayerError(
+            'auctionState',
+            'A pick is still going through. Wait for it.',
+          )
+        }
+      }
+
+      const [rawOrder, managers, maxSquadSize, pool] = await Promise.all([
+        service.read<unknown>(auctionDetailsPath(leagueId, 'draftOrder')),
+        service.read<Partial<Record<string, ManagerAuctionStatus>>>(
+          livePath(leagueId, 'managerStatus'),
+        ),
+        service.read<number>(
+          auctionDetailsPath(leagueId, 'auctionConfig', 'maxSquadSize'),
+        ),
+        draftPoolPrices(leagueId),
+      ])
+      const cheapest = Math.min(...pool.values())
+      const canPick = (managerId: UserId) => {
+        const status = managers?.[managerId]
+        const squad = Object.keys(status?.playerList ?? {}).length
+        return (
+          (maxSquadSize === undefined || squad < maxSquadSize) &&
+          (status?.budget ?? 0) >= cheapest
+        )
+      }
+
+      const next = nextDraftTurn(
+        draftOrderList(rawOrder),
+        turn === undefined ? 0 : turn + 1,
+        canPick,
+      )
+      if (next === undefined) {
+        throw new DataLayerError(
+          'auctionState',
+          'Nobody can pick any more. The draft is over.',
+        )
+      }
+
+      await service.update({
+        [livePath(leagueId, 'auctionState', 'currentDraftTurn')]: next.turn,
+        [livePath(leagueId, 'auctionState', 'currentDraftManagerId')]:
+          next.managerId,
+        [livePath(leagueId, 'auctionState', 'phase')]: 'betweenPlayers',
+        ...(turn === undefined
+          ? timelineEntry(leagueId, 'draftStarted', {})
+          : {}),
+        ...timelineEntry(leagueId, 'nextDraftManager', {
+          managerId: next.managerId,
+        }),
+      })
+    },
+
+    /**
+     * **Accepts the current turn's pick**, from the auctioneer's browser as it
+     * arrives. Re-checks everything, then sells at base price in one update —
+     * the same sale as a bid's, announced as a draft pick — and marks the pick
+     * accepted.
+     */
+    async acceptDraftPick(leagueId: LeagueId, turn: number): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await draftState(leagueId)
+      if (state.currentDraftTurn !== turn) {
+        throw new DataLayerError('auctionState', 'That turn is over.')
+      }
+      const pick = await service.read<DraftPick>(
+        livePath(leagueId, 'draftPicks', String(turn)),
+      )
+      if (pick === undefined) {
+        throw new DataLayerError('auctionState', 'Nobody has picked yet.')
+      }
+      if (pick.skipped === true) {
+        throw new DataLayerError('auctionState', 'That turn was skipped.')
+      }
+      if (pick.accepted === true) {
+        throw new DataLayerError(
+          'auctionState',
+          'That pick has already gone through.',
+        )
+      }
+      if (pick.managerId !== state.currentDraftManagerId) {
+        throw new DataLayerError(
+          'auctionState',
+          'That pick is not from the manager whose turn it is.',
+        )
+      }
+      const price = (await draftPoolPrices(leagueId)).get(pick.playerId)
+      if (price === undefined) {
+        throw new DataLayerError(
+          'auctionState',
+          'That player is no longer available.',
+        )
+      }
+      await assertCanBuy(leagueId, pick.managerId, price)
+
+      const bidId = service.generateKey() as BidId
+      const update = await saleUpdate(
+        leagueId,
+        pick.playerId,
+        pick.managerId,
+        price,
+        {
+          bidId,
+          bidNumber: 1,
+          bid: price,
+          managerId: pick.managerId,
+          timestamp: Date.now(),
+        },
+        timelineEntry(leagueId, 'draftPick', {
+          managerId: pick.managerId,
+          playerId: pick.playerId,
+          basePrice: price,
+        }),
+      )
+      update[livePath(leagueId, 'draftPicks', String(turn), 'accepted')] = true
+      await service.update(update)
+    },
+
+    /**
+     * **A manager's pick for their turn.** The manager is the caller, never an
+     * argument. Checked as far as it can be here — their turn, the player in
+     * the pool, budget and squad space — then **claimed**: written only if this
+     * turn has no pick yet, so a second pick, however it is sent, is refused.
+     * The auctioneer's browser makes the sale.
+     */
+    async submitDraftPick(
+      leagueId: LeagueId,
+      playerId: PlayerId,
+    ): Promise<void> {
+      await assertAuctionLeague(leagueId)
+      await assertManager(leagueId)
+      const uid = requireSession().uid as UserId
+      const state = await draftState(leagueId)
+      const turn = state.currentDraftTurn
+      if (turn === undefined || state.currentDraftManagerId !== uid) {
+        throw new DataLayerError('auctionState', "It isn't your turn.")
+      }
+      const price = (await draftPoolPrices(leagueId)).get(playerId)
+      if (price === undefined) {
+        throw new DataLayerError(
+          'auctionState',
+          'That player is not available in the draft.',
+        )
+      }
+      await assertCanBuy(leagueId, uid, price)
+
+      const won = await service.claim(
+        livePath(leagueId, 'draftPicks', String(turn)),
+        {
+          managerId: uid,
+          playerId,
+          submittedAt: Date.now(),
+        } satisfies DraftPick,
+      )
+      if (!won) {
+        const taken = await service.read<DraftPick>(
+          livePath(leagueId, 'draftPicks', String(turn)),
+        )
+        throw new DataLayerError(
+          'auctionState',
+          taken?.skipped === true
+            ? 'Your turn was skipped.'
+            : 'You have already picked this turn.',
+        )
+      }
+    },
+
+    /**
+     * **Skips the current manager's turn**, for one taking too long. A
+     * deliberate action of its own, separate from Next, so a double click can
+     * never skip anyone. Claims the turn like a pick does, so a pick and a
+     * skip landing together cannot both succeed: whichever is first wins.
+     */
+    async skipDraftTurn(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+      const state = await draftState(leagueId)
+      const turn = state.currentDraftTurn
+      const managerId = state.currentDraftManagerId
+      if (turn === undefined || managerId === undefined) {
+        throw new DataLayerError('auctionState', 'Nobody is picking yet.')
+      }
+
+      const won = await service.claim(
+        livePath(leagueId, 'draftPicks', String(turn)),
+        {
+          managerId,
+          skipped: true,
+          submittedAt: Date.now(),
+        } satisfies DraftPick,
+      )
+      if (!won) {
+        throw new DataLayerError(
+          'auctionState',
+          'This turn is already settled — they have picked, or it was skipped.',
+        )
+      }
+      await service.update(
+        timelineEntry(leagueId, 'draftTurnSkipped', { managerId }),
+      )
+    },
+
+    /**
+     * **Every player left in the current bidding batch, marked unsold at
+     * once**, for testing — so the batches can be run through to the draft
+     * without putting each player up. Between rounds only, and refused in
+     * production. No timeline entries: one per player would bury the rest.
+     */
+    async markBatchUnsold(leagueId: LeagueId): Promise<void> {
+      await assertAuctioneer(leagueId)
+
+      if (service.environment === 'prod') {
+        throw new DataLayerError(
+          'forbidden',
+          'A batch cannot be skipped in production.',
+        )
+      }
+
+      const state = await liveState(leagueId)
+      const left = await eligibleInBatch(leagueId, state)
+
+      const update: Record<string, unknown> = {}
+      for (const playerId of left) {
+        update[livePath(leagueId, 'playerStatus', playerId)] = {
+          playerId,
+          status: 'Unsold',
+        }
+        update[
+          livePath(leagueId, 'playerWiseBiddingHistory', playerId, 'status')
+        ] = 'Unsold'
+      }
+      if (Object.keys(update).length > 0) await service.update(update)
     },
 
     /**
