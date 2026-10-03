@@ -165,7 +165,7 @@ function Body({
   }
 
   return (
-    <ul className="mt-5 divide-y border-t">
+    <ul className="mt-5 divide-y border-t border-b sm:max-h-[28rem] sm:overflow-y-auto">
       {tournaments.map((tournament) => (
         <li key={tournament.tournamentId}>
           <TournamentRow tournament={tournament} competitions={competitions} />
